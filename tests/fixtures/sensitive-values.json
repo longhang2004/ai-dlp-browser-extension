@@ -12,5 +12,22 @@
     "validVisa": "4111 1111 1111 1111",
     "validMastercard": "5555-5555-5555-4444",
     "invalidChecksum": "4111 1111 1111 1112"
+  },
+  "awsAccessKey": {
+    "longLived": "AKIAIOSFODNN7EXAMPLE",
+    "temporary": "ASIAABCDEFGHIJKLMNOP"
+  },
+  "privateKey": {
+    "generic": "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWg==\n-----END PRIVATE KEY-----",
+    "rsa": "-----BEGIN RSA PRIVATE KEY-----\nUkVBTF9URVNUX1ZBTFVFX09OTFlfTk9UX0FfUkVBTF9LRVlfQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END RSA PRIVATE KEY-----",
+    "ec": "-----BEGIN EC PRIVATE KEY-----\nRUNfVEVTVF9WQUxVRV9PTkxZX05PVF9BX1JFQUxfS0VZX0FCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaQUJD\n-----END EC PRIVATE KEY-----"
+  },
+  "apiSecret": {
+    "knownPrefix": "sk-TestOnlyA1b2C3d4E5f6",
+    "githubClassicPrefix": "ghp_TestOnlyA1b2C3d4",
+    "githubFineGrainedPrefix": "github_pat_TestOnlyA1b2C3d4",
+    "slackBotPrefix": "xoxb-TestOnlyA1b2C3d4",
+    "highMixed": "LongTestOnly_A1b2C3d4E5",
+    "mediumMixed": "MediumToken12"
   }
 }

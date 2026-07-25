@@ -1,0 +1,16 @@
+{
+  "email": {
+    "valid": "alice.smith+dlp@example.co.uk",
+    "invalid": "alice..smith@example.com"
+  },
+  "phone": {
+    "vietnameseDomestic": "0912 345 678",
+    "vietnameseInternational": "+84 (912) 345-678",
+    "generalInternational": "+1 (415) 555-2671"
+  },
+  "paymentCard": {
+    "validVisa": "4111 1111 1111 1111",
+    "validMastercard": "5555-5555-5555-4444",
+    "invalidChecksum": "4111 1111 1111 1112"
+  }
+}

@@ -1,6 +1,6 @@
 # Privacy-First AI DLP Browser Extension — Milestone 1 Design
 
-- **Status:** Proposed for approval
+- **Status:** Approved for implementation planning
 - **Date:** 2026-07-26
 - **Milestone:** Chromium Manifest V3 extension for ChatGPT
 - **Audience:** Engineering, security, privacy, and product reviewers
@@ -300,10 +300,15 @@ User submission candidate
   -> audit store applies v1 envelope and retention
 ```
 
-Raw prompt text and `matchedText` remain only in transient detector, redaction,
-and submission-controller memory. Neither enters policy-engine memory,
-background messaging, storage, React props, React state, other UI state, or
-audit construction.
+Raw prompt text may be accessed transiently by the ChatGPT adapter solely to
+read or replace the active composer. It may be retained only by the submission
+controller for the lifetime of an active attempt and passed transiently to
+detector and redaction functions. The adapter must not cache, log, persist,
+message, or retain prompt content after the synchronous operation returns.
+
+The policy engine, UI, runtime messages, background worker, audit storage, and
+logs remain completely prompt-free. `matchedText` is permitted only in
+transient detector, redaction, and submission-controller memory.
 
 ## 9. Component responsibilities
 
@@ -1378,6 +1383,11 @@ Development follows test-driven development for every behavior:
   the policy spy boundary.
 - Popup and content-script status remain `initializing`, never `active`, until
   validated settings initialization resolves.
+- The adapter stores no prompt in instance fields after prompt read or
+  replacement operations return.
+- Adapter health events and errors contain no prompt-derived values.
+- Adapter disposal leaves no prompt-bearing state.
+- Selector and resume errors do not include composer contents.
 
 ### 20.5 Storage and messaging tests
 
@@ -1451,9 +1461,19 @@ Verify:
 - No test modules or fixture imports.
 - No production `.map` files and no source-map references.
 
-Standards namespace identifiers emitted by a UI runtime, if any, are classified
-as non-fetching identifiers during review; they do not permit or initiate
-network access. Any other `http://` or `https://` occurrence fails verification.
+Every non-standard remote URL literal must be reviewed. URLs used by scripts,
+styles, fonts, images, requests, dynamic imports, telemetry, remote code, or
+network-capable SDKs fail verification. Inert framework documentation or
+error-reference strings may be explicitly allowlisted only after confirming
+that no code path uses them to initiate a request.
+
+The artifact-security script reports each URL literal with:
+
+- The URL literal.
+- The generated file containing it.
+- Surrounding code or a classification.
+- Whether it is executable/fetching or inert.
+- An allowlist justification, when applicable.
 
 ### 21.3 Dependency and fixture review
 
@@ -1545,9 +1565,12 @@ Milestone 1 is acceptable only when:
 32. Warning cancellation, bypass, and redaction produce the exact distinct
     policy-action/resolution mappings defined in Section 10.6.
 33. The open Shadow DOM isolates component styling and remains inspectable.
-34. Raw prompt text, `matchedText`, `redactedText`, and finding offsets never
-    enter policy-engine memory, UI, messages, storage, logs, or production
-    artifacts.
+34. No runtime prompt-derived value, matched sensitive value, user-authored
+    excerpt, or dedicated secret-fixture value is embedded in or emitted to the
+    production artifact. Detector field identifiers such as `matchedText`,
+    `redactedText`, `start`, and `end` may exist as implementation identifiers
+    but must never contain build-time fixture data or be logged, persisted,
+    messaged, or rendered.
 35. Settings and audit data use validated `schemaVersion: 1` envelopes.
 36. Audit retention is enforced and clear-history works.
 37. Popup, options, and audit pages meet their functional and empty-state

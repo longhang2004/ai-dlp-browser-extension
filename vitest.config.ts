@@ -14,6 +14,8 @@ export default defineConfig({
           environment: "node",
           include: ["packages/**/*.test.ts", "apps/**/*.test.ts"],
           exclude: [
+            "**/.git/**",
+            "**/node_modules/**",
             "**/*.node.test.ts",
             "**/*.dom.test.ts",
             "**/*.ui.test.tsx",

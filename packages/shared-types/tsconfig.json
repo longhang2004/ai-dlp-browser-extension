@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "outDir": "../../node_modules/.cache/typescript/build/shared-types",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../node_modules/.cache/typescript/shared-types.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test-d.ts"]
+}

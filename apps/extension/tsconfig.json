@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noEmit": false,
+    "outDir": "../../node_modules/.cache/typescript/build/extension",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../node_modules/.cache/typescript/extension.tsbuildinfo",
+    "types": ["chrome"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test-d.ts"],
+  "references": [
+    { "path": "../../packages/shared-types" },
+    { "path": "../../packages/detectors" },
+    { "path": "../../packages/policy-engine" }
+  ]
+}

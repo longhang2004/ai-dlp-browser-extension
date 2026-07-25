@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.tooling.json" },
+    { "path": "./packages/shared-types" },
+    { "path": "./packages/detectors" },
+    { "path": "./packages/policy-engine" },
+    { "path": "./apps/extension" }
+  ]
+}

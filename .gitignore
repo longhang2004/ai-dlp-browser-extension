@@ -1,0 +1,10 @@
+artifacts/
+coverage/
+node_modules/
+playwright-report/
+test-results/
+
+apps/extension/dist/
+
+*.tsbuildinfo
+.DS_Store

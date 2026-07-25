@@ -287,7 +287,8 @@ User submission candidate
   -> Submission controller serializes the attempt
   -> Size guard rejects oversized prompt before detector execution
   -> Detector orchestrator returns transient SensitiveDataFinding[]
-  -> Findings-only policy engine returns PolicyDecision
+  -> Controller maps findings to metadata-only PolicyFinding[]
+  -> Policy engine returns metadata-only PolicyDecision
   -> Controller creates sanitized DisplayFinding[] and safe audit model
   -> allow: controller issues and consumes a one-shot authorization
   -> warn: UI requires explicit cancel, bypass, or redact action
@@ -299,9 +300,10 @@ User submission candidate
   -> audit store applies v1 envelope and retention
 ```
 
-Raw prompt text and `matchedText` stop at the controller boundary. Neither is
-passed to background messaging, storage, React props, React state, other UI
-state, or audit construction.
+Raw prompt text and `matchedText` remain only in transient detector, redaction,
+and submission-controller memory. Neither enters policy-engine memory,
+background messaging, storage, React props, React state, other UI state, or
+audit construction.
 
 ## 9. Component responsibilities
 
@@ -329,7 +331,8 @@ under `apps/extension/src/adapters/`.
 - Resolves category/confidence rules to an action.
 - Applies fixed action precedence.
 - Produces deterministic matched rule IDs and a non-sensitive reason code.
-- Never receives the raw prompt.
+- Receives only `PolicyFinding` metadata. It never receives the raw prompt,
+  matched or redacted text, offsets, or sanitized prompt text.
 - Does not redact, render, persist, or access browser APIs.
 
 ### 9.4 ChatGPT adapter
@@ -348,7 +351,9 @@ under `apps/extension/src/adapters/`.
 - Owns the attempt state machine.
 - Loads cached/validated settings.
 - Enforces the prompt-size boundary.
-- Invokes detection and policy evaluation.
+- Retains the original `SensitiveDataFinding[]` and maps each finding to a new
+  allowlisted `PolicyFinding` object before policy evaluation; it never uses
+  object spread for this conversion.
 - Creates `DisplayFinding` before calling UI code.
 - Owns prompt revalidation and one-shot authorization creation/consumption.
 - Invokes `redactPrompt` only after policy selection and live-context
@@ -412,9 +417,9 @@ type SensitiveDataFinding = {
 };
 ```
 
-`matchedText` is allowed only in transient detector, redaction, policy, and
-controller memory. It is forbidden in UI contracts, extension messages,
-storage, logs, errors, and analytics.
+`matchedText` is allowed only in transient detector, redaction, and
+submission-controller memory. It is forbidden in policy-engine memory, UI
+contracts, extension messages, storage, logs, errors, and analytics.
 
 Finding invariants:
 
@@ -477,30 +482,49 @@ component is invoked.
 ```typescript
 type PolicyAction = "allow" | "warn" | "redact" | "block";
 
+type PolicyFinding = {
+  id: string;
+  detectorId: string;
+  category: SensitiveDataCategory;
+  confidence: FindingConfidence;
+};
+
 type PolicyConfiguration = {
   schemaVersion: 1;
-  actions: Record<SensitiveDataCategory, PolicyAction>;
-  highConfidenceApiSecretAction: PolicyAction;
+  categoryActions: Record<
+    Exclude<SensitiveDataCategory, "api_secret">,
+    PolicyAction
+  >;
+  apiSecretActions: {
+    high: PolicyAction;
+    medium: PolicyAction;
+  };
 };
 
 type PolicyInput = {
   application: "chatgpt";
-  findings: SensitiveDataFinding[];
+  findings: PolicyFinding[];
   policy: PolicyConfiguration;
 };
 
 type PolicyDecision = {
   action: PolicyAction;
-  findings: SensitiveDataFinding[];
   matchedRuleIds: string[];
   reasonCode: string;
 };
 ```
 
-The policy engine receives findings and typed configuration only. It never
-receives raw prompt text and never returns sanitized text. The controller
-derives `canRedact` from supported finding categories without computing or
-passing a sanitized prompt to the UI.
+The submission controller retains the original `SensitiveDataFinding[]` for
+display-model construction and redaction. It constructs each `PolicyFinding`
+by explicitly copying only `id`, `detectorId`, `category`, and `confidence`
+before invoking policy evaluation.
+
+The policy engine strictly validates input and configuration at runtime,
+including rejection of unknown properties. Its input and output cannot contain
+the raw prompt, `matchedText`, `redactedText`, `start`, `end`, or sanitized
+prompt text. `PolicyDecision` does not echo findings because the controller
+already owns them. The controller derives `canRedact` from the original finding
+categories without computing or passing a sanitized prompt to the UI.
 
 ### 10.5 User settings
 
@@ -535,9 +559,39 @@ is 1 through 100 UTF-16 code units. Invalid saves are rejected with field-level
 errors. Invalid stored data causes the entire settings object to fall back to
 the safe defaults above; an invalid value must never disable protection.
 
-The policy engine supports a complete typed category map, but Milestone 1
-settings expose only email and phone actions. Strict-category overrides are a
-future managed-policy capability.
+The controller derives, but does not separately persist, the complete v1 policy
+from validated settings:
+
+```typescript
+const policy: PolicyConfiguration = {
+  schemaVersion: 1,
+  categoryActions: {
+    email: settings.emailAction,
+    phone: settings.phoneAction,
+    payment_card: "block",
+    aws_access_key: "block",
+    private_key: "block",
+    protected_keyword: "warn",
+  },
+  apiSecretActions: {
+    high: "block",
+    medium: "warn",
+  },
+};
+```
+
+Only email and phone actions are configurable in Milestone 1. The v1 policy
+validator requires exactly the six non-API category keys and exactly the `high`
+and `medium` API-secret keys. It rejects missing keys, unknown keys (including
+`api_secret` under `categoryActions` or `low` under `apiSecretActions`), invalid
+action strings, `payment_card`/`aws_access_key`/`private_key` values other than
+`block`, `protected_keyword` values other than `warn`, `apiSecretActions.high`
+values other than `block`, and `apiSecretActions.medium` values other than
+`warn`.
+
+Consequently corrupted or hand-edited configuration cannot weaken fixed strict
+categories. Strict-category or API-secret overrides require a future schema and
+managed-policy design rather than an unvalidated v1 object.
 
 ### 10.6 Versioned audit storage
 
@@ -752,8 +806,10 @@ whose elements are no longer associated.
 | `allow.no-findings` | No findings | `allow` |
 
 Low-confidence generic API-secret candidates are not emitted by the Milestone 1
-detector. The confidence type remains shared for detectors that may need it
-later.
+detector, and v1 has no low-confidence API-secret policy entry. A low-confidence
+`api_secret` `PolicyFinding` is rejected as invalid input rather than silently
+mapped to another action. The shared confidence type remains available to
+non-API detectors and future schema versions.
 
 ### 11.2 Precedence and ordering
 
@@ -767,6 +823,12 @@ All applicable rules are evaluated. `matchedRuleIds` uses the fixed table order
 above, not detector execution order or object-key order. Protection enablement
 is not a policy-engine concern: disabled protection bypasses detection and
 policy evaluation at the synchronous content-script gate.
+
+The engine reads non-API actions only from `categoryActions` and API-secret
+actions only from `apiSecretActions[confidence]`. There is no fallback between
+the two structures. Runtime validation occurs before rule evaluation, so a
+missing, unknown, invalid, or weakened fixed action produces a typed,
+content-free policy-validation error and no decision.
 
 For `redact`, the engine selects only the action. The controller invokes
 `redactPrompt` with the prompt and every supported finding, including
@@ -1089,8 +1151,9 @@ and immediate after confirmation.
 4. No telemetry, analytics, crash reporter, tracking pixel, or remote font is
    included.
 5. Raw prompts and `matchedText` are never logged or persisted.
-6. Raw prompts, `matchedText`, full findings, and user-authored excerpts never
-   enter runtime messages, React props/state, other UI state, or audit models.
+6. Raw prompts, `matchedText`, `redactedText`, offsets, full findings, and
+   user-authored excerpts never enter policy-engine input/output, runtime
+   messages, React props/state, other UI state, or audit models.
 7. Audit `allow` events are not persisted in Milestone 1.
 8. Audit retention defaults to 100 and is always bounded from 1 to 1,000.
 9. Storage is limited to `chrome.storage.local`; no sync storage is used.
@@ -1254,11 +1317,24 @@ Development follows test-driven development for every behavior:
 - Block precedence over redact and warn.
 - Redact precedence over warn.
 - Email and phone overrides.
-- Complete typed policy overrides at the package boundary.
+- Exact v1 `categoryActions` and `apiSecretActions` routing.
 - Deterministic matched-rule ordering.
 - Multiple categories and confidence-specific API-secret behavior.
-- Invalid policy configuration.
-- The policy input and output contain no prompt or sanitized-text fields.
+- Low-confidence API-secret findings are rejected because v1 defines no low
+  action.
+- Missing, unknown, and invalid category or confidence keys/actions are
+  rejected.
+- Attempts to weaken payment-card, AWS-key, private-key, protected-keyword, or
+  API-secret fixed actions are rejected.
+- Compile-time contract tests using `satisfies` and expected TypeScript errors
+  prove that `PolicyInput`, `PolicyFinding`, and `PolicyDecision` cannot contain
+  `prompt`, `matchedText`, `redactedText`, `start`, `end`, `sanitizedText`, or
+  returned original findings.
+- Runtime tests pass maliciously cast objects with each forbidden or unknown
+  field and prove strict validation rejects them before policy evaluation.
+- Runtime decision tests assert the exact output keys are only `action`,
+  `matchedRuleIds`, and `reasonCode`, with no echoed input findings or
+  sensitive fields.
 
 ### 20.3 Oversized-prompt tests
 
@@ -1297,6 +1373,11 @@ Development follows test-driven development for every behavior:
   invoke policy, create authorization, persist audit, or call adapter resume.
 - Initial settings load completes before interception is registered; invalid
   settings enable safe defaults and runtime settings updates replace the cache.
+- The controller converts each `SensitiveDataFinding` to a newly allocated
+  four-field `PolicyFinding`; matched/redacted text and offsets are absent at
+  the policy spy boundary.
+- Popup and content-script status remain `initializing`, never `active`, until
+  validated settings initialization resolves.
 
 ### 20.5 Storage and messaging tests
 
@@ -1417,8 +1498,8 @@ Milestone 1 is acceptable only when:
    Chromium.
 2. The content script activates only on `https://chatgpt.com/*`.
 3. The only required named permission is `storage`.
-4. Validated settings load before interception is registered, and initialization
-   never falsely reports active protection.
+4. Validated settings load before interception is registered; content-script
+   and popup status remain `initializing`, never `active`, until completion.
 5. Disabled protection lets the original event proceed without prevention,
    analysis, policy, dialogs, authorization, audit, or adapter resume.
 6. Invalid or unsupported stored settings fall back to protection-enabled safe
@@ -1434,8 +1515,9 @@ Milestone 1 is acceptable only when:
 14. A high-confidence contextual API secret is blocked.
 15. Warned findings can be redacted with approved placeholders before one
     resumed submission.
-16. The policy engine receives findings but never raw prompt text, never
-    performs redaction, and never returns sanitized text.
+16. The policy engine receives only four-field `PolicyFinding` metadata; its
+    strict input/output contains no prompt, matched/redacted text, offsets,
+    sanitized text, or returned original findings.
 17. The pure detector-package `redactPrompt` function returns sanitized text and
     applied findings with deterministic overlap behavior.
 18. The warning UI receives only sanitized `DisplayFinding` data and a
@@ -1463,8 +1545,9 @@ Milestone 1 is acceptable only when:
 32. Warning cancellation, bypass, and redaction produce the exact distinct
     policy-action/resolution mappings defined in Section 10.6.
 33. The open Shadow DOM isolates component styling and remains inspectable.
-34. Raw prompt text and `matchedText` never enter UI, messages, storage, logs, or
-    production artifacts.
+34. Raw prompt text, `matchedText`, `redactedText`, and finding offsets never
+    enter policy-engine memory, UI, messages, storage, logs, or production
+    artifacts.
 35. Settings and audit data use validated `schemaVersion: 1` envelopes.
 36. Audit retention is enforced and clear-history works.
 37. Popup, options, and audit pages meet their functional and empty-state
@@ -1476,6 +1559,11 @@ Milestone 1 is acceptable only when:
 41. No remote network calls are made by extension code.
 42. Manual QA results and any unavailable checks are explicitly distinguished.
 43. Documentation contains reproducible commands that were actually verified.
+44. V1 policy configuration uses exact non-API category and high/medium
+    API-secret action maps; missing, unknown, invalid, or weakened fixed actions
+    fail validation.
+45. Compile-time and runtime tests enforce the metadata-only policy boundary and
+    reject every forbidden field listed in Section 20.2.
 
 ## 24. Required completion verification
 
@@ -1496,6 +1584,9 @@ unless the corresponding check ran.
 
 ## 25. Known limitations
 
+- Submissions occurring before validated settings initialization completes are
+  not intercepted. During this interval the extension reports `initializing`,
+  never active. Managed or fail-closed startup behavior is future work.
 - ChatGPT can change its DOM or submission behavior without notice.
 - Unknown programmatic submission mechanisms may bypass DOM interception.
 - The extension does not inspect attachments, files, images, prior messages, or

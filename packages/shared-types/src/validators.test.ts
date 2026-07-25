@@ -16,6 +16,7 @@ import {
   createProtectionDialogModel,
   DECISION_RESOLUTIONS,
   DEFAULT_PROTECTION_SETTINGS,
+  DETECTOR_CATEGORY,
   DETECTOR_IDS,
   ENFORCEMENT_ERROR_CODES,
   FINDING_CONFIDENCES,
@@ -166,6 +167,7 @@ describe("frozen schema allowlists", () => {
   it("freezes every exported tuple and object allowlist", () => {
     const allowlists = [
       ADAPTER_HEALTH_CODES,
+      DETECTOR_CATEGORY,
       DETECTOR_IDS,
       DECISION_RESOLUTIONS,
       ENFORCEMENT_ERROR_CODES,
@@ -189,6 +191,14 @@ describe("frozen schema allowlists", () => {
         reasonCode: "policy.steal",
       }),
     ).toBe(false);
+  });
+
+  it("keeps a frozen one-to-one detector/category mapping with complete coverage", () => {
+    expect(DETECTOR_IDS).toEqual(Object.keys(DETECTOR_CATEGORY));
+    expect(Object.values(DETECTOR_CATEGORY)).toEqual(SENSITIVE_DATA_CATEGORIES);
+    expect(new Set(Object.values(DETECTOR_CATEGORY)).size).toBe(
+      SENSITIVE_DATA_CATEGORIES.length,
+    );
   });
 });
 
@@ -237,15 +247,33 @@ describe("policy runtime boundaries", () => {
     expect(isPolicyFinding(candidate)).toBe(false);
   });
 
-  it("accepts only the frozen Milestone 1 detector identifiers", () => {
+  it("accepts all seven canonical detector/category pairs and rejects every mismatch", () => {
+    const categories = Object.values(DETECTOR_CATEGORY);
+
     for (const detectorId of DETECTOR_IDS) {
+      const category = DETECTOR_CATEGORY[detectorId];
+      const valid = {
+        id: createFindingId(detectorId, 5, 21),
+        detectorId,
+        category,
+        confidence: "high",
+      };
+      const mismatchedCategory =
+        categories[(categories.indexOf(category) + 1) % categories.length];
+
+      expect(isPolicyFinding(valid)).toBe(true);
       expect(
         isPolicyFinding({
-          ...validPolicyFinding,
-          id: createFindingId(detectorId, 5, 21),
-          detectorId,
+          ...valid,
+          category: mismatchedCategory,
         }),
-      ).toBe(true);
+      ).toBe(false);
+      expect(() =>
+        createPolicyFinding({
+          ...valid,
+          category: mismatchedCategory,
+        } as PolicyFinding),
+      ).toThrow("Invalid policy finding.");
     }
 
     expect(

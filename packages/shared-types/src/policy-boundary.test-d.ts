@@ -37,6 +37,37 @@ type IsPromptFree<Boundary> = Boundary extends PromptFreeBoundary
   ? true
   : false;
 
+type DetectorCategoryMismatch = {
+  email: "phone";
+  phone: "payment_card";
+  "payment-card": "aws_access_key";
+  "aws-access-key": "private_key";
+  "private-key": "api_secret";
+  "api-secret": "protected_keyword";
+  "protected-keyword": "email";
+};
+
+type RejectsAllDetectorCategoryMismatches<Contract> = {
+  [Detector in keyof DetectorCategoryMismatch]: Extract<
+    Contract,
+    {
+      detectorId: Detector;
+      category: DetectorCategoryMismatch[Detector];
+    }
+  > extends never
+    ? true
+    : false;
+}[keyof DetectorCategoryMismatch] extends true
+  ? true
+  : false;
+
+export type PolicyFindingRejectsAllDetectorCategoryMismatches = Assert<
+  RejectsAllDetectorCategoryMismatches<PolicyFinding>
+>;
+export type SensitiveFindingRejectsAllDetectorCategoryMismatches = Assert<
+  RejectsAllDetectorCategoryMismatches<SensitiveDataFinding>
+>;
+
 export type RuntimeRequestIsPromptFree = Assert<IsPromptFree<RuntimeRequest>>;
 export type RuntimeResponseIsPromptFree = Assert<IsPromptFree<RuntimeResponse>>;
 export type SettingsPortIsPromptFree = Assert<
@@ -96,6 +127,17 @@ const finding = {
   category: "email",
   confidence: "high",
 } satisfies PolicyFinding;
+
+const mismatchedDetectorCategoryFinding = {
+  id: createFindingId("payment-card", 0, 16),
+  detectorId: "payment-card",
+  category: "email",
+  confidence: "high",
+};
+// @ts-expect-error A payment-card detector cannot produce an email policy finding.
+const rejectedMismatchedDetectorCategoryFinding: PolicyFinding =
+  mismatchedDetectorCategoryFinding;
+void rejectedMismatchedDetectorCategoryFinding;
 
 const input = {
   application: "chatgpt",

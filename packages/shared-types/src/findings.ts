@@ -18,22 +18,35 @@ export const FINDING_CONFIDENCES = Object.freeze([
 
 export type FindingConfidence = (typeof FINDING_CONFIDENCES)[number];
 
-export const DETECTOR_IDS = Object.freeze([
-  "email",
-  "phone",
-  "payment-card",
-  "aws-access-key",
-  "private-key",
-  "api-secret",
-  "protected-keyword",
-] as const);
+export const DETECTOR_CATEGORY = Object.freeze({
+  email: "email",
+  phone: "phone",
+  "payment-card": "payment_card",
+  "aws-access-key": "aws_access_key",
+  "private-key": "private_key",
+  "api-secret": "api_secret",
+  "protected-keyword": "protected_keyword",
+} as const satisfies Record<string, SensitiveDataCategory>);
 
-export type DetectorId = (typeof DETECTOR_IDS)[number];
+export type DetectorId = keyof typeof DETECTOR_CATEGORY;
+
+export type DetectorCategory<Detector extends DetectorId> =
+  (typeof DETECTOR_CATEGORY)[Detector];
+
+export type DetectorIdForCategory<Category extends SensitiveDataCategory> = {
+  [Detector in DetectorId]: DetectorCategory<Detector> extends Category
+    ? Detector
+    : never;
+}[DetectorId];
+
+export const DETECTOR_IDS = Object.freeze(
+  Object.keys(DETECTOR_CATEGORY) as DetectorId[],
+);
 
 declare const findingIdBrand: unique symbol;
 
-export type FindingId = string & {
-  readonly [findingIdBrand]: true;
+export type FindingId<Detector extends DetectorId = DetectorId> = string & {
+  readonly [findingIdBrand]: Detector;
 };
 
 export function isDetectorId(value: unknown): value is DetectorId {
@@ -46,11 +59,11 @@ export function isFindingId(value: unknown): value is FindingId {
   return typeof value === "string" && /^finding-[0-9a-f]{16}$/u.test(value);
 }
 
-export function createFindingId(
-  detectorId: DetectorId,
+export function createFindingId<Detector extends DetectorId>(
+  detectorId: Detector,
   start: number,
   end: number,
-): FindingId {
+): FindingId<Detector> {
   if (
     !isDetectorId(detectorId) ||
     !Number.isSafeInteger(start) ||
@@ -68,7 +81,7 @@ export function createFindingId(
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
 
-  return `finding-${hash.toString(16).padStart(16, "0")}` as FindingId;
+  return `finding-${hash.toString(16).padStart(16, "0")}` as FindingId<Detector>;
 }
 
 export const SENSITIVE_DATA_PLACEHOLDERS = Object.freeze({
@@ -84,9 +97,9 @@ export const SENSITIVE_DATA_PLACEHOLDERS = Object.freeze({
 export type SensitiveDataPlaceholder =
   (typeof SENSITIVE_DATA_PLACEHOLDERS)[SensitiveDataCategory];
 
-type SensitiveDataFindingBase = {
-  id: FindingId;
-  detectorId: DetectorId;
+type SensitiveDataFindingBase<Category extends SensitiveDataCategory> = {
+  id: FindingId<DetectorIdForCategory<Category>>;
+  detectorId: DetectorIdForCategory<Category>;
   start: number;
   end: number;
   confidence: FindingConfidence;
@@ -94,7 +107,7 @@ type SensitiveDataFindingBase = {
 };
 
 export type SensitiveDataFinding = {
-  [Category in SensitiveDataCategory]: SensitiveDataFindingBase & {
+  [Category in SensitiveDataCategory]: SensitiveDataFindingBase<Category> & {
     category: Category;
     redactedText: (typeof SENSITIVE_DATA_PLACEHOLDERS)[Category];
   };

@@ -18,6 +18,7 @@ import {
   isMaskedPreviewSnapshot,
 } from "./display.js";
 import {
+  DETECTOR_CATEGORY,
   FINDING_CONFIDENCES,
   isDetectorId,
   isFindingId,
@@ -35,6 +36,19 @@ import type {
   RuntimeResponse,
   SettingsPortMessage,
 } from "./messages.js";
+import {
+  POLICY_ACTION_PRECEDENCE,
+  POLICY_NO_FINDINGS_RULE,
+  POLICY_REASON_CODE,
+  POLICY_REASON_CODES,
+  POLICY_RULE_CATALOG,
+  POLICY_RULE_IDS,
+} from "./policy-catalog.js";
+import type {
+  PolicyCatalogRule,
+  PolicyReasonCode,
+  PolicyRuleId,
+} from "./policy-catalog.js";
 import { POLICY_ACTIONS } from "./policy.js";
 import type {
   PolicyAction,
@@ -63,27 +77,6 @@ import {
   snapshotStructuredValue,
   validatesStructuredSnapshot,
 } from "./validation-helpers.js";
-
-const POLICY_RULE_IDS = Object.freeze([
-  "block.private-key",
-  "block.aws-access-key",
-  "block.payment-card",
-  "block.api-secret.high",
-  "warn.api-secret.medium",
-  "warn.email",
-  "warn.phone",
-  "warn.protected-keyword",
-  "allow.no-findings",
-] as const);
-
-type PolicyRuleId = (typeof POLICY_RULE_IDS)[number];
-
-const POLICY_REASON_CODES = Object.freeze([
-  "no_findings",
-  "policy_match",
-] as const);
-
-type PolicyReasonCode = (typeof POLICY_REASON_CODES)[number];
 
 function isOneOf<const Values extends readonly string[]>(
   value: unknown,
@@ -134,31 +127,39 @@ function hasPolicyRuleOrder(ruleIds: readonly PolicyRuleId[]): boolean {
   return true;
 }
 
-const RULE_CATEGORY = Object.freeze({
-  "block.private-key": "private_key",
-  "block.aws-access-key": "aws_access_key",
-  "block.payment-card": "payment_card",
-  "block.api-secret.high": "api_secret",
-  "warn.api-secret.medium": "api_secret",
-  "warn.email": "email",
-  "warn.phone": "phone",
-  "warn.protected-keyword": "protected_keyword",
-} as const satisfies Record<
-  Exclude<PolicyRuleId, "allow.no-findings">,
-  SensitiveDataCategory
->);
+type CatalogFindingRule = Exclude<PolicyCatalogRule, { category: null }>;
 
-const FIXED_BLOCK_RULE_IDS = new Set<PolicyRuleId>([
-  "block.private-key",
-  "block.aws-access-key",
-  "block.payment-card",
-  "block.api-secret.high",
+const FINDING_RULES = POLICY_RULE_CATALOG.filter(
+  (rule): rule is CatalogFindingRule => rule.category !== null,
+);
+
+const FINDING_RULE_BY_ID = new Map<PolicyRuleId, CatalogFindingRule>(
+  FINDING_RULES.map((rule) => [rule.id, rule]),
+);
+
+const POLICY_CATEGORY_ACTION_KEYS = Object.freeze([
+  ...new Set(
+    FINDING_RULES.flatMap((rule) =>
+      rule.category === "api_secret" ? [] : [rule.category],
+    ),
+  ),
 ]);
 
-const CONFIGURABLE_CONTACT_RULE_IDS = new Set<PolicyRuleId>([
-  "warn.email",
-  "warn.phone",
+const API_SECRET_CONFIDENCE_KEYS = Object.freeze([
+  ...new Set(
+    FINDING_RULES.flatMap((rule) =>
+      rule.category === "api_secret" && rule.confidence !== null
+        ? [rule.confidence]
+        : [],
+    ),
+  ),
 ]);
+
+const CONFIGURABLE_CONTACT_RULE_IDS = new Set<PolicyRuleId>(
+  FINDING_RULES.filter((rule) => rule.actionSource.mode === "configured").map(
+    (rule) => rule.id,
+  ),
+);
 
 const PLACEHOLDER_CATEGORY = new Map<
   SensitiveDataPlaceholder,
@@ -173,20 +174,17 @@ const PLACEHOLDER_CATEGORY = new Map<
 function hasCompatibleRuleSet(ruleIds: readonly PolicyRuleId[]): boolean {
   const seenCategories = new Set<SensitiveDataCategory>();
   for (const ruleId of ruleIds) {
-    if (ruleId === "allow.no-findings") {
+    const rule = FINDING_RULE_BY_ID.get(ruleId);
+    if (rule === undefined) {
       return false;
     }
-    const category = RULE_CATEGORY[ruleId];
+    const category = rule.category;
     if (category !== "api_secret" && seenCategories.has(category)) {
       return false;
     }
     seenCategories.add(category);
   }
   return true;
-}
-
-function hasFixedBlockRule(ruleIds: readonly PolicyRuleId[]): boolean {
-  return ruleIds.some((ruleId) => FIXED_BLOCK_RULE_IDS.has(ruleId));
 }
 
 function hasConfigurableContactRule(ruleIds: readonly PolicyRuleId[]): boolean {
@@ -203,17 +201,25 @@ function hasKnowableActionForRules(
   action: Exclude<PolicyAction, "allow">,
   ruleIds: readonly PolicyRuleId[],
 ): boolean {
-  const hasFixedBlock = hasFixedBlockRule(ruleIds);
-  const hasContact = hasConfigurableContactRule(ruleIds);
-
-  switch (action) {
-    case "block":
-      return hasFixedBlock || hasContact;
-    case "redact":
-      return !hasFixedBlock && hasContact;
-    case "warn":
-      return !hasFixedBlock;
+  let fixedAction: PolicyAction = "allow";
+  for (const ruleId of ruleIds) {
+    const rule = FINDING_RULE_BY_ID.get(ruleId);
+    if (
+      rule !== undefined &&
+      rule.actionSource.mode === "fixed" &&
+      POLICY_ACTION_PRECEDENCE.indexOf(rule.actionSource.requiredAction) >
+        POLICY_ACTION_PRECEDENCE.indexOf(fixedAction)
+    ) {
+      fixedAction = rule.actionSource.requiredAction;
+    }
   }
+
+  const requestedPriority = POLICY_ACTION_PRECEDENCE.indexOf(action);
+  const fixedPriority = POLICY_ACTION_PRECEDENCE.indexOf(fixedAction);
+  return (
+    requestedPriority >= fixedPriority &&
+    (requestedPriority === fixedPriority || hasConfigurableContactRule(ruleIds))
+  );
 }
 
 function isPolicyFindingSnapshot(value: unknown): value is PolicyFinding {
@@ -224,6 +230,7 @@ function isPolicyFindingSnapshot(value: unknown): value is PolicyFinding {
       isFindingId(value.id) &&
       isDetectorId(value.detectorId) &&
       isSensitiveDataCategory(value.category) &&
+      DETECTOR_CATEGORY[value.detectorId] === value.category &&
       isFindingConfidence(value.confidence) &&
       !(value.category === "api_secret" && value.confidence === "low"),
   );
@@ -239,12 +246,7 @@ export function createPolicyFinding(value: PolicyFinding): PolicyFinding {
     throw new Error("Invalid policy finding.");
   }
 
-  return {
-    id: snapshot.id,
-    detectorId: snapshot.detectorId,
-    category: snapshot.category,
-    confidence: snapshot.confidence,
-  };
+  return snapshot;
 }
 
 function isPolicyConfigurationSnapshot(
@@ -260,30 +262,40 @@ function isPolicyConfigurationSnapshot(
       ]) ||
       value.schemaVersion !== 1 ||
       !isPlainRecord(value.categoryActions) ||
-      !hasExactOwnKeys(value.categoryActions, [
-        "email",
-        "phone",
-        "payment_card",
-        "aws_access_key",
-        "private_key",
-        "protected_keyword",
-      ]) ||
+      !hasExactOwnKeys(value.categoryActions, POLICY_CATEGORY_ACTION_KEYS) ||
       !isPlainRecord(value.apiSecretActions) ||
-      !hasExactOwnKeys(value.apiSecretActions, ["high", "medium"])
+      !hasExactOwnKeys(value.apiSecretActions, API_SECRET_CONFIDENCE_KEYS)
     ) {
       return false;
     }
 
-    return (
-      isPolicyAction(value.categoryActions.email) &&
-      isPolicyAction(value.categoryActions.phone) &&
-      value.categoryActions.payment_card === "block" &&
-      value.categoryActions.aws_access_key === "block" &&
-      value.categoryActions.private_key === "block" &&
-      value.categoryActions.protected_keyword === "warn" &&
-      value.apiSecretActions.high === "block" &&
-      value.apiSecretActions.medium === "warn"
-    );
+    const categoryActions = value.categoryActions;
+    const apiSecretActions = value.apiSecretActions;
+    return FINDING_RULES.every((rule) => {
+      switch (rule.actionSource.kind) {
+        case "policy_category": {
+          if (rule.category === "api_secret") {
+            return false;
+          }
+          const action = categoryActions[rule.category];
+          return (
+            isPolicyAction(action) &&
+            (rule.actionSource.mode === "configured" ||
+              action === rule.actionSource.requiredAction)
+          );
+        }
+        case "api_secret_confidence": {
+          if (rule.confidence === null) {
+            return false;
+          }
+          const action = apiSecretActions[rule.confidence];
+          return (
+            isPolicyAction(action) &&
+            action === rule.actionSource.requiredAction
+          );
+        }
+      }
+    });
   });
 }
 
@@ -316,27 +328,8 @@ export function createPolicyInput(value: PolicyInput): PolicyInput {
 
   return {
     application: "chatgpt",
-    findings: snapshot.findings.map((finding) => ({
-      id: finding.id,
-      detectorId: finding.detectorId,
-      category: finding.category,
-      confidence: finding.confidence,
-    })),
-    policy: {
-      schemaVersion: 1,
-      categoryActions: {
-        email: snapshot.policy.categoryActions.email,
-        phone: snapshot.policy.categoryActions.phone,
-        payment_card: "block",
-        aws_access_key: "block",
-        private_key: "block",
-        protected_keyword: "warn",
-      },
-      apiSecretActions: {
-        high: "block",
-        medium: "warn",
-      },
-    },
+    findings: snapshot.findings,
+    policy: snapshot.policy,
   };
 }
 
@@ -353,10 +346,10 @@ function isPolicyDecisionSnapshot(value: unknown): value is PolicyDecision {
 
     if (value.action === "allow") {
       return (
-        (value.reasonCode === "no_findings" &&
+        (value.reasonCode === POLICY_REASON_CODE.NO_FINDINGS &&
           isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
-          value.matchedRuleIds[0] === "allow.no-findings") ||
-        (value.reasonCode === "policy_match" &&
+          value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id) ||
+        (value.reasonCode === POLICY_REASON_CODE.POLICY_MATCH &&
           isDenseExactArray(value.matchedRuleIds, 1, 2, isPolicyRuleId) &&
           hasUniqueItems(value.matchedRuleIds) &&
           hasPolicyRuleOrder(value.matchedRuleIds) &&
@@ -365,14 +358,14 @@ function isPolicyDecisionSnapshot(value: unknown): value is PolicyDecision {
     }
 
     return (
-      value.reasonCode === "policy_match" &&
+      value.reasonCode === POLICY_REASON_CODE.POLICY_MATCH &&
       isDenseExactArray(
         value.matchedRuleIds,
         1,
         POLICY_RULE_IDS.length - 1,
         isPolicyRuleId,
       ) &&
-      !value.matchedRuleIds.includes("allow.no-findings") &&
+      !value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) &&
       hasUniqueItems(value.matchedRuleIds) &&
       hasPolicyRuleOrder(value.matchedRuleIds) &&
       hasCompatibleRuleSet(value.matchedRuleIds) &&
@@ -460,16 +453,15 @@ function hasCorrelatedRuleCategories(
   categories: readonly SensitiveDataCategory[],
 ): boolean {
   return (
-    ruleIds.every(
-      (ruleId) =>
-        ruleId !== "allow.no-findings" &&
-        categories.includes(RULE_CATEGORY[ruleId]),
-    ) &&
+    ruleIds.every((ruleId) => {
+      const rule = FINDING_RULE_BY_ID.get(ruleId);
+      return rule !== undefined && categories.includes(rule.category);
+    }) &&
     categories.every((category) =>
-      ruleIds.some(
-        (ruleId) =>
-          ruleId !== "allow.no-findings" && RULE_CATEGORY[ruleId] === category,
-      ),
+      ruleIds.some((ruleId) => {
+        const rule = FINDING_RULE_BY_ID.get(ruleId);
+        return rule !== undefined && rule.category === category;
+      }),
     )
   );
 }
@@ -533,7 +525,7 @@ function isDecisionAuditEventSnapshot(
           isSensitiveDataCategory,
         ) &&
         isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
-        value.matchedRuleIds[0] === "allow.no-findings" &&
+        value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id &&
         !Object.hasOwn(value, "maskedExcerpt");
 
       const isConfiguredAllow =
@@ -586,7 +578,7 @@ function isDecisionAuditEventSnapshot(
         POLICY_RULE_IDS.length - 1,
         isPolicyRuleId,
       ) ||
-      value.matchedRuleIds.includes("allow.no-findings") ||
+      value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) ||
       !hasUniqueItems(value.matchedRuleIds) ||
       !hasPolicyRuleOrder(value.matchedRuleIds) ||
       !hasCompatibleRuleSet(value.matchedRuleIds) ||

@@ -42,6 +42,7 @@ export type {
 } from "./display.js";
 export {
   createFindingId,
+  DETECTOR_CATEGORY,
   DETECTOR_IDS,
   FINDING_CONFIDENCES,
   isDetectorId,
@@ -50,7 +51,9 @@ export {
   SENSITIVE_DATA_PLACEHOLDERS,
 } from "./findings.js";
 export type {
+  DetectorCategory,
   DetectorId,
+  DetectorIdForCategory,
   FindingConfidence,
   FindingId,
   SensitiveDataCategory,
@@ -66,6 +69,25 @@ export type {
   SettingsPortMessage,
 } from "./messages.js";
 export { POLICY_ACTIONS } from "./policy.js";
+export {
+  POLICY_ACTION_PRECEDENCE,
+  POLICY_NO_FINDINGS_RULE,
+  POLICY_REASON_CODE,
+  POLICY_REASON_CODES,
+  POLICY_RULE_CATALOG,
+  POLICY_RULE_IDS,
+} from "./policy-catalog.js";
+export type {
+  ConfiguredCategoryActionSource,
+  FindingPolicyCatalogRule,
+  FixedApiSecretActionSource,
+  FixedCategoryActionSource,
+  NoFindingsActionSource,
+  NoFindingsPolicyCatalogRule,
+  PolicyCatalogRule,
+  PolicyReasonCode,
+  PolicyRuleId,
+} from "./policy-catalog.js";
 export type {
   PolicyAction,
   PolicyConfiguration,

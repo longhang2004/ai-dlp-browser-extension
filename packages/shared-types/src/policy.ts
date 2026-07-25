@@ -1,5 +1,5 @@
 import type {
-  DetectorId,
+  DetectorIdForCategory,
   FindingConfidence,
   FindingId,
   SensitiveDataCategory,
@@ -19,12 +19,17 @@ export const POLICY_ACTIONS = Object.freeze([
 
 export type PolicyAction = (typeof POLICY_ACTIONS)[number];
 
-export type PolicyFinding = PromptFreeBoundary & {
-  id: FindingId;
-  detectorId: DetectorId;
-  category: SensitiveDataCategory;
-  confidence: FindingConfidence;
-};
+type PolicyFindingForCategory<Category extends SensitiveDataCategory> =
+  PromptFreeBoundary & {
+    id: FindingId<DetectorIdForCategory<Category>>;
+    detectorId: DetectorIdForCategory<Category>;
+    category: Category;
+    confidence: FindingConfidence;
+  };
+
+export type PolicyFinding = {
+  [Category in SensitiveDataCategory]: PolicyFindingForCategory<Category>;
+}[SensitiveDataCategory];
 
 export type PolicyConfiguration = PromptFreeBoundary & {
   schemaVersion: 1;

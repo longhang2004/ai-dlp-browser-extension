@@ -95,6 +95,12 @@ export type {
   PolicyFinding,
   PolicyInput,
 } from "./policy.js";
+export {
+  isNormalizedProtectedKeyword,
+  MAX_PROTECTED_KEYWORD_CODE_UNITS,
+  MAX_PROTECTED_KEYWORD_COUNT,
+  normalizeProtectedKeyword,
+} from "./protected-keywords.js";
 export type { RedactionResult } from "./redaction.js";
 export type { PromptFreeArray, ReadonlyPromptFreeArray } from "./privacy.js";
 export {
@@ -113,6 +119,7 @@ export type {
   SettingsValidationField,
   StoredSettingsEnvelope,
 } from "./settings.js";
+export { areUnicodeCaseInsensitiveEquivalent } from "./unicode-equivalence.js";
 export { PROTECTION_STATUSES } from "./status.js";
 export type { ProtectionStatus, ProtectionStatusSnapshot } from "./status.js";
 export {

@@ -954,8 +954,45 @@ describe("settings validation", () => {
         protectedKeywords: ["Alpha", "alpha"],
       },
     },
+    {
+      schemaVersion: 1,
+      settings: {
+        ...DEFAULT_PROTECTION_SETTINGS,
+        protectedKeywords: ["Σ", "ς"],
+      },
+    },
+    {
+      schemaVersion: 1,
+      settings: {
+        ...DEFAULT_PROTECTION_SETTINGS,
+        protectedKeywords: ["line\nbreak"],
+      },
+    },
+    {
+      schemaVersion: 1,
+      settings: {
+        ...DEFAULT_PROTECTION_SETTINGS,
+        protectedKeywords: ["alpha\u200bbeta"],
+      },
+    },
+    {
+      schemaVersion: 1,
+      settings: {
+        ...DEFAULT_PROTECTION_SETTINGS,
+        protectedKeywords: ["alpha\u2028beta"],
+      },
+    },
   ])("rejects malformed or unknown settings data %#", (candidate) => {
     expect(isStoredSettingsEnvelope(candidate)).toBe(false);
+  });
+
+  it("rejects matcher-equivalent Unicode keywords when cloning settings", () => {
+    expect(() =>
+      cloneProtectionSettings({
+        ...DEFAULT_PROTECTION_SETTINGS,
+        protectedKeywords: ["Σ", "ς"],
+      }),
+    ).toThrow("Invalid protection settings.");
   });
 
   it("rejects non-enumerable and symbol-keyed unknown fields", () => {

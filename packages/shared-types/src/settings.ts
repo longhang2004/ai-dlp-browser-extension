@@ -6,6 +6,11 @@ import type {
   ReadonlyPromptFreeArray,
 } from "./privacy.js";
 import {
+  isNormalizedProtectedKeyword,
+  MAX_PROTECTED_KEYWORD_COUNT,
+} from "./protected-keywords.js";
+import { areUnicodeCaseInsensitiveEquivalent } from "./unicode-equivalence.js";
+import {
   hasExactOwnKeys,
   INVALID_SNAPSHOT,
   isDenseExactArray,
@@ -101,13 +106,25 @@ export const DEFAULT_PROTECTION_SETTINGS: ReadonlyProtectionSettings =
     auditRetentionLimit: 100,
   });
 
-function isProtectedKeyword(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= 100 &&
-    value.trim() === value
-  );
+function hasUniqueProtectedKeywords(keywords: readonly string[]): boolean {
+  for (let rightIndex = 1; rightIndex < keywords.length; rightIndex += 1) {
+    const right = keywords[rightIndex];
+    if (right === undefined) {
+      return false;
+    }
+
+    for (let leftIndex = 0; leftIndex < rightIndex; leftIndex += 1) {
+      const left = keywords[leftIndex];
+      if (
+        left === undefined ||
+        areUnicodeCaseInsensitiveEquivalent(left, right)
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 export function isProtectionSettingsSnapshot(
@@ -128,7 +145,12 @@ export function isProtectionSettingsSnapshot(
       !POLICY_ACTIONS.includes(value.emailAction as PolicyAction) ||
       typeof value.phoneAction !== "string" ||
       !POLICY_ACTIONS.includes(value.phoneAction as PolicyAction) ||
-      !isDenseExactArray(value.protectedKeywords, 0, 100, isProtectedKeyword) ||
+      !isDenseExactArray(
+        value.protectedKeywords,
+        0,
+        MAX_PROTECTED_KEYWORD_COUNT,
+        isNormalizedProtectedKeyword,
+      ) ||
       !Number.isSafeInteger(value.auditRetentionLimit) ||
       Number(value.auditRetentionLimit) < 1 ||
       Number(value.auditRetentionLimit) > 1_000
@@ -136,10 +158,7 @@ export function isProtectionSettingsSnapshot(
       return false;
     }
 
-    const normalized = value.protectedKeywords.map((keyword) =>
-      keyword.toLowerCase(),
-    );
-    return new Set(normalized).size === normalized.length;
+    return hasUniqueProtectedKeywords(value.protectedKeywords);
   });
 }
 

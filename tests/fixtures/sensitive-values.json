@@ -29,5 +29,9 @@
     "slackBotPrefix": "xoxb-TestOnlyA1b2C3d4",
     "highMixed": "LongTestOnly_A1b2C3d4E5",
     "mediumMixed": "MediumToken12"
+  },
+  "protectedKeyword": {
+    "vietnamese": "Dự án Mật",
+    "projectCode": "NOVA-42"
   }
 }

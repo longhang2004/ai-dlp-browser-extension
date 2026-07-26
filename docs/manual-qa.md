@@ -14,7 +14,8 @@ not copy fixture values into documentation, screenshots, tickets, or logs.
    pnpm verify:artifact
    ```
 
-3. Load `apps/extension/dist` unpacked in Chromium/Chrome 102+.
+3. Load `apps/extension/dist` unpacked in a Chromium-based browser (Chrome/Edge
+   102+).
 4. Open the popup. Do not rely on enforcement unless it says **Protection is
    active**. `initializing`, `waiting_for_composer`, `degraded`, and
    `unavailable` are not active.
@@ -81,17 +82,35 @@ date. Never record the submitted fixture value.
   confirmation.
 - The open Shadow root is inspectable and focus remains contained in the dialog.
 
-## Current live-check status
+## Authenticated live-check result — successful on 2026-07-26
 
-Interactive QA against an authenticated live ChatGPT session was not performed
-during the 2026-07-26 automated run because no authenticated browser session was
-used. Those items are **unavailable**, not passed. The local production-match
-fixture and unpacked-extension behavior are covered by Playwright. The
-production-shaped `#prompt-textarea[contenteditable="true"]` fixture, attachment
-presence, tool-button ambiguity, and ProseMirror replacement refusal were
-verified automatically on 2026-07-26; this is not a claim of live compatibility.
-Implementation can be re-reviewed, but merge remains blocked until the current
-authenticated ChatGPT DOM and submission behavior complete this checklist.
+The production build was loaded unpacked in Microsoft Edge and exercised on the
+current authenticated `chatgpt.com` composer. The exact Edge version was not
+captured. The browser-control extension reported version `1.2.2721.15725`, and
+the unpacked AI DLP extension reported version `0.1.0`.
+
+The popup reported **Protection is active** and **ChatGPT · local inspection
+only**, with 18 recent protection events after the test session.
+
+| Scenario               | Input                                                                                     | Result                                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Warning and cancel     | `email.valid`                                                                             | Placeholder-only warning opened; Cancel prevented submission                                                  |
+| Warning bypass         | `email.valid`                                                                             | Send anyway submitted exactly once without recursive or duplicate submission                                  |
+| Keyboard interception  | Ordinary text and the warning fixture                                                     | Unmodified Enter was intercepted once the semantic Send control was resolved; Shift+Enter was not intercepted |
+| Tool-button ambiguity  | Visible **Add files and more** control                                                    | The tool control was not treated as Send                                                                      |
+| Strict detector blocks | `paymentCard.validVisa`, `awsAccessKey.longLived`, and a valid minimum-length PEM fixture | Each was blocked without a bypass and without creating a user message                                         |
+| Large-paste attachment | Benign synthetic text converted by ChatGPT into an attachment                             | Failed closed with a content-free unsupported-attachment dialog, no Send anyway action, and no user message   |
+| Uploaded attachment    | Harmless local text file                                                                  | Failed closed with a content-free unsupported-attachment dialog, no Send anyway action, and no user message   |
+| Dialog isolation       | Warning and attachment dialogs                                                            | Rendered sanitized content in an inspectable open Shadow root                                                 |
+| Cleanup                | Large-paste and uploaded test attachments                                                 | Both test attachments were removed; existing composer content was preserved                                   |
+
+A too-short PEM-shaped sample was submitted during exploratory QA because it did
+not satisfy the detector's minimum valid fixture length. It is not counted as a
+detector bypass or as strict-block evidence.
+
+The table above records only checks actually performed in the authenticated
+session. Interactive checklist items not represented in the table were not run,
+and this document makes no live-pass claim for them.
 
 ## Failure reporting
 

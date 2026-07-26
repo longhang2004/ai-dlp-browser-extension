@@ -21,7 +21,7 @@ export const CHATGPT_SELECTORS = Object.freeze({
   stableDataSend:
     '[data-testid="send-button"], [data-testid="fruitjuice-send-button"]',
   attachmentEvidence:
-    '[data-testid="composer-attachment"], [data-testid="attachment-chip"], [data-testid="file-preview"], button[aria-label="Remove attachment"], button[aria-label="Remove file"]',
+    '[data-testid="composer-attachment"], [data-testid="attachment-chip"], [data-testid="file-preview"], button[aria-label="Remove attachment"], button[aria-label="Remove file"], button[aria-label^="Remove file "]',
   stableComposerRoot: '[data-testid="composer-root"]',
   semanticRoleFormRegion: '[role="form"][aria-label="Chat composer"]',
   semanticComposerRegion:

@@ -192,6 +192,25 @@ describe("ChatGptAdapter prompt operations", () => {
     });
   });
 
+  it("detects ChatGPT attachment removal controls with dynamic labels", () => {
+    renderFixture(`
+      <form>
+        <div id="prompt-textarea" contenteditable="true" role="textbox"></div>
+        <button aria-label="Remove file 1: pasted-content.txt" type="button">
+          Remove
+        </button>
+        <button data-testid="send-button" aria-label="Send prompt">Send</button>
+      </form>
+    `);
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    if (context === null) throw new Error("Expected submission context.");
+
+    expect(adapter.inspectSubmissionCapabilities(context)).toEqual({
+      hasUnsupportedAttachment: true,
+    });
+  });
+
   it.each(["before", "after"] as const)(
     "detects multiple attachment chips %s the form in the owned root",
     (position) => {

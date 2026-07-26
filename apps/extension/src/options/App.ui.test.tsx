@@ -16,6 +16,43 @@ const settings = {
 };
 
 describe("options App", () => {
+  it("normalizes legacy redact settings to visible fail-safe actions", async () => {
+    const user = userEvent.setup();
+    const legacySettings = {
+      ...settings,
+      emailAction: "redact" as const,
+      phoneAction: "redact" as const,
+    };
+    const sendMessage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        type: "settings.result",
+        envelope: { schemaVersion: 1, settings: legacySettings },
+      })
+      .mockImplementation(async (request: unknown) => {
+        const candidate = request as { settings: typeof settings };
+        return {
+          type: "settings.saved",
+          envelope: { schemaVersion: 1, settings: candidate.settings },
+        };
+      });
+
+    render(<App runtime={{ sendMessage }} />);
+
+    expect(await screen.findByLabelText("Email action")).toHaveValue("warn");
+    expect(screen.getByLabelText("Phone action")).toHaveValue("warn");
+    await user.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(sendMessage).toHaveBeenLastCalledWith({
+      type: "settings.save",
+      settings: {
+        ...settings,
+        emailAction: "warn",
+        phoneAction: "warn",
+      },
+    });
+  });
+
   it("exposes only Milestone 1 settings and saves normalized values", async () => {
     const user = userEvent.setup();
     const sendMessage = vi

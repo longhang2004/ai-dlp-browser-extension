@@ -15,6 +15,10 @@ import {
 
 const SETTINGS_ACTIONS = POLICY_ACTIONS.filter((action) => action !== "redact");
 
+function toVisibleSettingsAction(action: PolicyAction): PolicyAction {
+  return action === "redact" ? "warn" : action;
+}
+
 type FormState = {
   protectionEnabled: boolean;
   emailAction: PolicyAction;
@@ -35,8 +39,8 @@ const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
 function toFormState(settings: ProtectionSettings): FormState {
   return {
     protectionEnabled: settings.protectionEnabled,
-    emailAction: settings.emailAction,
-    phoneAction: settings.phoneAction,
+    emailAction: toVisibleSettingsAction(settings.emailAction),
+    phoneAction: toVisibleSettingsAction(settings.phoneAction),
     protectedKeywords: settings.protectedKeywords.join("\n"),
     auditRetentionLimit: String(settings.auditRetentionLimit),
   };

@@ -175,10 +175,7 @@ function harness() {
     return adapter;
   });
   const createDialog = vi.fn(
-    (
-      _document: Document,
-      options: { onRenderFailure?: () => void },
-    ) => {
+    (_document: Document, options: { onRenderFailure?: () => void }) => {
       dialogFailure = options.onRenderFailure;
       return dialog;
     },

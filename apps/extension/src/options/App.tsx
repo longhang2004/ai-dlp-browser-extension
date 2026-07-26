@@ -13,9 +13,7 @@ import {
   type ExtensionPageRuntime,
 } from "../ui/page-runtime.js";
 
-const SETTINGS_ACTIONS = POLICY_ACTIONS.filter(
-  (action) => action !== "redact",
-);
+const SETTINGS_ACTIONS = POLICY_ACTIONS.filter((action) => action !== "redact");
 
 type FormState = {
   protectionEnabled: boolean;

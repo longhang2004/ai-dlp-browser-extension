@@ -234,9 +234,7 @@ export function createSettingsPortManager(options: {
           recentEventCount: count,
         };
       }
-      if (
-        current.some((status) => status.state === "waiting_for_composer")
-      ) {
+      if (current.some((status) => status.state === "waiting_for_composer")) {
         return {
           state: "waiting_for_composer",
           application: "chatgpt",

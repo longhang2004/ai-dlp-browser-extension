@@ -142,9 +142,9 @@ describe("ChatGptAdapter prompt operations", () => {
     if (context === null) throw new Error("Expected context.");
     const inspect = (
       adapter as unknown as {
-        inspectSubmissionCapabilities(
-          value: LiveSubmissionContext,
-        ): { hasUnsupportedAttachment: boolean };
+        inspectSubmissionCapabilities(value: LiveSubmissionContext): {
+          hasUnsupportedAttachment: boolean;
+        };
       }
     ).inspectSubmissionCapabilities;
 

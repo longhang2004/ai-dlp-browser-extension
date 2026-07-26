@@ -164,11 +164,7 @@ function findAssociatedSendControl(
     return ariaSend;
   }
   return region.matches(CHATGPT_SELECTORS.semanticRoleFormRegion)
-    ? firstUsable(
-        region,
-        CHATGPT_SELECTORS.nativeSubmit,
-        isUsableSendControl,
-      )
+    ? firstUsable(region, CHATGPT_SELECTORS.nativeSubmit, isUsableSendControl)
     : null;
 }
 

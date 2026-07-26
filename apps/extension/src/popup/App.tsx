@@ -69,9 +69,9 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
           ? "Waiting for validated settings"
           : status.state === "waiting_for_composer"
             ? "Waiting for the ChatGPT composer"
-          : status.state === "unavailable"
-            ? "No protected ChatGPT tab is reporting"
-            : "ChatGPT · local inspection only"}
+            : status.state === "unavailable"
+              ? "No protected ChatGPT tab is reporting"
+              : "ChatGPT · local inspection only"}
       </p>
       <p className="muted">
         {status.recentEventCount} recent protection events

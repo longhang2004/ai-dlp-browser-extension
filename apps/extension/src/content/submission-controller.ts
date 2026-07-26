@@ -171,8 +171,7 @@ function capturePromptSynchronously(
     return {
       kind: "ready",
       prompt: adapter.readPrompt(context),
-      replacementCapability:
-        adapter.getPromptReplacementCapability(context),
+      replacementCapability: adapter.getPromptReplacementCapability(context),
     };
   } catch {
     return { kind: "error", errorCode: "extension_context_invalidated" };

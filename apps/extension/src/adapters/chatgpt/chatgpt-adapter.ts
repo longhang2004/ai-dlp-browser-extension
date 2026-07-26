@@ -194,11 +194,8 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   #interceptorDisposer: (() => void) | null = null;
   #observer: MutationObserver | null = null;
   #healthCheckQueued = false;
-  #lastHealth:
-    | "waiting_for_composer"
-    | "healthy"
-    | AdapterHealthCode
-    | null = null;
+  #lastHealth: "waiting_for_composer" | "healthy" | AdapterHealthCode | null =
+    null;
   #healthGraceTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #healthGracePeriodMs: number;
   #resumeInProgress = false;

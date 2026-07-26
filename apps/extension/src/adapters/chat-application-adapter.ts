@@ -5,6 +5,7 @@ export type SubmitInterceptionDisposition = "pass_through" | "intercept";
 export type CapturedSubmitAttempt = {
   id: string;
   source: SubmitSource;
+  contextIdentity: number;
   initialContextVersion: number;
 };
 
@@ -12,6 +13,7 @@ export type LiveSubmissionContext = {
   composer: HTMLElement;
   sendControl: HTMLElement;
   applicationUrl: URL;
+  contextIdentity: number;
   contextVersion: number;
 };
 
@@ -48,6 +50,9 @@ export interface ChatApplicationAdapter {
 
   matches(url: URL): boolean;
   resolveCurrentSubmissionContext(): LiveSubmissionContext | null;
+  resolveSubmissionContext(
+    contextIdentity: number,
+  ): LiveSubmissionContext | null;
   inspectSubmissionCapabilities(
     context: LiveSubmissionContext,
   ): SubmissionContentCapabilities;

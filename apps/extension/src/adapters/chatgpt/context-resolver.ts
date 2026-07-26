@@ -19,6 +19,14 @@ export type SubmissionResolutionDiagnosis =
   | { context: ResolvedSubmissionElements; healthCode: null }
   | { context: null; healthCode: AdapterHealthCode };
 
+export type TargetSubmissionResolution =
+  | { kind: "resolved"; context: ResolvedSubmissionElements }
+  | {
+      kind: "strong_candidate_unresolved";
+      healthCode: AdapterHealthCode;
+    }
+  | { kind: "not_a_submission_candidate" };
+
 function isElementVisible(element: HTMLElement): boolean {
   let current: HTMLElement | null = element;
   while (current !== null) {
@@ -184,6 +192,94 @@ function strategyFor(selectorIndex: number): SubmissionResolutionStrategy {
   return "stable_data_composer";
 }
 
+function strategyForComposer(
+  composer: HTMLElement,
+): SubmissionResolutionStrategy {
+  const selectorIndex = ORDERED_COMPOSER_SELECTORS.findIndex((selector) =>
+    composer.matches(selector),
+  );
+  return strategyFor(
+    selectorIndex < 0 ? ORDERED_COMPOSER_SELECTORS.length : selectorIndex,
+  );
+}
+
+function closestStrongComposer(target: Element): HTMLElement | null {
+  const candidate = target.closest(ORDERED_COMPOSER_SELECTORS.join(", "));
+  return candidate instanceof HTMLElement ? candidate : null;
+}
+
+export function resolveComposerSubmissionFromTarget(
+  document: Document,
+  target: Element,
+): TargetSubmissionResolution {
+  const composer = closestStrongComposer(target);
+  if (composer === null) {
+    return { kind: "not_a_submission_candidate" };
+  }
+  if (!isUsableComposer(composer)) {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "unsupported_dom_variant",
+    };
+  }
+  const sendControl = findAssociatedSendControl(document, composer);
+  if (sendControl === null) {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "send_control_not_found",
+    };
+  }
+  return {
+    kind: "resolved",
+    context: {
+      composer,
+      sendControl,
+      strategy: strategyForComposer(composer),
+    },
+  };
+}
+
+export function resolveSendSubmissionFromTarget(
+  document: Document,
+  target: Element,
+): TargetSubmissionResolution {
+  const sendCandidate = target.closest(CHATGPT_SELECTORS.knownSendCandidate);
+  if (!(sendCandidate instanceof HTMLElement)) {
+    return { kind: "not_a_submission_candidate" };
+  }
+  if (!isUsableSendControl(sendCandidate)) {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "send_control_not_found",
+    };
+  }
+
+  let sawAssociatedComposerCandidate = false;
+  for (const selector of ORDERED_COMPOSER_SELECTORS) {
+    for (const candidate of document.querySelectorAll(selector)) {
+      if (!(candidate instanceof HTMLElement)) continue;
+      const associatedSend = findAssociatedSendControl(document, candidate);
+      if (associatedSend !== sendCandidate) continue;
+      sawAssociatedComposerCandidate = true;
+      if (!isUsableComposer(candidate)) continue;
+      return {
+        kind: "resolved",
+        context: {
+          composer: candidate,
+          sendControl: sendCandidate,
+          strategy: strategyForComposer(candidate),
+        },
+      };
+    }
+  }
+  return {
+    kind: "strong_candidate_unresolved",
+    healthCode: sawAssociatedComposerCandidate
+      ? "unsupported_dom_variant"
+      : "composer_not_found",
+  };
+}
+
 export function diagnoseSubmissionElements(
   document: Document,
 ): SubmissionResolutionDiagnosis {
@@ -239,7 +335,11 @@ export function isSubmissionContextUsable(
   ) {
     return false;
   }
-  const current = resolveSubmissionElements(document);
+  const resolution = resolveComposerSubmissionFromTarget(
+    document,
+    context.composer,
+  );
+  const current = resolution.kind === "resolved" ? resolution.context : null;
   return (
     current?.composer === context.composer &&
     current.sendControl === context.sendControl

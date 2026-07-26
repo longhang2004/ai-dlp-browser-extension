@@ -17,8 +17,11 @@ import {
   diagnoseSubmissionElements,
   isSubmissionContextUsable,
   isUsableComposer,
+  resolveComposerSubmissionFromTarget,
+  resolveSendSubmissionFromTarget,
+  type ResolvedSubmissionElements,
 } from "./context-resolver.js";
-import { CHATGPT_SELECTORS, ORDERED_COMPOSER_SELECTORS } from "./selectors.js";
+import { CHATGPT_SELECTORS } from "./selectors.js";
 
 export type AdapterHealthTransition =
   | { status: "waiting_for_composer" }
@@ -188,7 +191,9 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   #onAdapterError: ((error: ChatGptAdapterError) => void) | null;
   #contextVersion = 0;
   #lastApplicationLocation: string | null = null;
-  #lastComposer: WeakRef<HTMLElement> | null = null;
+  #composerIdentities: WeakMap<HTMLElement, number> | null = new WeakMap();
+  #identityComposers = new Map<number, WeakRef<HTMLElement>>();
+  #identitySequence = 0;
   #attemptSequence = 0;
   #interceptor: SubmitInterceptor | null = null;
   #interceptorDisposer: (() => void) | null = null;
@@ -225,7 +230,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       retainsUrlReader: this.#getCurrentUrl !== null,
       retainsHealthReporter: this.#onHealthTransition !== null,
       retainsErrorReporter: this.#onAdapterError !== null,
-      retainsComposerIdentity: this.#lastComposer !== null,
+      retainsComposerIdentity: this.#identityComposers.size > 0,
       retainsInterceptor: this.#interceptor !== null,
       retainsDisposer: this.#interceptorDisposer !== null,
       retainsObserver: this.#observer !== null,
@@ -247,13 +252,36 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     if (resolved === null) {
       return null;
     }
-    this.#updateContextIdentity(applicationUrl, resolved.composer);
-    return {
-      composer: resolved.composer,
-      sendControl: resolved.sendControl,
-      applicationUrl,
-      contextVersion: this.#contextVersion,
-    };
+    return this.#createLiveContext(applicationUrl, resolved);
+  }
+
+  resolveSubmissionContext(
+    contextIdentity: number,
+  ): LiveSubmissionContext | null {
+    if (this.#disposed || !Number.isSafeInteger(contextIdentity)) {
+      return null;
+    }
+    const composer = this.#identityComposers.get(contextIdentity)?.deref();
+    if (composer === undefined || !composer.isConnected) {
+      this.#identityComposers.delete(contextIdentity);
+      return null;
+    }
+    const applicationUrl = this.#currentUrl();
+    if (!this.matches(applicationUrl)) {
+      return null;
+    }
+    const resolution = resolveComposerSubmissionFromTarget(
+      this.#requireDocument(),
+      composer,
+    );
+    if (
+      resolution.kind !== "resolved" ||
+      resolution.context.composer !== composer
+    ) {
+      return null;
+    }
+    const context = this.#createLiveContext(applicationUrl, resolution.context);
+    return context.contextIdentity === contextIdentity ? context : null;
   }
 
   readPrompt(context: LiveSubmissionContext): string {
@@ -374,7 +402,8 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#observer = null;
     this.#interceptor = null;
     this.#interceptorDisposer = null;
-    this.#lastComposer = null;
+    this.#composerIdentities = null;
+    this.#identityComposers.clear();
     this.#lastApplicationLocation = null;
     this.#lastHealth = null;
     this.#healthCheckQueued = false;
@@ -394,24 +423,27 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     if (target === null || !this.matches(this.#currentUrl())) {
       return;
     }
-    const context = this.resolveCurrentSubmissionContext();
-    const currentSend = context?.sendControl ?? null;
-    const isCurrentSend =
-      currentSend !== null &&
-      (target === currentSend || currentSend.contains(target));
-    const isKnownUnresolvedSend =
-      context === null &&
-      target.closest(CHATGPT_SELECTORS.knownSendCandidate) !== null;
-    if (!isCurrentSend && !isKnownUnresolvedSend) {
+    const resolution = resolveSendSubmissionFromTarget(
+      this.#requireDocument(),
+      target,
+    );
+    if (resolution.kind === "not_a_submission_candidate") {
       return;
     }
-    if (isKnownUnresolvedSend) {
-      this.#runHealthCheck(true);
+    if (resolution.kind === "strong_candidate_unresolved") {
+      this.#reportTargetResolutionFailure(resolution.healthCode);
+      this.#capture(event, "click", 0, this.#contextVersion);
+      return;
     }
+    const context = this.#createLiveContext(
+      this.#currentUrl(),
+      resolution.context,
+    );
     this.#capture(
       event,
       "click",
-      context?.contextVersion ?? this.#contextVersion,
+      context.contextIdentity,
+      context.contextVersion,
     );
   };
 
@@ -428,30 +460,34 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     if (target === null) {
       return;
     }
-    const context = this.resolveCurrentSubmissionContext();
-    const currentComposer = context?.composer ?? null;
-    const isCurrentComposer =
-      currentComposer !== null &&
-      (target === currentComposer || currentComposer.contains(target));
-    const unresolvedComposer =
-      context === null &&
-      target.closest(ORDERED_COMPOSER_SELECTORS.join(", ")) !== null;
-    if (!isCurrentComposer && !unresolvedComposer) {
+    const resolution = resolveComposerSubmissionFromTarget(
+      this.#requireDocument(),
+      target,
+    );
+    if (resolution.kind === "not_a_submission_candidate") {
       return;
     }
-    if (unresolvedComposer) {
-      this.#runHealthCheck(true);
+    if (resolution.kind === "strong_candidate_unresolved") {
+      this.#reportTargetResolutionFailure(resolution.healthCode);
+      this.#capture(event, "enter", 0, this.#contextVersion);
+      return;
     }
+    const context = this.#createLiveContext(
+      this.#currentUrl(),
+      resolution.context,
+    );
     this.#capture(
       event,
       "enter",
-      context?.contextVersion ?? this.#contextVersion,
+      context.contextIdentity,
+      context.contextVersion,
     );
   };
 
   #capture(
     event: MouseEvent | KeyboardEvent,
     source: CapturedSubmitAttempt["source"],
+    contextIdentity: number,
     initialContextVersion: number,
   ): void {
     const interceptor = this.#interceptor;
@@ -464,6 +500,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       disposition = interceptor({
         id: `chatgpt-submit-${this.#attemptSequence.toString(10)}`,
         source,
+        contextIdentity,
         initialContextVersion,
       });
     } catch {
@@ -486,9 +523,10 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     ) {
       throw new ChatGptAdapterError("prompt_context_invalid");
     }
-    const current = this.resolveCurrentSubmissionContext();
+    const current = this.resolveSubmissionContext(context.contextIdentity);
     if (
       current === null ||
+      current.contextIdentity !== context.contextIdentity ||
       current.composer !== context.composer ||
       current.sendControl !== context.sendControl ||
       current.contextVersion !== context.contextVersion
@@ -530,7 +568,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     ) {
       return false;
     }
-    const current = this.resolveCurrentSubmissionContext();
+    const current = this.resolveSubmissionContext(context.contextIdentity);
     return (
       current !== null &&
       current.composer === context.composer &&
@@ -539,17 +577,43 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     );
   }
 
-  #updateContextIdentity(applicationUrl: URL, composer: HTMLElement): void {
+  #updateNavigationVersion(applicationUrl: URL): void {
     const location = `${applicationUrl.origin}${applicationUrl.pathname}${applicationUrl.search}${applicationUrl.hash}`;
     if (this.#contextVersion === 0) {
       this.#contextVersion = 1;
     } else if (this.#lastApplicationLocation !== location) {
       this.#contextVersion += 1;
-    } else if (this.#lastComposer?.deref() !== composer) {
-      this.#contextVersion += 1;
     }
     this.#lastApplicationLocation = location;
-    this.#lastComposer = new WeakRef(composer);
+  }
+
+  #identityFor(composer: HTMLElement): number {
+    const identities = this.#composerIdentities;
+    if (identities === null) {
+      throw new ChatGptAdapterError("adapter_disposed");
+    }
+    const existing = identities.get(composer);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const identity = ++this.#identitySequence;
+    identities.set(composer, identity);
+    this.#identityComposers.set(identity, new WeakRef(composer));
+    return identity;
+  }
+
+  #createLiveContext(
+    applicationUrl: URL,
+    resolved: ResolvedSubmissionElements,
+  ): LiveSubmissionContext {
+    this.#updateNavigationVersion(applicationUrl);
+    return {
+      composer: resolved.composer,
+      sendControl: resolved.sendControl,
+      applicationUrl,
+      contextIdentity: this.#identityFor(resolved.composer),
+      contextVersion: this.#contextVersion,
+    };
   }
 
   #startHealthObserver(): void {
@@ -608,10 +672,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     const diagnosis = diagnoseSubmissionElements(this.#requireDocument());
     if (diagnosis.context !== null) {
       this.#clearHealthGrace();
-      this.#updateContextIdentity(
-        this.#currentUrl(),
-        diagnosis.context.composer,
-      );
+      this.#updateNavigationVersion(this.#currentUrl());
       if (this.#lastHealth !== "healthy") {
         this.#lastHealth = "healthy";
         this.#onHealthTransition?.({ status: "healthy" });
@@ -648,6 +709,18 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
         }
       }, this.#healthGracePeriodMs);
     }
+  }
+
+  #reportTargetResolutionFailure(healthCode: AdapterHealthCode): void {
+    this.#clearHealthGrace();
+    if (this.#lastHealth === healthCode) {
+      return;
+    }
+    this.#lastHealth = healthCode;
+    this.#onHealthTransition?.({
+      status: "degraded",
+      healthCode,
+    });
   }
 
   #clearHealthGrace(): void {

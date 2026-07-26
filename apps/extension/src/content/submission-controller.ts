@@ -150,10 +150,11 @@ function capturePromptSynchronously(
     }
   | { kind: "error"; errorCode: EnforcementErrorCode } {
   try {
-    const context = adapter.resolveCurrentSubmissionContext();
+    const context = adapter.resolveSubmissionContext(attempt.contextIdentity);
     if (
       context === null ||
       !adapter.matches(context.applicationUrl) ||
+      context.contextIdentity !== attempt.contextIdentity ||
       context.contextVersion !== attempt.initialContextVersion ||
       !isElementConnected(context.composer) ||
       !isSendControlEnabled(context.sendControl)
@@ -347,10 +348,13 @@ export function createSubmissionController(
     | { kind: "error"; errorCode: EnforcementErrorCode } {
     let context: LiveSubmissionContext | null;
     try {
-      context = options.adapter.resolveCurrentSubmissionContext();
+      context = options.adapter.resolveSubmissionContext(
+        attempt.attempt.contextIdentity,
+      );
       if (
         context === null ||
         !options.adapter.matches(context.applicationUrl) ||
+        context.contextIdentity !== attempt.attempt.contextIdentity ||
         context.contextVersion !== attempt.attempt.initialContextVersion ||
         !isElementConnected(context.composer) ||
         !isSendControlEnabled(context.sendControl) ||
@@ -609,6 +613,7 @@ export function createSubmissionController(
       attempt: {
         id: captured.id,
         source: captured.source,
+        contextIdentity: captured.contextIdentity,
         initialContextVersion: captured.initialContextVersion,
       },
       generation,

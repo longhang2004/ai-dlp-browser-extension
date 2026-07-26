@@ -17,7 +17,7 @@
     "test:browser": "pnpm build && playwright test",
     "test:e2e": "playwright test",
     "test:performance": "vitest run --project performance --disableConsoleIntercept",
-    "test": "pnpm test:unit",
+    "test": "pnpm test:unit && node --test scripts/ci-workflow-rules.test.mjs",
     "build": "pnpm --filter @ai-dlp/extension build",
     "verify:artifact": "node --test scripts/artifact-security-rules.test.mjs && node scripts/verify-production-artifact.mjs"
   },

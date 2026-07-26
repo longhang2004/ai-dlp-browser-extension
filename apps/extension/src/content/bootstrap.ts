@@ -100,6 +100,7 @@ export function bootstrapContent(options: {
   let controller: SubmissionController | null = null;
   let unregister: (() => void) | null = null;
   let adapterDegraded = false;
+  let adapterWaiting = false;
   let disposed = false;
 
   function sendAudit(event: AuditEvent): void {
@@ -133,7 +134,11 @@ export function bootstrapContent(options: {
       return;
     }
     publish({
-      state: adapterDegraded ? "degraded" : "active",
+      state: adapterDegraded
+        ? "degraded"
+        : adapterWaiting
+          ? "waiting_for_composer"
+          : "active",
       application: "chatgpt",
       protectionEnabled: true,
     });
@@ -145,12 +150,20 @@ export function bootstrapContent(options: {
     >[0],
   ): void {
     if (disposed) return;
+    if (transition.status === "waiting_for_composer") {
+      adapterDegraded = false;
+      adapterWaiting = true;
+      publishReadyStatus();
+      return;
+    }
     if (transition.status === "healthy") {
       adapterDegraded = false;
+      adapterWaiting = false;
       publishReadyStatus();
       return;
     }
     adapterDegraded = true;
+    adapterWaiting = false;
     sendAudit({
       kind: "adapter_health",
       id: createAuditEventId(eventId()),
@@ -280,6 +293,7 @@ export function bootstrapContent(options: {
     dialog = null;
     adapter = null;
     adapterDegraded = false;
+    adapterWaiting = false;
   }
 
   const cache = createSettingsCache({

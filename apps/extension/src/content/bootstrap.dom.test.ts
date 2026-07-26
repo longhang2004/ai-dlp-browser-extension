@@ -347,6 +347,24 @@ describe("content bootstrap", () => {
     await Promise.resolve();
   });
 
+  it("reports waiting without a health audit until composer health is confirmed", () => {
+    const h = harness();
+    h.firstPort.emitMessage(settingsSnapshot());
+    h.getAdapterOptions()?.onHealthTransition?.({
+      status: "waiting_for_composer",
+    });
+
+    expect(h.content.getStatus()).toEqual({
+      state: "waiting_for_composer",
+      application: "chatgpt",
+      protectionEnabled: true,
+    });
+    expect(h.runtime.sendMessage).not.toHaveBeenCalled();
+
+    h.getAdapterOptions()?.onHealthTransition?.({ status: "healthy" });
+    expect(h.content.getStatus().state).toBe("active");
+  });
+
   it("fails safe on interceptor errors even when audit and guidance reporters fail", async () => {
     const h = harness();
     h.firstPort.emitMessage(settingsSnapshot());

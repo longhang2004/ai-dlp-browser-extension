@@ -64,6 +64,7 @@ afterEach(() => {
   }
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("ChatGptAdapter prompt operations", () => {
@@ -195,6 +196,7 @@ describe("ChatGptAdapter prompt operations", () => {
       retainsInterceptor: false,
       retainsDisposer: false,
       retainsObserver: false,
+      retainsHealthTimer: false,
       resumeInProgress: false,
     });
   });
@@ -410,20 +412,19 @@ describe("ChatGptAdapter interception", () => {
   });
 
   it("recovers from delayed rendering and intercepts the newly available composer", async () => {
+    vi.useFakeTimers();
     const transitions: AdapterHealthTransition[] = [];
     const handler = vi.fn(() => "intercept" as const);
     const adapter = createAdapter({
       onHealthTransition: (transition) => transitions.push(transition),
     });
     adapter.registerSubmitInterceptor(handler);
-    expect(transitions).toContainEqual({
-      status: "degraded",
-      healthCode: "composer_not_found",
-    });
+    expect(transitions).toEqual([{ status: "waiting_for_composer" }]);
 
     renderFixture(CONTENTEDITABLE_COMPOSER_FIXTURE);
     await Promise.resolve();
     await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
     const send = document.querySelector("button");
     const click = new MouseEvent("click", { bubbles: true, cancelable: true });
     send?.dispatchEvent(click);
@@ -431,6 +432,31 @@ describe("ChatGptAdapter interception", () => {
     expect(transitions).toContainEqual({ status: "healthy" });
     expect(click.defaultPrevented).toBe(true);
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits through a grace period before one coalesced degradation", async () => {
+    vi.useFakeTimers();
+    const transitions: AdapterHealthTransition[] = [];
+    const adapter = createAdapter({
+      onHealthTransition: (transition) => transitions.push(transition),
+    });
+    adapter.registerSubmitInterceptor(() => "intercept");
+
+    expect(transitions).toEqual([{ status: "waiting_for_composer" }]);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(transitions).toEqual([{ status: "waiting_for_composer" }]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transitions).toEqual([
+      { status: "waiting_for_composer" },
+      { status: "degraded", healthCode: "composer_not_found" },
+    ]);
+    document.body.append(document.createElement("div"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(
+      transitions.filter((transition) => transition.status === "degraded"),
+    ).toHaveLength(1);
   });
 
   it("does not install duplicate listeners and disposes all interception", () => {
@@ -633,6 +659,7 @@ describe("ChatGptAdapter dynamic context and resume", () => {
 
 describe("ChatGptAdapter health privacy", () => {
   it("reports prompt-free fixed health transitions and coalesces degradation", async () => {
+    vi.useFakeTimers();
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const transitions: AdapterHealthTransition[] = [];
     const adapter = createAdapter({
@@ -648,6 +675,7 @@ describe("ChatGptAdapter health privacy", () => {
     context.composer.remove();
     await Promise.resolve();
     await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
 
     expect(transitions).toContainEqual({
       status: "degraded",
@@ -657,6 +685,7 @@ describe("ChatGptAdapter health privacy", () => {
   });
 
   it("rechecks health for style and class-based visibility changes without class selectors", async () => {
+    vi.useFakeTimers();
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const transitions: AdapterHealthTransition[] = [];
     const adapter = createAdapter({
@@ -672,6 +701,7 @@ describe("ChatGptAdapter health privacy", () => {
     composer.style.display = "none";
     await Promise.resolve();
     await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(transitions.at(-1)).toEqual({
       status: "degraded",
       healthCode: "unsupported_dom_variant",
@@ -683,11 +713,13 @@ describe("ChatGptAdapter health privacy", () => {
     composer.style.removeProperty("display");
     await Promise.resolve();
     await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(transitions.at(-1)).toEqual({ status: "healthy" });
 
     composer.className = "fixture-hidden";
     await Promise.resolve();
     await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(transitions.at(-1)).toEqual({
       status: "degraded",
       healthCode: "unsupported_dom_variant",

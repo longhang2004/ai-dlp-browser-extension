@@ -21,7 +21,9 @@ import {
 import { CHATGPT_SELECTORS, ORDERED_COMPOSER_SELECTORS } from "./selectors.js";
 
 export type AdapterHealthTransition =
-  { status: "healthy" } | { status: "degraded"; healthCode: AdapterHealthCode };
+  | { status: "waiting_for_composer" }
+  | { status: "healthy" }
+  | { status: "degraded"; healthCode: AdapterHealthCode };
 
 export const CHATGPT_ADAPTER_ERROR_CODES = Object.freeze([
   "adapter_disposed",
@@ -65,6 +67,7 @@ export type ChatGptAdapterOptions = {
   getCurrentUrl?: () => URL;
   onHealthTransition?: (transition: AdapterHealthTransition) => void;
   onAdapterError?: (error: ChatGptAdapterError) => void;
+  healthGracePeriodMs?: number;
 };
 
 export type ChatGptAdapterDiagnostics = {
@@ -78,6 +81,7 @@ export type ChatGptAdapterDiagnostics = {
   retainsInterceptor: boolean;
   retainsDisposer: boolean;
   retainsObserver: boolean;
+  retainsHealthTimer: boolean;
   resumeInProgress: boolean;
 };
 
@@ -190,7 +194,13 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   #interceptorDisposer: (() => void) | null = null;
   #observer: MutationObserver | null = null;
   #healthCheckQueued = false;
-  #lastHealth: "healthy" | AdapterHealthCode | null = null;
+  #lastHealth:
+    | "waiting_for_composer"
+    | "healthy"
+    | AdapterHealthCode
+    | null = null;
+  #healthGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly #healthGracePeriodMs: number;
   #resumeInProgress = false;
   #disposed = false;
 
@@ -202,6 +212,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
         new URL(options.document.defaultView?.location.href ?? "about:blank"));
     this.#onHealthTransition = options.onHealthTransition ?? null;
     this.#onAdapterError = options.onAdapterError ?? null;
+    this.#healthGracePeriodMs = options.healthGracePeriodMs ?? 1_000;
   }
 
   matches(url: URL): boolean {
@@ -221,6 +232,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       retainsInterceptor: this.#interceptor !== null,
       retainsDisposer: this.#interceptorDisposer !== null,
       retainsObserver: this.#observer !== null,
+      retainsHealthTimer: this.#healthGraceTimer !== null,
       resumeInProgress: this.#resumeInProgress,
     };
   }
@@ -361,6 +373,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     }
     this.#interceptorDisposer?.();
     this.#observer?.disconnect();
+    this.#clearHealthGrace();
     this.#observer = null;
     this.#interceptor = null;
     this.#interceptorDisposer = null;
@@ -395,6 +408,9 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     if (!isCurrentSend && !isKnownUnresolvedSend) {
       return;
     }
+    if (isKnownUnresolvedSend) {
+      this.#runHealthCheck(true);
+    }
     this.#capture(
       event,
       "click",
@@ -425,6 +441,9 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       target.closest(ORDERED_COMPOSER_SELECTORS.join(", ")) !== null;
     if (!isCurrentComposer && !unresolvedComposer) {
       return;
+    }
+    if (unresolvedComposer) {
+      this.#runHealthCheck(true);
     }
     this.#capture(
       event,
@@ -497,6 +516,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#document?.removeEventListener("click", this.#onClick, true);
     this.#document?.removeEventListener("keydown", this.#onKeyDown, true);
     this.#observer?.disconnect();
+    this.#clearHealthGrace();
     this.#observer = null;
     this.#interceptor = null;
     this.#interceptorDisposer = null;
@@ -587,9 +607,10 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     });
   }
 
-  #runHealthCheck(): void {
+  #runHealthCheck(forceDegraded = false): void {
     const diagnosis = diagnoseSubmissionElements(this.#requireDocument());
     if (diagnosis.context !== null) {
+      this.#clearHealthGrace();
       this.#updateContextIdentity(
         this.#currentUrl(),
         diagnosis.context.composer,
@@ -600,13 +621,44 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       }
       return;
     }
-    if (this.#lastHealth !== diagnosis.healthCode) {
-      this.#lastHealth = diagnosis.healthCode;
-      this.#onHealthTransition?.({
-        status: "degraded",
-        healthCode: diagnosis.healthCode,
-      });
+    if (forceDegraded) {
+      this.#clearHealthGrace();
+      if (this.#lastHealth !== diagnosis.healthCode) {
+        this.#lastHealth = diagnosis.healthCode;
+        this.#onHealthTransition?.({
+          status: "degraded",
+          healthCode: diagnosis.healthCode,
+        });
+      }
+      return;
     }
+    if (
+      this.#lastHealth !== null &&
+      this.#lastHealth !== "healthy" &&
+      this.#lastHealth !== "waiting_for_composer"
+    ) {
+      return;
+    }
+    if (this.#lastHealth !== "waiting_for_composer") {
+      this.#lastHealth = "waiting_for_composer";
+      this.#onHealthTransition?.({ status: "waiting_for_composer" });
+    }
+    if (this.#healthGraceTimer === null) {
+      this.#healthGraceTimer = setTimeout(() => {
+        this.#healthGraceTimer = null;
+        if (!this.#disposed && this.#interceptor !== null) {
+          this.#runHealthCheck(true);
+        }
+      }, this.#healthGracePeriodMs);
+    }
+  }
+
+  #clearHealthGrace(): void {
+    if (this.#healthGraceTimer === null) {
+      return;
+    }
+    clearTimeout(this.#healthGraceTimer);
+    this.#healthGraceTimer = null;
   }
 
   #requireDocument(): Document {

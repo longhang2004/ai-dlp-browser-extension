@@ -14,6 +14,7 @@ describe("popup App", () => {
   it.each([
     ["initializing", "Protection is initializing"],
     ["active", "Protection is active"],
+    ["waiting_for_composer", "Protection is waiting for ChatGPT"],
     ["disabled", "Protection is disabled"],
     ["degraded", "Protection is degraded"],
     ["unavailable", "Protection is unavailable"],
@@ -26,7 +27,9 @@ describe("popup App", () => {
             state,
             application: "chatgpt",
             protectionEnabled:
-              state === "active" || state === "degraded"
+              state === "active" ||
+              state === "degraded" ||
+              state === "waiting_for_composer"
                 ? true
                 : state === "disabled"
                   ? false

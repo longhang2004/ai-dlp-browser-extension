@@ -2,6 +2,7 @@ import type { PromptFreeBoundary } from "./privacy.js";
 
 export const PROTECTION_STATUSES = Object.freeze([
   "initializing",
+  "waiting_for_composer",
   "active",
   "disabled",
   "degraded",
@@ -21,7 +22,7 @@ export type ProtectionStatusSnapshot =
       protectionEnabled: null;
     })
   | (StatusSnapshotBase & {
-      state: "active" | "degraded";
+      state: "waiting_for_composer" | "active" | "degraded";
       protectionEnabled: true;
     })
   | (StatusSnapshotBase & {
@@ -36,7 +37,7 @@ export type ContentProtectionStatus =
       protectionEnabled: null;
     })
   | (PromptFreeBoundary & {
-      state: "active" | "degraded";
+      state: "waiting_for_composer" | "active" | "degraded";
       application: "chatgpt";
       protectionEnabled: true;
     })

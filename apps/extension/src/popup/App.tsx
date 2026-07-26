@@ -9,6 +9,7 @@ import {
 
 const STATUS_COPY = {
   initializing: "Protection is initializing",
+  waiting_for_composer: "Protection is waiting for ChatGPT",
   active: "Protection is active",
   disabled: "Protection is disabled",
   degraded: "Protection is degraded",
@@ -66,6 +67,8 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
       <p className={`status-pill status-${status.state}`}>
         {status.state === "initializing"
           ? "Waiting for validated settings"
+          : status.state === "waiting_for_composer"
+            ? "Waiting for the ChatGPT composer"
           : status.state === "unavailable"
             ? "No protected ChatGPT tab is reporting"
             : "ChatGPT · local inspection only"}

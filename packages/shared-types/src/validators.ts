@@ -734,6 +734,7 @@ function isProtectionStatusSnapshotValue(
         return value.protectionEnabled === null;
       case "active":
       case "degraded":
+      case "waiting_for_composer":
         return value.protectionEnabled === true;
       case "disabled":
         return value.protectionEnabled === false;
@@ -765,6 +766,7 @@ function isContentProtectionStatusValue(
         return value.protectionEnabled === null;
       case "active":
       case "degraded":
+      case "waiting_for_composer":
         return value.protectionEnabled === true;
       case "disabled":
         return value.protectionEnabled === false;

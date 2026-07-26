@@ -53,6 +53,9 @@ jobs:
       - name: Unit and DOM tests
         run: pnpm test
 
+      - name: Detector performance tests
+        run: pnpm test:performance
+
       - name: Clean prior build output
         run: rm -rf apps/extension/dist
 

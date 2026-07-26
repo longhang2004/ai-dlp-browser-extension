@@ -17,6 +17,7 @@ test("pins a least-privilege clean CI gate with all security checks", () => {
     "pnpm lint",
     "pnpm typecheck",
     "pnpm test",
+    "pnpm test:performance",
     "pnpm build",
     "pnpm verify:artifact",
     "pnpm test:e2e",

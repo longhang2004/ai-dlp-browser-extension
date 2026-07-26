@@ -63,6 +63,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     composer,
     sendControl,
     applicationUrl: new URL(currentUrl.href),
+    contextIdentity: 1,
     contextVersion,
   });
   let interceptor:
@@ -79,6 +80,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     version: "1",
     matches: (url) => url.origin === "https://chatgpt.com",
     resolveCurrentSubmissionContext: vi.fn(() => context()),
+    resolveSubmissionContext: vi.fn(() => context()),
     inspectSubmissionCapabilities,
     getPromptReplacementCapability,
     readPrompt: vi.fn(() => currentPrompt),
@@ -144,7 +146,12 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     dialog,
     events,
     fire: (id = "attempt-1") =>
-      interceptor?.({ id, source: "click", initialContextVersion: 1 }),
+      interceptor?.({
+        id,
+        source: "click",
+        contextIdentity: 1,
+        initialContextVersion: 1,
+      }),
     prompt: () => currentPrompt,
     setPrompt: (value: string) => {
       currentPrompt = value;
@@ -369,6 +376,7 @@ describe("submission controller", () => {
     const disposition = controller.handleCapturedAttempt({
       id: "large",
       source: "enter",
+      contextIdentity: 1,
       initialContextVersion: 1,
     });
     expect(disposition).toBe("intercept");
@@ -472,19 +480,16 @@ describe("submission controller", () => {
       controller.handleCapturedAttempt({
         id: "disabled",
         source: "click",
+        contextIdentity: 1,
         initialContextVersion: 1,
       }),
     ).toBe("pass_through");
-    expect(
-      harness.adapter.resolveCurrentSubmissionContext,
-    ).not.toHaveBeenCalled();
+    expect(harness.adapter.resolveSubmissionContext).not.toHaveBeenCalled();
   });
 
   it("stops a missing live context with one extension error", async () => {
     const harness = createHarness();
-    vi.mocked(harness.adapter.resolveCurrentSubmissionContext).mockReturnValue(
-      null,
-    );
+    vi.mocked(harness.adapter.resolveSubmissionContext).mockReturnValue(null);
     harness.fire();
     await harness.controller.whenSettledForTesting();
 

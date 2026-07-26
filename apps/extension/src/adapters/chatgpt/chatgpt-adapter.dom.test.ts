@@ -11,8 +11,10 @@ import {
 } from "./chatgpt-adapter.js";
 import {
   CONTENTEDITABLE_COMPOSER_FIXTURE,
+  MULTI_COMPOSER_FIXTURE,
   NATIVE_TEXTAREA_COMPOSER_FIXTURE,
   PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE,
+  REVIEWER_MULTI_COMPOSER_FIXTURE,
 } from "./fixtures.js";
 
 const CHATGPT_URL = new URL("https://chatgpt.com/");
@@ -238,6 +240,125 @@ describe("ChatGptAdapter prompt operations", () => {
 });
 
 describe("ChatGptAdapter interception", () => {
+  it("anchors Enter and Send interception to the second same-priority composer", () => {
+    renderFixture(MULTI_COMPOSER_FIXTURE);
+    const attempts: unknown[] = [];
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const composerB = document.querySelector("#prompt-b");
+    const sendB = document.querySelector("#composer-b button");
+    expect(composerB).not.toBeNull();
+    expect(sendB).not.toBeNull();
+    if (composerB === null || sendB === null) {
+      throw new Error("Missing second composer fixture.");
+    }
+
+    const enter = dispatchEnter(composerB);
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    sendB.dispatchEvent(click);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(click.defaultPrevented).toBe(true);
+    expect(attempts).toHaveLength(2);
+  });
+
+  it("anchors events to reviewer-shaped composer B regardless of selector priority", () => {
+    renderFixture(REVIEWER_MULTI_COMPOSER_FIXTURE);
+    const attempts: unknown[] = [];
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const composerB = document.querySelector("#prompt-textarea");
+    const sendB = document.querySelector("#composer-b button");
+    if (composerB === null || sendB === null) {
+      throw new Error("Missing reviewer multi-composer fixture.");
+    }
+
+    const enter = dispatchEnter(composerB);
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    sendB.dispatchEvent(click);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(click.defaultPrevented).toBe(true);
+    expect(attempts).toHaveLength(2);
+  });
+
+  it("fails closed for unresolved composer B even while composer A is valid", () => {
+    renderFixture(`
+      <section data-testid="composer-root" id="composer-a">
+        <div contenteditable="true" role="textbox" aria-label="Message ChatGPT"></div>
+        <button data-testid="send-button" aria-label="Send prompt">Send A</button>
+      </section>
+      <section data-testid="composer-root" id="composer-b">
+        <div id="prompt-b" contenteditable="true" role="textbox" aria-label="Message ChatGPT"></div>
+      </section>
+    `);
+    const transitions: AdapterHealthTransition[] = [];
+    const adapter = createAdapter({
+      onHealthTransition: (transition) => transitions.push(transition),
+    });
+    const attempts: unknown[] = [];
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const composerB = document.querySelector("#prompt-b");
+    if (composerB === null) throw new Error("Missing composer B.");
+
+    const enter = dispatchEnter(composerB);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(attempts).toEqual([
+      expect.objectContaining({ source: "enter", contextIdentity: 0 }),
+    ]);
+    expect(transitions).toContainEqual({
+      status: "degraded",
+      healthCode: "send_control_not_found",
+    });
+  });
+
+  it("fails closed for unresolved Send B even while composer A is valid", () => {
+    renderFixture(`
+      <section data-testid="composer-root" id="composer-a">
+        <div contenteditable="true" role="textbox" aria-label="Message ChatGPT"></div>
+        <button data-testid="send-button" aria-label="Send prompt">Send A</button>
+      </section>
+      <section data-testid="composer-root" id="composer-b">
+        <button id="send-b" data-testid="send-button" aria-label="Send prompt">Send B</button>
+      </section>
+    `);
+    const adapter = createAdapter();
+    const attempts: unknown[] = [];
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const sendB = document.querySelector("#send-b");
+    if (sendB === null) throw new Error("Missing Send B.");
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    sendB.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(attempts).toEqual([
+      expect.objectContaining({ source: "click", contextIdentity: 0 }),
+    ]);
+  });
+
   it("intercepts production prompt-textarea Enter and Send but ignores tools", () => {
     renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
     const handler = vi.fn(() => "intercept" as const);
@@ -320,8 +441,18 @@ describe("ChatGptAdapter interception", () => {
     expect(click.defaultPrevented).toBe(true);
     expect(enter.defaultPrevented).toBe(true);
     expect(attempts).toEqual([
-      { id: "chatgpt-submit-1", source: "click", initialContextVersion: 1 },
-      { id: "chatgpt-submit-2", source: "enter", initialContextVersion: 1 },
+      {
+        id: "chatgpt-submit-1",
+        source: "click",
+        contextIdentity: 1,
+        initialContextVersion: 1,
+      },
+      {
+        id: "chatgpt-submit-2",
+        source: "enter",
+        contextIdentity: 1,
+        initialContextVersion: 1,
+      },
     ]);
   });
 
@@ -407,6 +538,7 @@ describe("ChatGptAdapter interception", () => {
     expect(handler).toHaveBeenCalledWith({
       id: "chatgpt-submit-1",
       source: "click",
+      contextIdentity: 0,
       initialContextVersion: 0,
     });
   });
@@ -483,11 +615,12 @@ describe("ChatGptAdapter interception", () => {
 });
 
 describe("ChatGptAdapter dynamic context and resume", () => {
-  it("increments context version for composer replacement but not send replacement", async () => {
+  it("changes weak context identity for composer replacement but not send replacement", async () => {
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const adapter = createAdapter();
     const first = adapter.resolveCurrentSubmissionContext();
     expect(first?.contextVersion).toBe(1);
+    expect(first?.contextIdentity).toBe(1);
 
     const send = document.querySelector("button");
     const replacementSend = send?.cloneNode(true);
@@ -496,6 +629,7 @@ describe("ChatGptAdapter dynamic context and resume", () => {
     const second = adapter.resolveCurrentSubmissionContext();
     expect(second?.sendControl).not.toBe(first?.sendControl);
     expect(second?.contextVersion).toBe(1);
+    expect(second?.contextIdentity).toBe(first?.contextIdentity);
 
     const textarea = document.querySelector("textarea");
     const replacementComposer = textarea?.cloneNode(true);
@@ -503,7 +637,9 @@ describe("ChatGptAdapter dynamic context and resume", () => {
       replacementComposer ?? document.createElement("textarea"),
     );
     await Promise.resolve();
-    expect(adapter.resolveCurrentSubmissionContext()?.contextVersion).toBe(2);
+    const third = adapter.resolveCurrentSubmissionContext();
+    expect(third?.contextVersion).toBe(1);
+    expect(third?.contextIdentity).not.toBe(first?.contextIdentity);
   });
 
   it("increments context version when SPA navigation changes the application location", () => {
@@ -632,7 +768,7 @@ describe("ChatGptAdapter dynamic context and resume", () => {
     expect(String(thrown)).not.toContain("selector error sentinel");
   });
 
-  it("rejects connected but non-current prompt contexts for read and replace", () => {
+  it("keeps a connected exact-identity context valid when another composer appears first", () => {
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const adapter = createAdapter();
     const stale = adapter.resolveCurrentSubmissionContext();
@@ -648,12 +784,13 @@ describe("ChatGptAdapter dynamic context and resume", () => {
     document.querySelector("#stale")?.append(staleForm as HTMLFormElement);
     expect(stale.composer.isConnected).toBe(true);
 
-    expect(() => adapter.readPrompt(stale)).toThrowError(
-      expect.objectContaining({ code: "prompt_context_invalid" }),
-    );
-    expect(() => adapter.replacePrompt(stale, "replacement")).toThrowError(
-      expect.objectContaining({ code: "prompt_context_invalid" }),
-    );
+    expect(adapter.readPrompt(stale)).toBe("");
+    expect(
+      adapter.resolveSubmissionContext(stale.contextIdentity),
+    ).toMatchObject({
+      composer: stale.composer,
+      contextIdentity: stale.contextIdentity,
+    });
   });
 });
 

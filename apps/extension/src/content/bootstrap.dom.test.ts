@@ -115,6 +115,9 @@ class FakeAdapter implements ChatApplicationAdapter {
   resolveCurrentSubmissionContext(): LiveSubmissionContext | null {
     return null;
   }
+  resolveSubmissionContext(): LiveSubmissionContext | null {
+    return null;
+  }
   inspectSubmissionCapabilities() {
     return { hasUnsupportedAttachment: false };
   }

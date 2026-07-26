@@ -9,7 +9,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatGptAdapter } from "../adapters/chatgpt/chatgpt-adapter.js";
-import { NATIVE_TEXTAREA_COMPOSER_FIXTURE } from "../adapters/chatgpt/fixtures.js";
+import {
+  MULTI_COMPOSER_FIXTURE,
+  NATIVE_TEXTAREA_COMPOSER_FIXTURE,
+} from "../adapters/chatgpt/fixtures.js";
 import { createProtectionDialogController } from "../ui/protection-dialog/dialog-controller.js";
 import { createSubmissionController } from "./submission-controller.js";
 
@@ -106,6 +109,134 @@ afterEach(() => {
 });
 
 describe("submission controller with the semantic ChatGPT adapter", () => {
+  it("analyzes and resumes only the event-targeted second composer", async () => {
+    const parsed = new DOMParser().parseFromString(
+      MULTI_COMPOSER_FIXTURE,
+      "text/html",
+    );
+    document.body.replaceChildren(...parsed.body.childNodes);
+    const composerA = document.querySelector("#prompt-a");
+    const composerB = document.querySelector("#prompt-b");
+    const sendA = document.querySelector("#composer-a button");
+    const sendB = document.querySelector("#composer-b button");
+    if (
+      !(composerA instanceof HTMLElement) ||
+      !(composerB instanceof HTMLElement) ||
+      !(sendA instanceof HTMLButtonElement) ||
+      !(sendB instanceof HTMLButtonElement)
+    ) {
+      throw new Error("Missing multi-composer fixture.");
+    }
+    composerA.textContent = "person-a@example.com";
+    composerB.textContent = "person-b@example.com";
+    const adapter = new ChatGptAdapter({
+      document,
+      getCurrentUrl: () => new URL("https://chatgpt.com/"),
+    });
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const dialog = {
+      show: vi.fn(
+        () =>
+          new Promise<ProtectionDialogIntent>((resolve) => (settle = resolve)),
+      ),
+      cancel: vi.fn(),
+    };
+    const analyze = vi.fn((prompt: string) => [findingFor(prompt)]);
+    const controller = createSubmissionController({
+      adapter,
+      settings: () => createDefaultProtectionSettings(),
+      dialog,
+      audit: { append: vi.fn() },
+      analyze,
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.email"],
+        reasonCode: "policy_match",
+      }),
+    });
+    controller.register();
+    const sendAClicks = vi.fn();
+    const sendBClicks = vi.fn();
+    sendA.addEventListener("click", sendAClicks);
+    sendB.addEventListener("click", sendBClicks);
+
+    sendB.click();
+    await vi.waitFor(() => expect(dialog.show).toHaveBeenCalledOnce());
+
+    expect(analyze).toHaveBeenCalledWith("person-b@example.com", {
+      protectedKeywords: [],
+    });
+    settle("bypass");
+    await controller.whenSettledForTesting();
+    expect(sendAClicks).not.toHaveBeenCalled();
+    expect(sendBClicks).toHaveBeenCalledOnce();
+
+    controller.dispose();
+    adapter.dispose();
+  });
+
+  it("cannot submit composer A after targeted composer B is replaced", async () => {
+    const parsed = new DOMParser().parseFromString(
+      MULTI_COMPOSER_FIXTURE,
+      "text/html",
+    );
+    document.body.replaceChildren(...parsed.body.childNodes);
+    const composerB = document.querySelector("#prompt-b");
+    const sendA = document.querySelector("#composer-a button");
+    const sendB = document.querySelector("#composer-b button");
+    if (
+      !(composerB instanceof HTMLElement) ||
+      !(sendA instanceof HTMLButtonElement) ||
+      !(sendB instanceof HTMLButtonElement)
+    ) {
+      throw new Error("Missing multi-composer fixture.");
+    }
+    composerB.textContent = "person-b@example.com";
+    const adapter = new ChatGptAdapter({
+      document,
+      getCurrentUrl: () => new URL("https://chatgpt.com/"),
+    });
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const dialog = {
+      show: vi.fn(
+        () =>
+          new Promise<ProtectionDialogIntent>((resolve) => (settle = resolve)),
+      ),
+      cancel: vi.fn(),
+    };
+    const events: AuditEvent[] = [];
+    const controller = createSubmissionController({
+      adapter,
+      settings: () => createDefaultProtectionSettings(),
+      dialog,
+      audit: { append: (event) => void events.push(event) },
+      analyze: (prompt) => [findingFor(prompt)],
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.email"],
+        reasonCode: "policy_match",
+      }),
+    });
+    controller.register();
+    const sendAClicks = vi.fn();
+    const sendBClicks = vi.fn();
+    sendA.addEventListener("click", sendAClicks);
+    sendB.addEventListener("click", sendBClicks);
+    sendB.click();
+    await vi.waitFor(() => expect(dialog.show).toHaveBeenCalledOnce());
+
+    const replacement = composerB.cloneNode(true);
+    composerB.replaceWith(replacement);
+    settle("bypass");
+    await controller.whenSettledForTesting();
+
+    expect(sendAClicks).not.toHaveBeenCalled();
+    expect(sendBClicks).not.toHaveBeenCalled();
+    expect(events[0]).toMatchObject({ resolution: "cancelled" });
+    controller.dispose();
+    adapter.dispose();
+  });
+
   it("stops click and Enter duplicates while one dialog is active, then resumes once", async () => {
     const prompt = "person@example.com";
     const harness = createHarness(prompt);

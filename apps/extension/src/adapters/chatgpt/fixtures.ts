@@ -45,3 +45,66 @@ export const PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE = `
     </form>
   </main>
 `;
+
+export const MULTI_COMPOSER_FIXTURE = `
+  <main>
+    <section data-testid="composer-root" id="composer-a">
+      <div
+        id="prompt-a"
+        contenteditable="true"
+        role="textbox"
+        aria-label="Message ChatGPT"
+      >Prompt A</div>
+      <button
+        type="button"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      >Send A</button>
+    </section>
+
+    <section data-testid="composer-root" id="composer-b">
+      <div
+        id="prompt-b"
+        contenteditable="true"
+        role="textbox"
+        aria-label="Message ChatGPT"
+      >Prompt B</div>
+      <button
+        type="button"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      >Send B</button>
+    </section>
+  </main>
+`;
+
+export const REVIEWER_MULTI_COMPOSER_FIXTURE = `
+  <main>
+    <section data-testid="composer-root" id="composer-a">
+      <div
+        id="prompt-a"
+        contenteditable="true"
+        role="textbox"
+        aria-label="Message ChatGPT"
+      >Prompt A</div>
+      <button
+        type="button"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      >Send A</button>
+    </section>
+
+    <section data-testid="composer-root" id="composer-b">
+      <div
+        id="prompt-textarea"
+        contenteditable="true"
+        role="textbox"
+      >Prompt B</div>
+      <button
+        type="button"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      >Send B</button>
+    </section>
+  </main>
+`;

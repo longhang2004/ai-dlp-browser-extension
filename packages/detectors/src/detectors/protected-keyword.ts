@@ -85,6 +85,12 @@ function normalizeKeywords(
   return normalized;
 }
 
+export function validateProtectedKeywordConfiguration(
+  configuredKeywords: readonly string[],
+): void {
+  normalizeKeywords(configuredKeywords);
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(REGEXP_METACHARACTER_PATTERN, "\\$&");
 }

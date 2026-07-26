@@ -73,7 +73,7 @@ describe("ChatGptAdapter prompt operations", () => {
     const composer = document.querySelector("#prompt-textarea");
     expect(composer).toBeInstanceOf(HTMLElement);
     if (!(composer instanceof HTMLElement)) throw new Error("Missing editor.");
-    let editorModel = "Example prompt";
+    const editorModel = "Example prompt";
     composer.addEventListener("input", () => {
       // A ProseMirror-like model intentionally ignores foreign DOM mutation.
       composer.textContent = editorModel;

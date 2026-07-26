@@ -12,6 +12,7 @@ export type SubmissionResolutionStrategy =
 export type ResolvedSubmissionElements = {
   composer: HTMLElement;
   sendControl: HTMLElement;
+  submissionRegion: HTMLElement;
   strategy: SubmissionResolutionStrategy;
 };
 
@@ -176,6 +177,44 @@ function findAssociatedSendControl(
     : null;
 }
 
+function resolveSubmissionRegion(
+  composer: HTMLElement,
+  sendControl: HTMLElement,
+): HTMLElement | null {
+  for (const selector of [
+    CHATGPT_SELECTORS.stableComposerRoot,
+    CHATGPT_SELECTORS.semanticComposerRegion,
+  ]) {
+    const region = composer.closest(selector);
+    if (
+      region instanceof HTMLElement &&
+      region.contains(composer) &&
+      region.contains(sendControl)
+    ) {
+      return region;
+    }
+  }
+  const form = nativeFormOwner(composer);
+  return form !== null && form.contains(composer) && form.contains(sendControl)
+    ? form
+    : null;
+}
+
+function completeSubmissionElements(
+  composer: HTMLElement,
+  sendControl: HTMLElement,
+): ResolvedSubmissionElements | null {
+  const submissionRegion = resolveSubmissionRegion(composer, sendControl);
+  return submissionRegion === null
+    ? null
+    : {
+        composer,
+        sendControl,
+        submissionRegion,
+        strategy: strategyForComposer(composer),
+      };
+}
+
 function strategyFor(selectorIndex: number): SubmissionResolutionStrategy {
   if (selectorIndex === 0) {
     return "prompt_textarea";
@@ -229,14 +268,13 @@ export function resolveComposerSubmissionFromTarget(
       healthCode: "send_control_not_found",
     };
   }
-  return {
-    kind: "resolved",
-    context: {
-      composer,
-      sendControl,
-      strategy: strategyForComposer(composer),
-    },
-  };
+  const context = completeSubmissionElements(composer, sendControl);
+  return context === null
+    ? {
+        kind: "strong_candidate_unresolved",
+        healthCode: "unsupported_dom_variant",
+      }
+    : { kind: "resolved", context };
 }
 
 export function resolveSendSubmissionFromTarget(
@@ -262,13 +300,11 @@ export function resolveSendSubmissionFromTarget(
       if (associatedSend !== sendCandidate) continue;
       sawAssociatedComposerCandidate = true;
       if (!isUsableComposer(candidate)) continue;
+      const context = completeSubmissionElements(candidate, sendCandidate);
+      if (context === null) continue;
       return {
         kind: "resolved",
-        context: {
-          composer: candidate,
-          sendControl: sendCandidate,
-          strategy: strategyForComposer(candidate),
-        },
+        context,
       };
     }
   }
@@ -298,12 +334,12 @@ export function diagnoseSubmissionElements(
       sawUsableComposer = true;
       const sendControl = findAssociatedSendControl(document, candidate);
       if (sendControl !== null) {
+        const context = completeSubmissionElements(candidate, sendControl);
+        if (context === null) {
+          continue;
+        }
         return {
-          context: {
-            composer: candidate,
-            sendControl,
-            strategy: strategyFor(selectorIndex),
-          },
+          context: { ...context, strategy: strategyFor(selectorIndex) },
           healthCode: null,
         };
       }
@@ -327,7 +363,10 @@ export function resolveSubmissionElements(
 
 export function isSubmissionContextUsable(
   document: Document,
-  context: Pick<ResolvedSubmissionElements, "composer" | "sendControl">,
+  context: Pick<
+    ResolvedSubmissionElements,
+    "composer" | "sendControl" | "submissionRegion"
+  >,
 ): boolean {
   if (
     !isUsableComposer(context.composer) ||
@@ -342,6 +381,7 @@ export function isSubmissionContextUsable(
   const current = resolution.kind === "resolved" ? resolution.context : null;
   return (
     current?.composer === context.composer &&
-    current.sendControl === context.sendControl
+    current.sendControl === context.sendControl &&
+    current.submissionRegion === context.submissionRegion
   );
 }

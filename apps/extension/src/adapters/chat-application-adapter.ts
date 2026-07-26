@@ -12,6 +12,7 @@ export type CapturedSubmitAttempt = {
 export type LiveSubmissionContext = {
   composer: HTMLElement;
   sendControl: HTMLElement;
+  submissionRegion: HTMLElement;
   applicationUrl: URL;
   contextIdentity: number;
   contextVersion: number;

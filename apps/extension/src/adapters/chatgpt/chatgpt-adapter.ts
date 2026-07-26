@@ -191,8 +191,17 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   #onAdapterError: ((error: ChatGptAdapterError) => void) | null;
   #contextVersion = 0;
   #lastApplicationLocation: string | null = null;
-  #composerIdentities: WeakMap<HTMLElement, number> | null = new WeakMap();
-  #identityComposers = new Map<number, WeakRef<HTMLElement>>();
+  #composerIdentities: WeakMap<
+    HTMLElement,
+    { identity: number; submissionRegion: WeakRef<HTMLElement> }
+  > | null = new WeakMap();
+  #identityContexts = new Map<
+    number,
+    {
+      composer: WeakRef<HTMLElement>;
+      submissionRegion: WeakRef<HTMLElement>;
+    }
+  >();
   #identitySequence = 0;
   #attemptSequence = 0;
   #interceptor: SubmitInterceptor | null = null;
@@ -230,7 +239,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       retainsUrlReader: this.#getCurrentUrl !== null,
       retainsHealthReporter: this.#onHealthTransition !== null,
       retainsErrorReporter: this.#onAdapterError !== null,
-      retainsComposerIdentity: this.#identityComposers.size > 0,
+      retainsComposerIdentity: this.#identityContexts.size > 0,
       retainsInterceptor: this.#interceptor !== null,
       retainsDisposer: this.#interceptorDisposer !== null,
       retainsObserver: this.#observer !== null,
@@ -261,9 +270,16 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     if (this.#disposed || !Number.isSafeInteger(contextIdentity)) {
       return null;
     }
-    const composer = this.#identityComposers.get(contextIdentity)?.deref();
-    if (composer === undefined || !composer.isConnected) {
-      this.#identityComposers.delete(contextIdentity);
+    const stored = this.#identityContexts.get(contextIdentity);
+    const composer = stored?.composer.deref();
+    const submissionRegion = stored?.submissionRegion.deref();
+    if (
+      composer === undefined ||
+      submissionRegion === undefined ||
+      !composer.isConnected ||
+      !submissionRegion.isConnected
+    ) {
+      this.#identityContexts.delete(contextIdentity);
       return null;
     }
     const applicationUrl = this.#currentUrl();
@@ -276,7 +292,8 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     );
     if (
       resolution.kind !== "resolved" ||
-      resolution.context.composer !== composer
+      resolution.context.composer !== composer ||
+      resolution.context.submissionRegion !== submissionRegion
     ) {
       return null;
     }
@@ -295,10 +312,11 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     context: LiveSubmissionContext,
   ): SubmissionContentCapabilities {
     this.#assertPromptContext(context);
-    const region = context.composer.closest(CHATGPT_SELECTORS.composerRegion);
     return {
       hasUnsupportedAttachment:
-        region?.querySelector(CHATGPT_SELECTORS.attachmentEvidence) !== null,
+        context.submissionRegion.querySelector(
+          CHATGPT_SELECTORS.attachmentEvidence,
+        ) !== null,
     };
   }
 
@@ -403,7 +421,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#interceptor = null;
     this.#interceptorDisposer = null;
     this.#composerIdentities = null;
-    this.#identityComposers.clear();
+    this.#identityContexts.clear();
     this.#lastApplicationLocation = null;
     this.#lastHealth = null;
     this.#healthCheckQueued = false;
@@ -529,6 +547,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       current.contextIdentity !== context.contextIdentity ||
       current.composer !== context.composer ||
       current.sendControl !== context.sendControl ||
+      current.submissionRegion !== context.submissionRegion ||
       current.contextVersion !== context.contextVersion
     ) {
       throw new ChatGptAdapterError("prompt_context_invalid");
@@ -573,6 +592,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       current !== null &&
       current.composer === context.composer &&
       current.sendControl === context.sendControl &&
+      current.submissionRegion === context.submissionRegion &&
       current.contextVersion === context.contextVersion
     );
   }
@@ -587,18 +607,27 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#lastApplicationLocation = location;
   }
 
-  #identityFor(composer: HTMLElement): number {
+  #identityFor(composer: HTMLElement, submissionRegion: HTMLElement): number {
     const identities = this.#composerIdentities;
     if (identities === null) {
       throw new ChatGptAdapterError("adapter_disposed");
     }
     const existing = identities.get(composer);
-    if (existing !== undefined) {
-      return existing;
+    if (
+      existing !== undefined &&
+      existing.submissionRegion.deref() === submissionRegion
+    ) {
+      return existing.identity;
     }
     const identity = ++this.#identitySequence;
-    identities.set(composer, identity);
-    this.#identityComposers.set(identity, new WeakRef(composer));
+    identities.set(composer, {
+      identity,
+      submissionRegion: new WeakRef(submissionRegion),
+    });
+    this.#identityContexts.set(identity, {
+      composer: new WeakRef(composer),
+      submissionRegion: new WeakRef(submissionRegion),
+    });
     return identity;
   }
 
@@ -610,8 +639,12 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     return {
       composer: resolved.composer,
       sendControl: resolved.sendControl,
+      submissionRegion: resolved.submissionRegion,
       applicationUrl,
-      contextIdentity: this.#identityFor(resolved.composer),
+      contextIdentity: this.#identityFor(
+        resolved.composer,
+        resolved.submissionRegion,
+      ),
       contextVersion: this.#contextVersion,
     };
   }

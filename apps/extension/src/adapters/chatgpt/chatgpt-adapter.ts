@@ -127,18 +127,6 @@ function cancelCapturedEvent(event: Event): void {
   event.stopImmediatePropagation();
 }
 
-function nativeTextareaValueSetter(
-  textarea: HTMLTextAreaElement,
-): ((value: string) => void) | null {
-  const descriptor = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    "value",
-  );
-  return descriptor?.set === undefined
-    ? null
-    : (value: string) => descriptor.set?.call(textarea, value);
-}
-
 function readStructuredContentEditable(composer: HTMLElement): string {
   const renderedText = composer.innerText;
   if (typeof renderedText === "string") {
@@ -324,9 +312,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     context: LiveSubmissionContext,
   ): PromptReplacementCapability {
     this.#assertPromptContext(context);
-    return context.composer instanceof HTMLTextAreaElement
-      ? "supported"
-      : "unsupported";
+    return "unsupported";
   }
 
   replacePrompt(
@@ -334,25 +320,8 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     text: string,
   ): PromptReplacementResult {
     this.#assertPromptContext(context);
-    if (!(context.composer instanceof HTMLTextAreaElement)) {
-      return { ok: false, reason: "unsupported_editor" };
-    }
-    const setValue = nativeTextareaValueSetter(context.composer);
-    if (setValue === null) {
-      context.composer.value = text;
-    } else {
-      setValue(text);
-    }
-    context.composer.dispatchEvent(
-      new InputEvent("input", {
-        bubbles: true,
-        composed: true,
-        inputType: "insertText",
-      }),
-    );
-    return context.composer.value === text
-      ? { ok: true, verifiedText: text }
-      : { ok: false, reason: "replacement_not_acknowledged" };
+    void text;
+    return { ok: false, reason: "unsupported_editor" };
   }
 
   registerSubmitInterceptor(handler: SubmitInterceptor): () => void {

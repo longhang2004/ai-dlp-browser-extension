@@ -312,6 +312,9 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     await vi.waitFor(() =>
       expect(harness.dialog.show).toHaveBeenCalledTimes(1),
     );
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "warn", canRedact: false }),
+    );
     const enter = new KeyboardEvent("keydown", {
       key: "Enter",
       bubbles: true,
@@ -374,34 +377,28 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     harness.adapter.dispose();
   });
 
-  it("re-resolves after redaction replacement before resuming", async () => {
+  it("fails closed on automatic redact without mutating or resuming ChatGPT", async () => {
     const prompt = "person@example.com";
     const harness = createHarness(prompt, "redact");
-    const oldSend = sendControl();
-    const oldClick = vi.fn();
-    oldSend.addEventListener("click", oldClick);
-    let replacementClick = vi.fn();
-    composer().addEventListener(
-      "input",
-      () => {
-        const replacement = oldSend.cloneNode(true) as HTMLButtonElement;
-        replacementClick = vi.fn();
-        replacement.addEventListener("click", (event) => {
-          event.preventDefault();
-          replacementClick();
-        });
-        oldSend.replaceWith(replacement);
-      },
-      { once: true },
-    );
+    const resumed = vi.fn();
+    sendControl().addEventListener("click", resumed);
 
-    oldSend.click();
+    sendControl().click();
+    await vi.waitFor(() =>
+      expect(harness.dialog.show).toHaveBeenCalledWith({
+        kind: "error",
+        errorCode: "redaction_unavailable",
+      }),
+    );
+    harness.settle("cancel");
     await harness.controller.whenSettledForTesting();
 
-    expect(composer().value).toBe("[EMAIL]");
-    expect(oldClick).toHaveBeenCalledTimes(0);
-    expect(replacementClick).toHaveBeenCalledTimes(1);
-    expect(harness.events[0]).toMatchObject({ resolution: "redacted" });
+    expect(composer().value).toBe(prompt);
+    expect(resumed).not.toHaveBeenCalled();
+    expect(harness.events[0]).toMatchObject({
+      kind: "enforcement_error",
+      errorCode: "redaction_unavailable",
+    });
     harness.controller.dispose();
     harness.adapter.dispose();
   });

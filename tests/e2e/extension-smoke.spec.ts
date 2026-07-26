@@ -44,8 +44,8 @@ async function saveSettings(
   page: Parameters<typeof sendRuntimeMessage>[0],
   overrides: Partial<{
     protectionEnabled: boolean;
-    emailAction: "allow" | "warn" | "redact" | "block";
-    phoneAction: "allow" | "warn" | "redact" | "block";
+    emailAction: "allow" | "warn" | "block";
+    phoneAction: "allow" | "warn" | "block";
     protectedKeywords: string[];
     auditRetentionLimit: number;
   }>,
@@ -202,7 +202,7 @@ test("email and Vietnamese phone warnings support one-shot bypass and Shift+Ente
   await extensionPage.close();
 });
 
-test("email redaction replaces the composer before the single resumed submission", async ({
+test("ChatGPT warnings never offer unverified automatic redaction", async ({
   chatPage,
   extensionContext,
   extensionId,
@@ -212,16 +212,20 @@ test("email redaction replaces the composer before the single resumed submission
     extensionId,
     "options.html",
   );
-  await saveSettings(extensionPage, { emailAction: "redact" });
+  await saveSettings(extensionPage, { emailAction: "warn" });
   await waitForProtectionState(extensionPage, "active");
   await setComposerText(chatPage, `Contact ${sensitive.email.valid}`);
   await chatPage.getByRole("button", { name: "Send prompt" }).click();
-  await expect
-    .poll(() => submissionValues(chatPage))
-    .toEqual(["Contact [EMAIL]"]);
+  const dialog = protectionDialog(chatPage);
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Redact and continue" }),
+  ).toHaveCount(0);
   await expect(chatPage.locator("#prompt-textarea")).toHaveValue(
-    "Contact [EMAIL]",
+    `Contact ${sensitive.email.valid}`,
   );
+  expect(await submissionValues(chatPage)).toEqual([]);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
   await extensionPage.close();
 });
 

@@ -105,25 +105,37 @@ describe("ChatGptAdapter prompt operations", () => {
     expect(adapter.readPrompt(context)).toBe("Example prompt");
   });
 
-  it("verifies native textarea replacement through its value state", () => {
+  it("does not treat native textarea DOM value replacement as application-state proof", () => {
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const adapter = createAdapter();
     const context = adapter.resolveCurrentSubmissionContext();
     expect(context).not.toBeNull();
     if (context === null) throw new Error("Expected context.");
-    const replacementAdapter = adapter as unknown as {
-      getPromptReplacementCapability(
-        value: LiveSubmissionContext,
-      ): "supported" | "unsupported";
-    };
+    const original = adapter.readPrompt(context);
 
-    expect(replacementAdapter.getPromptReplacementCapability(context)).toBe(
-      "supported",
-    );
+    expect(adapter.getPromptReplacementCapability(context)).toBe("unsupported");
     expect(adapter.replacePrompt(context, "[EMAIL]")).toEqual({
-      ok: true,
-      verifiedText: "[EMAIL]",
+      ok: false,
+      reason: "unsupported_editor",
     });
+    expect(adapter.readPrompt(context)).toBe(original);
+  });
+
+  it("reports every current ChatGPT editor variant as replacement unsupported", () => {
+    for (const fixture of [
+      NATIVE_TEXTAREA_COMPOSER_FIXTURE,
+      CONTENTEDITABLE_COMPOSER_FIXTURE,
+      PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE,
+    ]) {
+      renderFixture(fixture);
+      const adapter = createAdapter();
+      const context = adapter.resolveCurrentSubmissionContext();
+      if (context === null) throw new Error("Expected context.");
+
+      expect(adapter.getPromptReplacementCapability(context)).toBe(
+        "unsupported",
+      );
+    }
   });
 
   it("detects only composer-scoped attachment evidence, not upload capability", () => {
@@ -296,9 +308,15 @@ describe("ChatGptAdapter prompt operations", () => {
     expect(context && adapter.readPrompt(context)).toBe("Example prompt");
   });
 
-  it("reads and replaces a native textarea prompt without retaining it", () => {
+  it("reads a native textarea prompt without retaining it", () => {
     const markup = NATIVE_TEXTAREA_COMPOSER_FIXTURE;
     renderFixture(markup);
+    const textarea = document.querySelector("textarea");
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected textarea.");
+    }
+    const prompt = "private composer sentinel";
+    textarea.value = prompt;
     const adapter = createAdapter();
     const context = adapter.resolveCurrentSubmissionContext();
     expect(context).not.toBeNull();
@@ -306,8 +324,6 @@ describe("ChatGptAdapter prompt operations", () => {
       throw new Error("Expected a submission context.");
     }
 
-    const prompt = "private composer sentinel";
-    adapter.replacePrompt(context, prompt);
     expect(adapter.readPrompt(context)).toBe(prompt);
 
     expect(adapter.getDiagnosticsForTesting()).toMatchObject({

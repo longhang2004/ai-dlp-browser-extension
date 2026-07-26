@@ -39,8 +39,13 @@ describe("options App", () => {
 
     render(<App runtime={{ sendMessage }} />);
 
-    expect(await screen.findByLabelText("Email action")).toHaveValue("warn");
-    expect(screen.getByLabelText("Phone action")).toHaveValue("warn");
+    expect(
+      ((await screen.findByLabelText("Email action")) as HTMLSelectElement)
+        .value,
+    ).toBe("warn");
+    expect(
+      (screen.getByLabelText("Phone action") as HTMLSelectElement).value,
+    ).toBe("warn");
     await user.click(screen.getByRole("button", { name: "Save settings" }));
 
     expect(sendMessage).toHaveBeenLastCalledWith({

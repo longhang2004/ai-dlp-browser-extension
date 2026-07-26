@@ -254,6 +254,34 @@ export function bootstrapContent(options: {
     }
   }
 
+  function disposeProtectionRuntime(): void {
+    unregisterInterception();
+    try {
+      controller?.cancelActiveAttempt();
+    } catch {
+      // Continue through every independent cleanup boundary.
+    }
+    try {
+      controller?.dispose();
+    } catch {
+      // Continue through every independent cleanup boundary.
+    }
+    try {
+      dialog?.dispose();
+    } catch {
+      // Continue through every independent cleanup boundary.
+    }
+    try {
+      adapter?.dispose();
+    } catch {
+      // Continue through every independent cleanup boundary.
+    }
+    controller = null;
+    dialog = null;
+    adapter = null;
+    adapterDegraded = false;
+  }
+
   const cache = createSettingsCache({
     connect: () => options.runtime.connect({ name: SETTINGS_PORT_NAME }),
     ...(options.scheduler === undefined
@@ -267,25 +295,24 @@ export function bootstrapContent(options: {
         return;
       }
       if (connectionState === "unavailable") {
-        try {
-          controller?.cancelActiveAttempt();
-        } catch {
-          // Continue disabling interception and clearing settings.
-        }
-        unregisterInterception();
+        disposeProtectionRuntime();
         settings = null;
-        adapterDegraded = false;
         publish(unavailableStatus());
       }
     },
     onSettings(nextSettings) {
       if (disposed) return;
-      const wasEnabled = settings?.protectionEnabled;
       settings = cloneProtectionSettings(nextSettings);
-      const runtimeReady = ensureRuntime();
-      if (wasEnabled === true && !settings.protectionEnabled) {
-        controller?.cancelActiveAttempt();
+      if (!settings.protectionEnabled) {
+        disposeProtectionRuntime();
+        publish({
+          state: "disabled",
+          application: "chatgpt",
+          protectionEnabled: false,
+        });
+        return;
       }
+      const runtimeReady = ensureRuntime();
       if (runtimeReady && unregister === null) {
         try {
           unregister = controller?.register() ?? null;
@@ -294,19 +321,11 @@ export function bootstrapContent(options: {
         }
       }
       if (unregister === null) {
-        publish(
-          settings.protectionEnabled
-            ? {
-                state: "degraded",
-                application: "chatgpt",
-                protectionEnabled: true,
-              }
-            : {
-                state: "disabled",
-                application: "chatgpt",
-                protectionEnabled: false,
-              },
-        );
+        publish({
+          state: "degraded",
+          application: "chatgpt",
+          protectionEnabled: true,
+        });
         return;
       }
       publishReadyStatus();
@@ -326,22 +345,7 @@ export function bootstrapContent(options: {
       if (disposed) return;
       disposed = true;
       try {
-        unregisterInterception();
-      } catch {
-        // Continue through every independent cleanup boundary.
-      }
-      try {
-        controller?.dispose();
-      } catch {
-        // Continue through every independent cleanup boundary.
-      }
-      try {
-        dialog?.dispose();
-      } catch {
-        // Continue through every independent cleanup boundary.
-      }
-      try {
-        adapter?.dispose();
+        disposeProtectionRuntime();
       } catch {
         // Continue through every independent cleanup boundary.
       }

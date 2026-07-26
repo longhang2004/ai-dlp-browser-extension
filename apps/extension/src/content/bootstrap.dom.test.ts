@@ -170,22 +170,30 @@ function harness() {
       hasAuthorization: false,
     })),
   };
+  const createAdapter = vi.fn((options: ChatGptAdapterOptions) => {
+    adapterOptions = options;
+    return adapter;
+  });
+  const createDialog = vi.fn(
+    (
+      _document: Document,
+      options: { onRenderFailure?: () => void },
+    ) => {
+      dialogFailure = options.onRenderFailure;
+      return dialog;
+    },
+  );
+  const createController = vi.fn((options: SubmissionControllerOptions) => {
+    controllerOptions = options;
+    return controller;
+  });
   const content = bootstrapContent({
     document,
     runtime,
     scheduler,
-    createAdapter(options) {
-      adapterOptions = options;
-      return adapter;
-    },
-    createDialog(_document, options) {
-      dialogFailure = options.onRenderFailure;
-      return dialog;
-    },
-    createController(options) {
-      controllerOptions = options;
-      return controller;
-    },
+    createAdapter,
+    createDialog,
+    createController,
     eventId: () => "00000000-0000-4000-8000-000000000001",
     now: () => new Date("2026-07-26T00:00:00.000Z"),
   });
@@ -199,6 +207,9 @@ function harness() {
     dialog,
     controller,
     registrationDispose,
+    createAdapter,
+    createDialog,
+    createController,
     getAdapterOptions: () => adapterOptions,
     getDialogFailure: () => dialogFailure,
     getControllerOptions: () => controllerOptions,
@@ -206,6 +217,37 @@ function harness() {
 }
 
 describe("content bootstrap", () => {
+  it("creates no protection runtime, observer source, or health audit while disabled", () => {
+    const h = harness();
+
+    h.firstPort.emitMessage(settingsSnapshot(false));
+
+    expect(h.content.getStatus().state).toBe("disabled");
+    expect(h.createAdapter).not.toHaveBeenCalled();
+    expect(h.createDialog).not.toHaveBeenCalled();
+    expect(h.createController).not.toHaveBeenCalled();
+    expect(h.controller.register).not.toHaveBeenCalled();
+    expect(h.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("fully disposes on disable and creates exactly one fresh runtime on re-enable", () => {
+    const h = harness();
+    h.firstPort.emitMessage(settingsSnapshot(true));
+    expect(h.createAdapter).toHaveBeenCalledOnce();
+
+    h.firstPort.emitMessage(settingsSnapshot(false, 1));
+    expect(h.registrationDispose).toHaveBeenCalledOnce();
+    expect(h.controller.dispose).toHaveBeenCalledOnce();
+    expect(h.dialog.dispose).toHaveBeenCalledOnce();
+    expect(h.adapter.dispose).toHaveBeenCalledOnce();
+
+    h.firstPort.emitMessage(settingsSnapshot(false, 2));
+    expect(h.createAdapter).toHaveBeenCalledOnce();
+    h.firstPort.emitMessage(settingsSnapshot(true, 3));
+    h.firstPort.emitMessage(settingsSnapshot(true, 4));
+    expect(h.createAdapter).toHaveBeenCalledTimes(2);
+  });
+
   it("passes through the documented initialization interval and cannot report active", () => {
     const h = harness();
 
@@ -237,7 +279,7 @@ describe("content bootstrap", () => {
     });
   });
 
-  it("updates atomically, cancels on disable, and reuses idempotent setup", () => {
+  it("updates atomically, disposes on disable, and recreates on enable", () => {
     const h = harness();
     h.firstPort.emitMessage(settingsSnapshot());
     const controllerOptions = h.getControllerOptions();
@@ -251,8 +293,9 @@ describe("content bootstrap", () => {
 
     h.firstPort.emitMessage(settingsSnapshot(true, 2));
     expect(h.content.getStatus().state).toBe("active");
-    expect(h.controller.register).toHaveBeenCalledOnce();
+    expect(h.controller.register).toHaveBeenCalledTimes(2);
     expect(h.controller.cancelActiveAttempt).toHaveBeenCalledOnce();
+    expect(h.controller.dispose).toHaveBeenCalledOnce();
   });
 
   it("disposes interception on disconnect and needs a fresh reconnect snapshot", () => {

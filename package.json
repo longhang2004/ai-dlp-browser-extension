@@ -15,6 +15,7 @@
     "typecheck": "tsc --build --pretty false",
     "test:unit": "vitest run --project unit --project node --project dom",
     "test:browser": "pnpm build && playwright test",
+    "test:e2e": "playwright test",
     "test:performance": "vitest run --project performance --disableConsoleIntercept",
     "test": "pnpm test:unit",
     "build": "pnpm --filter @ai-dlp/extension build",

@@ -28,7 +28,7 @@ export const CONTENTEDITABLE_COMPOSER_FIXTURE = `
 
 export const PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE = `
   <main>
-    <form aria-label="Chat composer">
+    <form>
       <button aria-label="Open tools">Tools</button>
       <div
         id="prompt-textarea"

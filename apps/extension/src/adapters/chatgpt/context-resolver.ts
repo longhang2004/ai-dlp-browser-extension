@@ -3,6 +3,7 @@ import type { AdapterHealthCode } from "@ai-dlp/shared-types";
 import { CHATGPT_SELECTORS, ORDERED_COMPOSER_SELECTORS } from "./selectors.js";
 
 export type SubmissionResolutionStrategy =
+  | "prompt_textarea"
   | "native_form"
   | "semantic_contenteditable"
   | "aria_composer"
@@ -173,12 +174,15 @@ function findAssociatedSendControl(
 
 function strategyFor(selectorIndex: number): SubmissionResolutionStrategy {
   if (selectorIndex === 0) {
-    return "native_form";
+    return "prompt_textarea";
   }
   if (selectorIndex === 1) {
-    return "semantic_contenteditable";
+    return "native_form";
   }
   if (selectorIndex === 2) {
+    return "semantic_contenteditable";
+  }
+  if (selectorIndex === 3) {
     return "aria_composer";
   }
   return "stable_data_composer";

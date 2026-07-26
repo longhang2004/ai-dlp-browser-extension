@@ -171,4 +171,23 @@ describe("resolveSubmissionElements", () => {
 
     expect(resolveSubmissionElements(document)).toBeNull();
   });
+
+  it("ignores invisible and disconnected prompt-textarea candidates", () => {
+    renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
+    const composer = document.querySelector("#prompt-textarea");
+    expect(composer).toBeInstanceOf(HTMLElement);
+    if (!(composer instanceof HTMLElement)) {
+      throw new Error("Missing prompt-textarea fixture.");
+    }
+
+    composer.hidden = true;
+    expect(resolveSubmissionElements(document)).toBeNull();
+    composer.hidden = false;
+    const resolved = resolveSubmissionElements(document);
+    expect(resolved).not.toBeNull();
+    composer.remove();
+    expect(resolved && isSubmissionContextUsable(document, resolved)).toBe(
+      false,
+    );
+  });
 });

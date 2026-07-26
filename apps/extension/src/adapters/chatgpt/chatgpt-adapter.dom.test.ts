@@ -67,6 +67,15 @@ afterEach(() => {
 });
 
 describe("ChatGptAdapter prompt operations", () => {
+  it("reads structured text from the production prompt-textarea", () => {
+    renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+
+    expect(context?.composer).toBe(document.querySelector("#prompt-textarea"));
+    expect(context && adapter.readPrompt(context)).toBe("Example prompt");
+  });
+
   it.each([
     ["textarea", NATIVE_TEXTAREA_COMPOSER_FIXTURE],
     ["contenteditable", CONTENTEDITABLE_COMPOSER_FIXTURE],

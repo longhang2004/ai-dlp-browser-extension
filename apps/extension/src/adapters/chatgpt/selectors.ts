@@ -5,6 +5,8 @@
  */
 export const CHATGPT_SELECTORS = Object.freeze({
   nativeForm: "form",
+  promptTextarea:
+    '#prompt-textarea[contenteditable="true"], #prompt-textarea[contenteditable="plaintext-only"]',
   nativeComposer:
     'form[aria-label="Chat composer"] textarea, [role="form"][aria-label="Chat composer"] textarea',
   semanticEditable:
@@ -26,6 +28,7 @@ export const CHATGPT_SELECTORS = Object.freeze({
 } as const);
 
 export const ORDERED_COMPOSER_SELECTORS = Object.freeze([
+  CHATGPT_SELECTORS.promptTextarea,
   CHATGPT_SELECTORS.nativeComposer,
   CHATGPT_SELECTORS.semanticEditable,
   CHATGPT_SELECTORS.ariaEditable,

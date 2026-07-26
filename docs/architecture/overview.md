@@ -43,19 +43,24 @@ redacted prompt text, or offsets.
 3. Disabled settings create no protection runtime. Enabled settings create and
    register one runtime, which reports `waiting_for_composer` until a valid
    composer is confirmed, then `active`, or `degraded` after the grace period.
-4. Click or unmodified Enter is captured synchronously. Shift+Enter, IME, and
-   modifier combinations pass through.
+4. Click or unmodified Enter is resolved from its exact event target and
+   captured synchronously. The adapter assigns an opaque weak context identity
+   to the owning composer and complete submission region; another valid composer
+   is never substituted. Shift+Enter, IME, and modifier combinations pass
+   through.
 5. The controller reads the current prompt synchronously and retains it only for
    the active attempt.
-6. Composer-scoped attachment presence is checked before analysis and again
+6. Attachment presence is checked across the exact captured submission region,
+   including chips before or after a nested form, before analysis and again
    immediately before resume. Attachments stop with no content inspection.
    Inputs over 100,000 UTF-16 code units stop before detection.
 7. Findings are converted separately into metadata-only policy findings and
    placeholder-only display findings.
-8. The controller handles allow, warn, redact, or block. Redaction is offered
-   only for an editor with verified replacement support; ProseMirror is
-   unsupported and fails closed. Before any resumed submission it re-resolves
-   the URL, composer, send control, context version, and current text.
+8. The controller handles allow, warn, internal redact, or block decisions.
+   Every Milestone 1 ChatGPT editor reports replacement unsupported, so warning
+   dialogs never offer redaction and an internal redact decision fails closed.
+   Before any resumed submission it re-resolves the exact weak identity, URL,
+   region, composer, send control, context version, and current text.
 9. A one-shot authorization is consumed exactly once. Modified prompts, stale
    dialogs, replaced composers, cancelled attempts, and duplicate events cannot
    reuse it.
@@ -72,10 +77,12 @@ Content scripts never access storage directly. Extension pages use closed,
 strictly validated one-time messages; content settings use a validated long-
 lived port with generation numbers.
 
-Settings and audit data use `schemaVersion: 1` envelopes. Missing, corrupted,
-unsupported, or invalid data falls back to safe settings or an empty audit log.
-Milestone 1 intentionally has only the minimal version-1 fallback mechanism, not
-a general migration framework.
+Settings and audit data use `schemaVersion: 1` envelopes. Persisted email/phone
+actions are limited to `allow`, `warn`, and `block`. Exact legacy V1 `redact`
+values migrate atomically to `warn` and are persisted before content broadcast.
+Missing, corrupted, unsupported, or otherwise invalid data falls back to safe
+settings or an empty audit log. Milestone 1 intentionally has only this minimal
+version-1 migration/fallback mechanism, not a general migration framework.
 
 ## UI isolation and status truthfulness
 
@@ -88,7 +95,9 @@ The popup cannot report active protection until a validated snapshot has been
 applied, interception registered, and a valid composer confirmed. Disconnecting
 the settings port or disabling protection disposes interception and reports
 `unavailable` until a fresh connection and snapshot complete. Delayed rendering
-reports `waiting_for_composer` without health audit noise.
+reports `waiting_for_composer` for the 10-second default grace without health
+audit noise. SPA navigation starts a fresh waiting lifecycle instead of reusing
+a stale degraded state.
 
 ## Build topology
 

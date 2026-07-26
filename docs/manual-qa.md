@@ -30,7 +30,7 @@ to local fixture HTML and every other HTTP(S) request blocked:
 | Initialization interval | `paymentCard.validVisa`                                                 | Pass-through while settings read was deliberately delayed; popup remained `initializing`, then became `active` |
 | Clean submission        | Ordinary non-sensitive sentence                                         | Submitted exactly once; no allow audit record                                                                  |
 | Warning and bypass      | `email.valid` + `phone.vietnameseDomestic`                              | Placeholder-only warning; Shift+Enter passed through; one-shot send-anyway submitted once                      |
-| Redaction               | `email.valid`                                                           | Composer and submitted value used `[EMAIL]`                                                                    |
+| No automatic redaction  | `email.valid`                                                           | Warning exposed no Redact action; composer remained unchanged and unsubmitted                                  |
 | Strict blocks           | `paymentCard.validVisa`, `awsAccessKey.longLived`, `privateKey.generic` | Blocked with no bypass                                                                                         |
 | Disabled protection     | `paymentCard.validVisa`                                                 | Runtime status reported disabled through the options page and submission passed through                        |
 | Audit retention         | `email.valid`, then `phone.vietnameseDomestic` with limit 1             | Only final prompt-free phone decision remained                                                                 |
@@ -50,10 +50,10 @@ date. Never record the submitted fixture value.
 - Warning shows category/confidence/placeholder information only.
 - Cancel restores focus and does not submit.
 - Send anyway works once and a second attempt requires a new decision.
-- Native textarea redaction replaces every finding with the documented
-  placeholder and submits once. Current ProseMirror/contenteditable must not
-  show Redact and continue; automatic redact must show fixed fail-closed
-  guidance.
+- No ChatGPT editor variant, including native textarea and
+  ProseMirror/contenteditable, shows Redact and continue. An injected
+  legacy/internal redact decision must leave the composer unchanged, never
+  resume submission, and show fixed fail-closed guidance.
 - An attachment-only prompt and text plus attachment are blocked without bypass;
   removing the attachment permits a new attempt. Do not record the filename.
 - A large paste converted by ChatGPT into an attachment is blocked as an
@@ -65,8 +65,9 @@ date. Never record the submitted fixture value.
 - Changing the prompt while a dialog is open prevents stale approval.
 - Replacing the composer or send control while a dialog is open prevents stale
   approval.
-- SPA navigation and a newly rendered composer recover or report degraded
-  truthfully.
+- SPA navigation and a newly rendered composer restart `waiting_for_composer`,
+  recover within the 10-second default grace, or report degraded truthfully
+  after expiry.
 - Disabling protection cancels an active attempt and later submissions pass
   through.
 - Re-enabling protection returns to active only after a fresh validated
@@ -89,6 +90,8 @@ fixture and unpacked-extension behavior are covered by Playwright. The
 production-shaped `#prompt-textarea[contenteditable="true"]` fixture, attachment
 presence, tool-button ambiguity, and ProseMirror replacement refusal were
 verified automatically on 2026-07-26; this is not a claim of live compatibility.
+Implementation can be re-reviewed, but merge remains blocked until the current
+authenticated ChatGPT DOM and submission behavior complete this checklist.
 
 ## Failure reporting
 

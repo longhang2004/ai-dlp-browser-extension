@@ -73,16 +73,20 @@ user to split the prompt, no send-anyway action is offered, and only a
 
 ## Attachments and editor replacement
 
-The adapter checks only fixed, composer-scoped attachment-presence evidence. It
-never reads or records a filename, path, MIME type, preview, attachment
-contents, or accessible text. An attachment produces only the fixed
-`unsupported_attachment` enforcement code and cannot be bypassed.
+The adapter checks only fixed attachment-presence evidence within the exact
+composer-owned submission region. That region includes the active composer,
+associated Send control, and attachment chips/previews even when those are
+siblings of a nested form. It never reads or records a filename, path, MIME
+type, preview, attachment contents, or accessible text. An attachment produces
+only the fixed `unsupported_attachment` enforcement code and cannot be bypassed.
 
-Native textarea replacement uses the native value setter and verifies the
-textarea value before resume. Contenteditable and ProseMirror editors are
-classified as replacement-unsupported because DOM mutation does not prove their
-internal model changed. Those editors are never mutated for redaction; automatic
-redaction produces only `redaction_unavailable`.
+Every current ChatGPT editor, including native textarea, contenteditable, and
+ProseMirror variants, is replacement-unsupported. A DOM property equality check
+does not prove which application-state value ChatGPT will submit. The adapter
+therefore never mutates a composer for redaction, warning dialogs never offer
+redaction, and any legacy/internal automatic-redact decision produces only
+`redaction_unavailable` without resumed submission. The pure local redaction
+algorithm remains independently tested for future verified integrations.
 
 ## Local storage boundary
 

@@ -1,6 +1,6 @@
 # Privacy-First AI DLP Browser Extension — Milestone 1 Design
 
-- **Status:** Approved for implementation planning
+- **Status:** Implemented; merge blocked on authenticated live ChatGPT QA
 - **Date:** 2026-07-26
 - **Milestone:** Chromium Manifest V3 extension for ChatGPT
 - **Audience:** Engineering, security, privacy, and product reviewers
@@ -10,8 +10,9 @@
 Employees can accidentally paste sensitive company information into public AI
 chatbots. Milestone 1 must prove that a browser extension can inspect a ChatGPT
 prompt immediately before submission, make a deterministic local policy
-decision, and allow, warn, redact, or block the submission without sending the
-prompt to any remote service.
+decision, and allow, warn, or block the submission without sending the prompt
+to any remote service. The policy/redaction core remains broader for a future
+adapter, but ChatGPT replacement is disabled in Milestone 1.
 
 The product must minimize its own collection. Prompt text and detector matches
 are sensitive processing data, not telemetry. They may exist transiently in the
@@ -27,8 +28,8 @@ included in extension messages or UI state.
 3. Detect the required sensitive-data categories locally with deterministic
    rules.
 4. Evaluate findings through a browser-independent, typed policy engine.
-5. Provide accessible warning, blocking, redaction, oversized-prompt, and
-   recoverable-error experiences.
+5. Provide accessible warning, blocking, oversized-prompt, and
+   recoverable-error experiences while unsupported redaction fails closed.
 6. Store only versioned, privacy-safe local settings and audit metadata.
 7. Keep detector, policy, adapter, storage, and UI responsibilities separately
    testable.
@@ -96,8 +97,8 @@ including the extension's host element.
    an ordinary `allow` audit record.
 2. As an employee, I receive a warning before sending a prompt containing an
    email address, phone number, or protected keyword.
-3. As an employee, I can cancel, explicitly send a warned prompt, or redact
-   supported findings and continue.
+3. As an employee, I can cancel or explicitly send a warned prompt. Milestone 1
+   asks me to edit findings manually because ChatGPT replacement is unsupported.
 4. As an employee, I cannot bypass a block for a payment card, AWS access key,
    private key, or high-confidence API secret under the default policy.
 5. As an employee, Shift+Enter continues to insert a newline.
@@ -131,8 +132,10 @@ including the extension's host element.
 
 ### 6.2 Submission interception
 
-- A candidate click on the current composer send control is captured.
-- Enter in the current composer is captured only when it represents submission.
+- A candidate click is resolved from the exact strong Send target and its
+  owning composer region; a different document-global composer is never used.
+- Enter is resolved from the exact strong composer target and its associated
+  Send control; an incomplete strong target fails closed.
 - Shift+Enter, modifier shortcuts, IME composition, and Enter outside the
   composer are not intercepted.
 - An enabled-protection attempt with disposition `intercept` is prevented
@@ -197,8 +200,9 @@ The warning dialog displays:
 - A concise explanation.
 - Cancel, Send anyway, and conditional Redact and continue actions. Redaction
   is shown only when every finding is redactable and the active editor reports
-  verified replacement support. Direct contenteditable/ProseMirror DOM
-  mutation is not verified support.
+  verified replacement support. Every ChatGPT editor reports unsupported in
+  Milestone 1, including native textarea and contenteditable/ProseMirror, so
+  the action is never shown by the ChatGPT adapter.
 
 The block dialog displays:
 
@@ -291,10 +295,8 @@ User submission candidate
   -> Policy engine returns metadata-only PolicyDecision
   -> Controller creates sanitized DisplayFinding[] and safe audit model
   -> allow: controller issues and consumes a one-shot authorization
-  -> warn: UI requires explicit cancel, bypass, or redact action
-  -> redact: controller requires verified editor replacement capability,
-     revalidates live context, invokes pure redaction, verifies replacement,
-     then authorizes once
+  -> warn: UI requires explicit cancel or bypass; ChatGPT offers no redact action
+  -> internal/legacy redact: replacement is unsupported and fails closed
   -> block/error: attempt remains stopped
   -> adapter re-resolves live DOM and performs one browser-specific resume
   -> background accepts only schema-validated, privacy-safe audit messages
@@ -345,7 +347,8 @@ under `apps/extension/src/adapters/`.
 
 - Owns all ChatGPT selector strategies.
 - Determines whether an event is a submission candidate.
-- Locates, reads, and replaces the current composer.
+- Resolves from the exact event target, assigns an opaque weak composer/region
+  identity, and reads the captured composer.
 - Captures candidate events synchronously.
 - Exposes the browser-specific resume operation.
 - Implements only a synchronous, call-scoped resume bypass; it does not create,
@@ -362,8 +365,8 @@ under `apps/extension/src/adapters/`.
   object spread for this conversion.
 - Creates `DisplayFinding` before calling UI code.
 - Owns prompt revalidation and one-shot authorization creation/consumption.
-- Invokes `redactPrompt` only after policy selection and live-context
-  revalidation require redaction.
+- Retains the browser-independent redaction path for a future verified adapter;
+  the ChatGPT adapter's unsupported capability keeps that path fail-closed.
 - Ensures one dialog and one possible resumed submission per attempt.
 - Constructs privacy-safe audit events.
 - Never logs prompt data.
@@ -457,8 +460,10 @@ findings whose ranges were applied. It has no policy, DOM, browser, storage,
 messaging, or UI dependency.
 
 The submission controller is the only extension component that combines raw
-prompt text with policy results. It calls `redactPrompt` only for an automatic
-`redact` decision or after the user chooses Redact and continue from a warning.
+prompt text with policy results. Its browser-independent path may call
+`redactPrompt` only after a verified adapter reports support. The Milestone 1
+ChatGPT adapter never reports that support, so neither warning nor automatic
+policy paths invoke replacement.
 
 ### 10.3 Sanitized display model
 
@@ -535,12 +540,12 @@ categories without computing or passing a sanitized prompt to the UI.
 ### 10.5 User settings
 
 ```typescript
-type ConfigurableAction = "allow" | "warn" | "redact" | "block";
+type ConfigurableProtectionAction = "allow" | "warn" | "block";
 
 type ProtectionSettings = {
   protectionEnabled: boolean;
-  emailAction: ConfigurableAction;
-  phoneAction: ConfigurableAction;
+  emailAction: ConfigurableProtectionAction;
+  phoneAction: ConfigurableProtectionAction;
   protectedKeywords: string[];
   auditRetentionLimit: number;
 };
@@ -564,6 +569,10 @@ trimmed, deduplicated case-insensitively, limited to 100 entries, and each entry
 is 1 through 100 UTF-16 code units. Invalid saves are rejected with field-level
 errors. Invalid stored data causes the entire settings object to fall back to
 the safe defaults above; an invalid value must never disable protection.
+The sole V1 migration recognizes an otherwise valid version-1 settings envelope
+whose email or phone action is `redact`, converts every such action atomically
+to `warn`, persists the normalized envelope once, and only then broadcasts it.
+New save requests containing `redact` are rejected.
 
 The controller derives, but does not separately persist, the complete v1 policy
 from validated settings:
@@ -702,18 +711,21 @@ events rather than invented decision resolutions.
 `maskedExcerpt`, when present, is a maximum of five fixed category placeholders
 joined by separators. It cannot contain user-authored text.
 
-The only migration behavior in Milestone 1 is:
+The only migration/fallback behavior in Milestone 1 is:
 
 1. Read the configured storage key as unknown data.
 2. Require an object with exactly the supported `schemaVersion: 1` envelope.
-3. Validate every contained field/event.
-4. On a missing, corrupted, invalid, or unsupported settings envelope, return
+3. Normalize an otherwise exact legacy V1 email/phone `redact` action to
+   `warn`, persist the complete normalized envelope once, and broadcast only
+   normalized settings.
+4. Validate every contained field/event; new `redact` saves are invalid.
+5. On a missing, corrupted, invalid, or unsupported settings envelope, return
    safe default settings.
-5. On a missing, corrupted, invalid, or unsupported audit envelope, return an
+6. On a missing, corrupted, invalid, or unsupported audit envelope, return an
    empty audit list.
 
 No migration registry, version chain, or speculative migration framework is
-introduced.
+introduced beyond that exact legacy-V1 normalization.
 
 ### 10.7 Runtime messages
 
@@ -740,13 +752,16 @@ type SubmitInterceptionDisposition = "pass_through" | "intercept";
 type CapturedSubmitAttempt = {
   id: string;
   source: SubmitSource;
+  contextIdentity: number;
   initialContextVersion: number;
 };
 
 type LiveSubmissionContext = {
   composer: HTMLElement;
   sendControl: HTMLElement;
+  submissionRegion: HTMLElement;
   applicationUrl: URL;
+  contextIdentity: number;
   contextVersion: number;
 };
 
@@ -790,16 +805,17 @@ interface ChatApplicationAdapter {
 
 `PromptReplacementResult` is either `{ok: true, verifiedText}` or a fixed
 failure reason (`unsupported_editor`, `replacement_not_acknowledged`, or
-`context_changed`). Milestone 1 supports verified replacement for native
-textareas. It deliberately returns `unsupported_editor` for
-contenteditable/ProseMirror because assigning `textContent` and dispatching
-synthetic input does not prove the editor model changed.
+`context_changed`). Milestone 1 returns `unsupported_editor` for every ChatGPT
+editor, including native textarea and contenteditable/ProseMirror. DOM equality
+or a synthetic input event does not prove the application-state value observed
+by ChatGPT's actual submission handler.
 
 These DOM-bearing contracts live under `apps/extension/src/adapters/`; none is
 exported from `packages/shared-types`. `CapturedSubmitAttempt` deliberately
-contains no `HTMLElement` reference. `LiveSubmissionContext` is short-lived and
-must be freshly resolved for analysis and again immediately before redaction or
-resume.
+contains no `HTMLElement` reference. Its adapter-owned `contextIdentity` maps
+only through weak references to the exact composer and complete submission
+region. `LiveSubmissionContext` is short-lived and must be freshly resolved for
+analysis and again immediately before resume.
 
 The handler returns `pass_through` synchronously when the validated settings
 cache says protection is disabled. In that case the adapter must not call
@@ -1017,8 +1033,17 @@ The production selector set includes
 Send resolution prefers composer-associated `data-testid="send-button"`,
 stable Send accessible labels, `button[type="submit"]`, then
 `input[type="submit"]`. Generic `button:not([type])` is forbidden. Attachment
-evidence is centralized and scoped to the current composer; dormant file inputs
-and attachment-like elements outside that region are ignored.
+evidence is centralized and scoped to the complete submission region that owns
+the exact composer and Send control. A validated
+`[data-testid="composer-root"]` or semantic chat region is preferred over a
+nested form, so sibling attachment chips are included; dormant file inputs and
+attachment-like elements outside that region are ignored.
+
+Enter and click resolution begins at the event target. A strong composer or
+Send candidate that cannot complete its own local context fails closed and is
+never replaced by the first usable composer elsewhere in the document. The
+adapter carries only an opaque identity across asynchronous work and resolves
+that exact weakly held composer/region again before analysis and resume.
 
 ### 13.2 Dynamic rendering and SPA behavior
 
@@ -1027,11 +1052,12 @@ send elements. A debounced MutationObserver checks adapter health only; it does
 not read or scan prompt content. URL matching is rechecked on each candidate
 event and on SPA navigation signals.
 
-The adapter maintains an in-memory monotonically increasing `contextVersion`.
-It increments when SPA navigation changes the application context or when the
-active composer element identity changes. Replacing only the associated send
-control does not invalidate an otherwise unchanged composer context; the new
-control must still be discovered and validated before resume.
+The adapter maintains an in-memory monotonically increasing `contextVersion`
+for SPA navigation plus a distinct weak `contextIdentity` for composer and
+submission-region identity. Replacing the composer or owning region invalidates
+approval even when text is identical. Replacing only the associated send
+control does not reuse the old control; the new control must still be discovered
+and validated before resume.
 
 ### 13.3 Resubmission responsibility and state machine
 
@@ -1059,11 +1085,12 @@ Authorization sequence:
 
 1. Capture and prevent a candidate event.
 2. Assign one attempt ID and enter `evaluating`.
-3. Resolve the current live context, record its `contextVersion`, read the exact
-   prompt snapshot, and discard the DOM references after the synchronous read.
+3. Resolve the exact captured `contextIdentity`, record its `contextVersion`,
+   read the exact prompt snapshot, and retain no prompt in adapter state.
 4. Analyze the snapshot and obtain a findings-only policy decision.
-5. For an allow, automatic redact, or explicit warning approval, resolve a new
-   `LiveSubmissionContext`; never reuse the earlier composer or send control.
+5. For an allow or explicit warning approval, resolve the same captured
+   `contextIdentity`; never substitute another valid composer or reuse the
+   earlier send control.
 6. Before consuming authorization, verify all of the following:
    - `adapter.matches(current.applicationUrl)` is still true.
    - The current application/navigation context is the approved context.
@@ -1079,11 +1106,10 @@ Authorization sequence:
 7. If any check fails, invalidate the dialog and authorization, keep the attempt
    stopped, and require a new submission attempt. Do not submit or reuse a stale
    DOM element.
-8. For redaction, call `redactPrompt` only after the checks pass, replace the
-   prompt in the freshly resolved composer, then re-resolve once more because
-   the page may replace nodes during its input handler. Verify the same
-   application/composer context, the exact sanitized text, and a current
-   enabled associated send control.
+8. The ChatGPT adapter reports replacement unsupported, so any internal redact
+   path stops with `redaction_unavailable` before mutation or authorization.
+   The pure redaction/revalidation flow remains browser-independent future
+   adapter behavior and is not claimed as ChatGPT integration.
 9. Atomically consume the controller's one-shot authorization, producing a
    branded consumed authorization for that attempt.
 10. Enter `resuming` and call the adapter exactly once with the latest live
@@ -1134,9 +1160,12 @@ must report that protection is not confirmed rather than claiming a healthy
 state. This limitation is documented in manual QA and the threat model.
 
 After validated settings, absent composer DOM reports `waiting_for_composer`
-without an audit event. A valid context transitions to `active`. Only grace
-expiry, a strong unresolved submission candidate, or unrecovered loss of a
-previously active context transitions to coalesced `degraded`.
+without an audit event for a default 10,000-millisecond grace period. The grace
+is configurable only at the adapter construction boundary for deterministic
+tests. A valid context transitions to `active`. Only grace expiry, a strong
+unresolved submission candidate, or unrecovered loss of a previously active
+context transitions to coalesced `degraded`. SPA navigation clears stale health
+state and starts a fresh waiting lifecycle when its composer is absent.
 
 ## 14. Extension pages
 
@@ -1166,9 +1195,9 @@ Allows:
 All inputs are validated before the complete v1 settings envelope is saved.
 Strict default block rules and allow-audit configuration are not exposed.
 Automatic `redact` is not offered in the Milestone 1 settings UI because the
-supported production ProseMirror editor lacks verified replacement support.
-Legacy/local v1 redact configuration remains fail-closed on unsupported
-editors and is exercised only by the verified native-textarea path.
+ChatGPT adapter has no verified replacement support for any editor. Persisted
+V1 settings accept only `allow`, `warn`, or `block`; exact legacy V1
+email/phone `redact` values migrate to `warn` in storage before broadcast.
 
 ### 14.3 Local audit
 
@@ -1391,9 +1420,11 @@ Development follows test-driven development for every behavior:
 ### 20.4 Adapter and controller tests
 
 - Both required composer fixture variants.
-- Composer location, prompt reading, and prompt replacement for textarea and
-  contenteditable implementations.
-- Click and Enter interception.
+- Composer location and prompt reading for textarea/contenteditable variants;
+  replacement capability is unsupported for all ChatGPT editors.
+- Target-anchored click and Enter interception across simultaneous composers,
+  including fail-closed incomplete strong candidates and unrelated-control
+  pass-through.
 - Shift+Enter, IME composition, modifiers, and Enter outside the composer.
 - Approved resubmission passes exactly once without recursion.
 - A consumed authorization cannot be reused.
@@ -1402,7 +1433,8 @@ Development follows test-driven development for every behavior:
 - Cancelled and stale/replaced dialogs cannot submit.
 - Resume exceptions always clear adapter bypass state.
 - Duplicate initialization, SPA element replacement, cleanup, and disposal.
-- Missing and changed selectors and coalesced degraded health reports.
+- Missing and changed selectors, the full 10-second health grace, recovery
+  during grace, one coalesced expiry, and fresh SPA waiting lifecycle.
 - Composer replacement while a warning is open invalidates approval, including
   when the replacement contains identical text.
 - Send-button replacement while a warning is open uses only the newly resolved,
@@ -1425,6 +1457,11 @@ Development follows test-driven development for every behavior:
 - Adapter health events and errors contain no prompt-derived values.
 - Adapter disposal leaves no prompt-bearing state.
 - Selector and resume errors do not include composer contents.
+- The exact captured complete submission region includes attachment evidence
+  before/after nested forms and excludes evidence owned by other composers.
+- Warning dialogs never offer ChatGPT redaction; internal redact decisions
+  neither mutate nor resume the composer and fail with
+  `redaction_unavailable`.
 
 ### 20.5 Storage and messaging tests
 
@@ -1432,6 +1469,8 @@ Development follows test-driven development for every behavior:
 - Missing, invalid, corrupted, and unsupported versions.
 - Safe settings fallback never disables protection.
 - Invalid configuration saves are rejected.
+- Legacy V1 email/phone `redact` values migrate atomically to `warn`, persist
+  once, and are never broadcast; new redact saves are rejected.
 - Raw prompt, `matchedText`, findings, and arbitrary metadata are rejected.
 - All six policy-action/resolution mappings are validated.
 - Events with `policyAction: "allow"` are dropped.
@@ -1570,9 +1609,9 @@ Milestone 1 is acceptable only when:
 12. An AWS access key ID is blocked.
 13. A complete PEM private key is blocked.
 14. A high-confidence contextual API secret is blocked.
-15. Warned findings can be redacted before one resumed submission only when the
-    active editor provides verified replacement support. Unsupported automatic
-    redaction fails closed with `redaction_unavailable`.
+15. Every ChatGPT editor reports replacement unsupported. Warning UI exposes no
+    redact action, and any internal redact decision leaves the composer
+    unchanged, never resumes, and fails closed with `redaction_unavailable`.
 16. The policy engine receives only four-field `PolicyFinding` metadata; its
     strict input/output contains no prompt, matched/redacted text, offsets,
     sanitized text, or returned original findings.
@@ -1595,14 +1634,17 @@ Milestone 1 is acceptable only when:
 28. Send-control replacement uses only a freshly resolved, enabled control
     associated with the current composer; disconnected original elements are
     never resumed.
-29. Delayed rendering reports `waiting_for_composer` during its grace period;
-    SPA replacement, duplicate initialization, health coalescing, and adapter
-    cleanup pass automated tests.
-30. At least two semantic composer DOM fixtures pass adapter tests.
+29. Delayed rendering reports `waiting_for_composer` for the full 10-second
+    default grace; recovery during grace, one degradation after expiry, fresh
+    SPA waiting lifecycle, duplicate initialization, health coalescing, and
+    adapter cleanup pass automated tests.
+30. At least two semantic composer DOM fixtures and simultaneous-composer
+    target-anchoring fixtures pass adapter tests.
 31. Browser-specific contracts containing DOM elements, events, or `URL` remain
     under the extension adapter and are absent from `packages/shared-types`.
-32. Warning cancellation, bypass, and redaction produce the exact distinct
-    policy-action/resolution mappings defined in Section 10.6.
+32. Warning cancellation and bypass produce exact distinct resolutions;
+    browser-independent internal redaction mappings remain tested without
+    enabling ChatGPT replacement.
 33. The open Shadow DOM isolates component styling and remains inspectable.
 34. No runtime prompt-derived value, matched sensitive value, user-authored
     excerpt, or dedicated secret-fixture value is embedded in or emitted to the
@@ -1626,16 +1668,22 @@ Milestone 1 is acceptable only when:
     fail validation.
 45. Compile-time and runtime tests enforce the metadata-only policy boundary and
     reject every forbidden field listed in Section 20.2.
-46. Composer-scoped attachments are detected at capture and immediately before
-    resume, blocked without bypass, and represented only by
+46. Attachments in the exact captured complete submission region, including
+    siblings before/after a nested form, are detected before analysis and
+    immediately before resume, blocked without bypass, and represented only by
     `unsupported_attachment`.
 47. `#prompt-textarea[contenteditable]` and strict semantic Send resolution pass
     production-shaped fixtures; generic no-type tool buttons are never Send.
 48. Disabled protection creates no adapter/controller/dialog/interceptor,
     MutationObserver, health timer, or health audit runtime.
 49. A clean GitHub Actions job pins actions by commit SHA, rebuilds from clean
-    output, runs artifact and browser verification, and uploads no profiles or
-    secret fixtures.
+    output, runs unit, performance, artifact, and browser verification, and
+    uploads no profiles or secret fixtures.
+50. Persisted V1 settings exclude `redact`; exact legacy redact values migrate
+    atomically to `warn` before broadcast, while new redact saves are rejected.
+51. Enter and Send interception resolves from the exact event target and
+    adapter-owned weak context identity; no other valid composer can satisfy or
+    resume the captured attempt.
 
 ## 24. Required completion verification
 
@@ -1663,8 +1711,9 @@ unless the corresponding check ran.
 - Unknown programmatic submission mechanisms may bypass DOM interception.
 - The extension detects and blocks composer attachments but does not inspect
   their contents, filenames, paths, MIME types, previews, files, or images.
-- ProseMirror/contenteditable automatic redaction is disabled until a stable
-  editor-state replacement mechanism can be proven. Users must edit manually.
+- All ChatGPT automatic redaction, including native textarea,
+  ProseMirror/contenteditable, is disabled until application-state submission
+  can be proven. Users must edit manually.
 - Deterministic detectors have false positives and false negatives.
 - Generic international phone matching is inherently ambiguous.
 - Open Shadow DOM and an isolated execution world do not prevent host-page DOM

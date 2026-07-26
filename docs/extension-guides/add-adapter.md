@@ -65,9 +65,12 @@ no-type buttons are not submit candidates. Attachment selectors remain
 centralized and scoped to the resolved composer region; dormant file inputs and
 page-external attachment-like elements are not attachment evidence.
 
-`replacePrompt` returns an explicit verified result. Native textarea support
-must verify the value used by the submit path. Direct `textContent` assignment
-plus synthetic events is not sufficient for ProseMirror/contenteditable.
+`replacePrompt` returns an explicit verified result. The ChatGPT Milestone 1
+adapter reports every editor as unsupported, including native textarea, because
+DOM equality does not prove the application-state value used by the real submit
+path. A future adapter may report support only after an application-specific
+integration proves the value observed by its actual submission handler. Direct
+DOM assignment plus synthetic events is never sufficient evidence.
 
 Tests must cover click/Enter capture, Shift+Enter/modifiers/IME pass-through,
 recursive interception, double events, dynamic element replacement, stale

@@ -6,14 +6,15 @@ only and never sends prompt content to a backend.
 
 It detects email addresses, phone numbers, payment cards, AWS access key IDs,
 PEM private keys, contextual API secrets, and locally configured protected
-keywords. Depending on policy, a submission is allowed, warned, redacted, or
-blocked.
+keywords. Depending on policy, a submission is allowed, warned, or blocked. The
+pure redaction engine remains available for future adapters, but Milestone 1
+never replaces a ChatGPT composer automatically.
 
 ## Privacy and security summary
 
 - Prompt inspection, policy evaluation, and redaction run in the browser.
-- The ChatGPT adapter reads or replaces the active composer only for the
-  synchronous operation being performed; it does not cache prompt content.
+- The ChatGPT adapter reads the active composer only for the synchronous
+  operation being performed; it does not cache prompt content.
 - React receives category, confidence, and placeholder metadata only.
 - Runtime messages, the service worker, storage, audit records, and logs are
   prompt-free.
@@ -22,8 +23,9 @@ blocked.
   and no bypass.
 - Composer-scoped attachments are detected but never inspected; while protection
   is enabled, their submission is stopped with no bypass.
-- Automatic replacement is supported only for verified native textareas.
-  ProseMirror/contenteditable redaction is disabled and fails closed.
+- Automatic ChatGPT replacement is unsupported for every current editor,
+  including native textareas and ProseMirror/contenteditable. A legacy or
+  internal redact decision fails closed without changing or submitting content.
 - The dialog uses open Shadow DOM for CSS/component isolation and inspection,
   not as a security boundary.
 - The production manifest grants only `storage`; there are no host permissions,
@@ -57,7 +59,7 @@ pnpm verify:artifact
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
 
-The latest remediation run on 2026-07-26 passed 660 unit/DOM tests, 7 Chromium
+The latest remediation run on 2026-07-26 passed 680 unit/DOM tests, 7 Chromium
 integration tests, and 4 performance scenarios. The production build contained
 12 files; 43 URL literals were classified with zero fetching and zero unreviewed
 URLs.
@@ -80,10 +82,11 @@ interval active.
 
 The options page exposes protection enablement, email and phone actions,
 protected keywords, and a local audit-retention limit from 1 to 1,000 events.
-The settings UI does not offer automatic `redact`; warning redaction is shown
-only when the active editor reports verified replacement support. Payment cards,
-AWS access keys, and private keys always block; protected keywords warn;
-high-confidence API secrets block and medium-confidence API secrets warn.
+The settings UI does not offer automatic `redact`. Persisted V1 settings accept
+only `allow`, `warn`, or `block`; legacy V1 email/phone `redact` values migrate
+to `warn` at the storage boundary before broadcast. Payment cards, AWS access
+keys, and private keys always block; protected keywords warn; high-confidence
+API secrets block and medium-confidence API secrets warn.
 
 The audit page stores only privacy-safe decision metadata and enforcement or
 adapter-health errors. Clearing the audit log requires explicit confirmation.

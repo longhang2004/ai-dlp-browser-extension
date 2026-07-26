@@ -697,24 +697,31 @@ Implemented on 2026-07-26 as focused regression-tested commits:
 - Production-shaped `#prompt-textarea[contenteditable]` resolution and
   strong-candidate fail-closed interception cover Enter, Shift+Enter, IME, and
   click behavior.
-- `inspectSubmissionCapabilities` detects only composer-scoped attachment
-  presence. The controller checks it at capture and immediately before resume;
+- Enter and Send resolution is anchored to the exact event target. An opaque
+  adapter-owned identity uses weak composer/region references so analysis and
+  resume cannot substitute a different valid composer.
+- `inspectSubmissionCapabilities` scans the exact complete submission region,
+  including attachment chips outside a nested form. The controller checks that
+  region before analysis and immediately before resume;
   `unsupported_attachment` has no bypass and no file metadata.
-- Prompt replacement has an explicit capability/result. Native textarea
-  replacement is verified; contenteditable/ProseMirror replacement is
-  unsupported, warning redaction is hidden, and automatic redaction fails
-  closed with `redaction_unavailable`. The settings UI no longer offers
-  automatic redact.
+- Persisted V1 email/phone actions exclude redact. Exact legacy V1 redact
+  envelopes migrate atomically to warn, persist once, and broadcast only the
+  normalized settings; new redact saves are rejected.
+- Prompt replacement has an explicit capability/result and is unsupported for
+  every ChatGPT editor, including native textarea and
+  contenteditable/ProseMirror. Warning redaction is hidden, and an internal
+  automatic-redact decision fails closed with `redaction_unavailable` without
+  mutation or resume.
 - Disabled settings create no protection runtime and fully dispose the current
   adapter, controller, dialog, listeners, observer, timer, attempt, and
   authorization when protection is turned off.
-- Health uses `initializing → waiting_for_composer → active`, a fake-timer
-  grace period, immediate degradation for strong unresolved candidates, and
-  coalesced degraded auditing.
+- Health uses `initializing → waiting_for_composer → active`, a 10-second
+  default fake-timer-tested grace, immediate degradation for strong unresolved
+  candidates, fresh SPA waiting lifecycles, and coalesced degraded auditing.
 - `.github/workflows/ci.yml` pins actions by commit SHA, uses the locked
   Node/pnpm versions and dependency cache, deletes old build output, runs the
-  complete source/build/artifact/browser gate, uploads the extension only after
-  success, and uploads only failure traces/screenshots/error context.
+  complete source/performance/build/artifact/browser gate, uploads the extension
+  only after success, and uploads only failure traces/screenshots/error context.
 
 Live authenticated ChatGPT verification remains a manual QA gate. Automated
 fixtures prove the documented DOM variants but are not a claim that the current

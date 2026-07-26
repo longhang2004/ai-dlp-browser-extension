@@ -32,6 +32,7 @@ Security goals are:
 | Threat                                                                 | Mitigation                                                                                                                                 | Residual risk                                                                            |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
 | Host page removes or alters the composer, send control, or dialog host | Central semantic selectors, context versions, live re-resolution, degraded health, stopped captured attempts                               | A completely new or hostile DOM can prevent reliable interception                        |
+| A second valid composer shadows the event target                       | Target-anchored Enter/Send resolution plus adapter-owned weak composer/region identity; no document-global fallback                        | Entirely unknown submission mechanisms remain outside the supported adapter path         |
 | Recursive or duplicate submission                                      | Synchronous resume guard, controller state machine, one-shot authorization, click/keyboard deduplication                                   | Browser/page behavior outside supported variants may remain unsupported                  |
 | Prompt changes after approval                                          | Re-read and compare prompt plus URL, composer, send control, and context version before token consumption                                  | None within the modeled adapter path; unsupported page submission paths are out of scope |
 | Reused or expired approval                                             | Controller-private authorization, five-minute monotonic expiry, single consumption, invalidation on cancel/replace                         | User can submit again as a new attempt                                                   |
@@ -42,8 +43,8 @@ Security goals are:
 | Message spoofing                                                       | Sender ID, top-frame, origin, URL, schema, generation, and envelope validation; no externally connectable surface                          | Compromised extension context remains trusted by the browser model                       |
 | Corrupted settings weaken strict categories                            | Safe defaults plus exact v1 policy validation; card/AWS/private-key and API-secret defaults cannot be weakened by settings                 | User-configurable email/phone actions may intentionally allow those categories           |
 | Oversized input causes partial or expensive scanning                   | Reject over 100,000 UTF-16 units before detection; fixed error and no bypass                                                               | Large supported prompts still consume local CPU within the tested budget                 |
-| Attachment bypasses text-only inspection                               | Composer-scoped presence is checked at capture and immediately before resume; fixed error, no bypass, and no file metadata                 | Attachment contents are not inspected                                                    |
-| DOM-only ProseMirror replacement submits stale editor state            | Contenteditable replacement is unsupported; UI hides redaction and automatic redaction fails closed                                        | Users must edit contenteditable prompts manually                                         |
+| Attachment outside the nearest nested form bypasses inspection         | Presence is checked across the exact captured composer-owned region before analysis and resume; fixed error and no file metadata           | Attachment contents are not inspected                                                    |
+| DOM-only replacement submits stale application state                   | All current ChatGPT editor replacement is unsupported; UI hides redaction and automatic redaction fails closed                             | Users must edit prompts manually                                                         |
 | Extension startup or worker disconnect creates false confidence        | Status remains `initializing`/`waiting_for_composer`/`unavailable`; activation requires settings and a valid composer                      | Submissions during initialization are intentionally not intercepted                      |
 
 ## Explicit non-goals and limitations
@@ -71,7 +72,8 @@ registered. Submissions in that brief interval pass through and status remains
 `initializing`, never `active`.
 
 After settings initialization, ordinary delayed composer rendering reports
-`waiting_for_composer` without an audit event. A grace-period expiry or a strong
-unresolved submission candidate can transition to one coalesced degraded event.
-Disabled protection owns no adapter, controller, dialog, listeners, observer,
-timer, or health-audit runtime.
+`waiting_for_composer` without an audit event. The default grace is 10 seconds.
+A grace-period expiry or a strong unresolved submission candidate can transition
+to one coalesced degraded event; SPA navigation starts a fresh waiting
+lifecycle. Disabled protection owns no adapter, controller, dialog, listeners,
+observer, timer, or health-audit runtime.

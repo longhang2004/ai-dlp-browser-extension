@@ -159,6 +159,134 @@ describe("ChatGptAdapter prompt operations", () => {
     });
   });
 
+  it("detects an attachment sibling outside the nearest composer form", () => {
+    renderFixture(`
+      <section data-testid="composer-root">
+        <div data-testid="composer-attachment">
+          <button aria-label="Remove attachment">Remove</button>
+        </div>
+        <form>
+          <div id="prompt-textarea" contenteditable="true" role="textbox"></div>
+          <button data-testid="send-button" aria-label="Send prompt">Send</button>
+        </form>
+      </section>
+    `);
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    if (context === null) throw new Error("Expected submission context.");
+
+    expect(adapter.inspectSubmissionCapabilities(context)).toEqual({
+      hasUnsupportedAttachment: true,
+    });
+  });
+
+  it.each(["before", "after"] as const)(
+    "detects multiple attachment chips %s the form in the owned root",
+    (position) => {
+      const attachments = `
+        <div data-testid="composer-attachment"></div>
+        <div data-testid="attachment-chip"></div>
+      `;
+      const form = `
+        <form>
+          <div id="prompt-textarea" contenteditable="true" role="textbox"></div>
+          <input type="file" />
+          <button data-testid="send-button" aria-label="Send prompt">Send</button>
+        </form>
+      `;
+      renderFixture(`
+        <section data-testid="composer-root">
+          ${position === "before" ? attachments : ""}
+          ${form}
+          ${position === "after" ? attachments : ""}
+        </section>
+      `);
+      const adapter = createAdapter();
+      const context = adapter.resolveCurrentSubmissionContext();
+      if (context === null) throw new Error("Expected submission context.");
+
+      expect(context.submissionRegion).toBe(
+        document.querySelector('[data-testid="composer-root"]'),
+      );
+      expect(adapter.inspectSubmissionCapabilities(context)).toEqual({
+        hasUnsupportedAttachment: true,
+      });
+    },
+  );
+
+  it("scans only the exact event-targeted composer attachment region", () => {
+    renderFixture(`
+      <section data-testid="composer-root" id="composer-a">
+        <div data-testid="composer-attachment"></div>
+        <div contenteditable="true" role="textbox" aria-label="Message ChatGPT"></div>
+        <button data-testid="send-button" aria-label="Send prompt">Send A</button>
+      </section>
+      <section data-testid="composer-root" id="composer-b">
+        <form>
+          <div id="prompt-b" contenteditable="true" role="textbox" aria-label="Message ChatGPT"></div>
+          <input type="file" />
+          <button data-testid="send-button" aria-label="Send prompt">Send B</button>
+        </form>
+      </section>
+    `);
+    const adapter = createAdapter();
+    let capturedIdentity = 0;
+    adapter.registerSubmitInterceptor((attempt) => {
+      capturedIdentity = attempt.contextIdentity;
+      return "intercept";
+    });
+    const composerB = document.querySelector("#prompt-b");
+    if (composerB === null) throw new Error("Missing composer B.");
+
+    dispatchEnter(composerB);
+    const contextB = adapter.resolveSubmissionContext(capturedIdentity);
+    if (contextB === null) throw new Error("Expected composer B context.");
+
+    expect(contextB.submissionRegion).toBe(
+      document.querySelector("#composer-b"),
+    );
+    expect(adapter.inspectSubmissionCapabilities(contextB)).toEqual({
+      hasUnsupportedAttachment: false,
+    });
+    contextB.submissionRegion.insertAdjacentHTML(
+      "afterbegin",
+      '<div data-testid="file-preview"></div>',
+    );
+    expect(adapter.inspectSubmissionCapabilities(contextB)).toEqual({
+      hasUnsupportedAttachment: true,
+    });
+  });
+
+  it("fails closed when attachment ownership cannot be bounded to one region", () => {
+    renderFixture(`
+      <section data-testid="composer-root">
+        <form id="chat-form">
+          <div id="prompt-textarea" contenteditable="true" role="textbox"></div>
+        </form>
+      </section>
+      <button
+        form="chat-form"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      >Send outside</button>
+    `);
+    const adapter = createAdapter();
+    const attempts: unknown[] = [];
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const composer = document.querySelector("#prompt-textarea");
+    if (composer === null) throw new Error("Missing composer.");
+
+    const enter = dispatchEnter(composer);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(attempts).toEqual([
+      expect.objectContaining({ contextIdentity: 0, source: "enter" }),
+    ]);
+  });
+
   it("reads structured text from the production prompt-textarea", () => {
     renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
     const adapter = createAdapter();

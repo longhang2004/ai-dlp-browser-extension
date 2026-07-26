@@ -59,9 +59,11 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
   let hasAttachment = harnessOptions.hasAttachment ?? false;
   const composer = { isConnected: true } as HTMLElement;
   const sendControl = { isConnected: true } as HTMLElement;
+  const submissionRegion = { isConnected: true } as HTMLElement;
   const context = (): LiveSubmissionContext => ({
     composer,
     sendControl,
+    submissionRegion,
     applicationUrl: new URL(currentUrl.href),
     contextIdentity: 1,
     contextVersion,

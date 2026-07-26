@@ -237,6 +237,67 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     adapter.dispose();
   });
 
+  it("invalidates approval when the owned region changes around the same composer", async () => {
+    const parsed = new DOMParser().parseFromString(
+      MULTI_COMPOSER_FIXTURE,
+      "text/html",
+    );
+    document.body.replaceChildren(...parsed.body.childNodes);
+    const regionB = document.querySelector("#composer-b");
+    const composerB = document.querySelector("#prompt-b");
+    const sendB = document.querySelector("#composer-b button");
+    if (
+      !(regionB instanceof HTMLElement) ||
+      !(composerB instanceof HTMLElement) ||
+      !(sendB instanceof HTMLButtonElement)
+    ) {
+      throw new Error("Missing multi-composer fixture.");
+    }
+    composerB.textContent = "person-b@example.com";
+    const adapter = new ChatGptAdapter({
+      document,
+      getCurrentUrl: () => new URL("https://chatgpt.com/"),
+    });
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const dialog = {
+      show: vi.fn(
+        () =>
+          new Promise<ProtectionDialogIntent>((resolve) => (settle = resolve)),
+      ),
+      cancel: vi.fn(),
+    };
+    const events: AuditEvent[] = [];
+    const controller = createSubmissionController({
+      adapter,
+      settings: () => createDefaultProtectionSettings(),
+      dialog,
+      audit: { append: (event) => void events.push(event) },
+      analyze: (prompt) => [findingFor(prompt)],
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.email"],
+        reasonCode: "policy_match",
+      }),
+    });
+    controller.register();
+    const resumed = vi.fn();
+    sendB.addEventListener("click", resumed);
+    sendB.click();
+    await vi.waitFor(() => expect(dialog.show).toHaveBeenCalledOnce());
+
+    const replacementRegion = document.createElement("section");
+    replacementRegion.dataset.testid = "composer-root";
+    replacementRegion.append(composerB, sendB);
+    regionB.replaceWith(replacementRegion);
+    settle("bypass");
+    await controller.whenSettledForTesting();
+
+    expect(resumed).not.toHaveBeenCalled();
+    expect(events[0]).toMatchObject({ resolution: "cancelled" });
+    controller.dispose();
+    adapter.dispose();
+  });
+
   it("stops click and Enter duplicates while one dialog is active, then resumes once", async () => {
     const prompt = "person@example.com";
     const harness = createHarness(prompt);

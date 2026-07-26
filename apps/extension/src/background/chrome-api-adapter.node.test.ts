@@ -99,6 +99,9 @@ describe("production Chrome API adapter", () => {
     let productionConnectListener:
       ((port: chrome.runtime.Port) => void) | undefined;
     const disconnectListeners = new Set<(port: chrome.runtime.Port) => void>();
+    const messageListeners = new Set<
+      (message: unknown, port: chrome.runtime.Port) => void
+    >();
     const postMessage = vi.fn();
     const disconnect = vi.fn();
     const productionPort = {
@@ -117,7 +120,14 @@ describe("production Chrome API adapter", () => {
         removeListener: (listener: (port: chrome.runtime.Port) => void) =>
           disconnectListeners.delete(listener),
       } as unknown as chrome.runtime.Port["onDisconnect"],
-      onMessage: {} as chrome.runtime.Port["onMessage"],
+      onMessage: {
+        addListener: (
+          listener: (message: unknown, port: chrome.runtime.Port) => void,
+        ) => messageListeners.add(listener),
+        removeListener: (
+          listener: (message: unknown, port: chrome.runtime.Port) => void,
+        ) => messageListeners.delete(listener),
+      } as unknown as chrome.runtime.Port["onMessage"],
     } as chrome.runtime.Port;
     const source = {
       storage: {
@@ -167,5 +177,15 @@ describe("production Chrome API adapter", () => {
     expect(internalDisconnect).toHaveBeenCalledOnce();
     adaptedPort?.onDisconnect.removeListener?.(internalDisconnect);
     expect(disconnectListeners).toHaveLength(0);
+
+    const internalMessage = vi.fn();
+    adaptedPort?.onMessage.addListener(internalMessage);
+    expect(messageListeners).toHaveLength(1);
+    for (const listener of messageListeners) {
+      listener({ type: "status.snapshot" }, productionPort);
+    }
+    expect(internalMessage).toHaveBeenCalledWith({ type: "status.snapshot" });
+    adaptedPort?.onMessage.removeListener?.(internalMessage);
+    expect(messageListeners).toHaveLength(0);
   });
 });

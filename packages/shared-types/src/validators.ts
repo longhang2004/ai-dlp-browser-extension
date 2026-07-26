@@ -34,6 +34,7 @@ import { RUNTIME_ERROR_CODES } from "./messages.js";
 import type {
   RuntimeRequest,
   RuntimeResponse,
+  ContentStatusPortMessage,
   SettingsPortMessage,
 } from "./messages.js";
 import {
@@ -67,7 +68,10 @@ import type {
   SettingsValidationError,
   StoredSettingsEnvelope,
 } from "./settings.js";
-import type { ProtectionStatusSnapshot } from "./status.js";
+import type {
+  ContentProtectionStatus,
+  ProtectionStatusSnapshot,
+} from "./status.js";
 import {
   hasExactOwnKeys,
   INVALID_SNAPSHOT,
@@ -745,6 +749,31 @@ export function isProtectionStatusSnapshot(
   return validatesStructuredSnapshot(value, isProtectionStatusSnapshotValue);
 }
 
+function isContentProtectionStatusValue(
+  value: unknown,
+): value is ContentProtectionStatus {
+  return safelyValidate(() => {
+    if (
+      !isPlainRecord(value) ||
+      !hasExactOwnKeys(value, ["state", "application", "protectionEnabled"]) ||
+      value.application !== "chatgpt"
+    ) {
+      return false;
+    }
+    switch (value.state) {
+      case "initializing":
+        return value.protectionEnabled === null;
+      case "active":
+      case "degraded":
+        return value.protectionEnabled === true;
+      case "disabled":
+        return value.protectionEnabled === false;
+      default:
+        return false;
+    }
+  });
+}
+
 function isSettingsValidationErrorSnapshot(
   value: unknown,
 ): value is SettingsValidationError {
@@ -889,8 +918,9 @@ function isSettingsPortMessageSnapshot(
   return safelyValidate(
     () =>
       isPlainRecord(value) &&
-      hasExactOwnKeys(value, ["type", "envelope"]) &&
+      hasExactOwnKeys(value, ["type", "generation", "envelope"]) &&
       value.type === "settings.snapshot" &&
+      isNonNegativeSafeInteger(value.generation) &&
       isStoredSettingsEnvelopeSnapshot(value.envelope),
   );
 }
@@ -899,4 +929,23 @@ export function isSettingsPortMessage(
   value: unknown,
 ): value is SettingsPortMessage {
   return validatesStructuredSnapshot(value, isSettingsPortMessageSnapshot);
+}
+
+function isContentStatusPortMessageSnapshot(
+  value: unknown,
+): value is ContentStatusPortMessage {
+  return safelyValidate(
+    () =>
+      isPlainRecord(value) &&
+      hasExactOwnKeys(value, ["type", "generation", "status"]) &&
+      value.type === "status.snapshot" &&
+      isNonNegativeSafeInteger(value.generation) &&
+      isContentProtectionStatusValue(value.status),
+  );
+}
+
+export function isContentStatusPortMessage(
+  value: unknown,
+): value is ContentStatusPortMessage {
+  return validatesStructuredSnapshot(value, isContentStatusPortMessageSnapshot);
 }

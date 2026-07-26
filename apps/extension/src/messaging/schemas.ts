@@ -176,9 +176,11 @@ export function createRuntimeResponse(value: RuntimeResponse): RuntimeResponse {
 
 export function createSettingsSnapshotMessage(
   envelope: StoredSettingsEnvelope,
+  generation: number,
 ): SettingsPortMessage {
   const message: SettingsPortMessage = {
     type: "settings.snapshot",
+    generation,
     envelope: structuredClone(envelope),
   };
   if (!isSettingsPortMessage(message)) {

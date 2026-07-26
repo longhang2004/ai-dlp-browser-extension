@@ -31,6 +31,10 @@ export function adaptRuntimePort(port: chrome.runtime.Port): RuntimePortLike {
     () => void,
     (disconnectedPort: chrome.runtime.Port) => void
   >();
+  const messageListenerMap = new Map<
+    (message: unknown) => void,
+    (message: unknown, sourcePort: chrome.runtime.Port) => void
+  >();
   const adapted: RuntimePortLike = {
     name: port.name,
     postMessage(message) {
@@ -51,6 +55,20 @@ export function adaptRuntimePort(port: chrome.runtime.Port): RuntimePortLike {
         if (wrapped === undefined) return;
         port.onDisconnect.removeListener(wrapped);
         listenerMap.delete(listener);
+      },
+    },
+    onMessage: {
+      addListener(listener) {
+        if (messageListenerMap.has(listener)) return;
+        const wrapped = (message: unknown): void => listener(message);
+        messageListenerMap.set(listener, wrapped);
+        port.onMessage.addListener(wrapped);
+      },
+      removeListener(listener) {
+        const wrapped = messageListenerMap.get(listener);
+        if (wrapped === undefined) return;
+        port.onMessage.removeListener(wrapped);
+        messageListenerMap.delete(listener);
       },
     },
   };

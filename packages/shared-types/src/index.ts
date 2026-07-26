@@ -66,6 +66,7 @@ export type {
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
+  ContentStatusPortMessage,
   SettingsPortMessage,
 } from "./messages.js";
 export { POLICY_ACTIONS } from "./policy.js";
@@ -121,7 +122,11 @@ export type {
 } from "./settings.js";
 export { areUnicodeCaseInsensitiveEquivalent } from "./unicode-equivalence.js";
 export { PROTECTION_STATUSES } from "./status.js";
-export type { ProtectionStatus, ProtectionStatusSnapshot } from "./status.js";
+export type {
+  ContentProtectionStatus,
+  ProtectionStatus,
+  ProtectionStatusSnapshot,
+} from "./status.js";
 export {
   createPolicyDecision,
   createPolicyFinding,
@@ -138,6 +143,7 @@ export {
   isPolicyInput,
   isRuntimeRequest,
   isRuntimeResponse,
+  isContentStatusPortMessage,
   isSettingsPortMessage,
   isSettingsValidationError,
   isStoredAuditEnvelope,

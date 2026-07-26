@@ -7,6 +7,7 @@ import {
 } from "@ai-dlp/shared-types";
 
 import { bootstrapBackground, type BackgroundChromeApi } from "./bootstrap.js";
+import type { RuntimePortLike } from "./settings-ports.js";
 
 describe("background bootstrap", () => {
   it("restricts storage exactly once and registers both listeners synchronously", async () => {
@@ -190,6 +191,96 @@ describe("background bootstrap", () => {
     expect(response).toMatchObject({
       type: "audit.result",
       envelope: { schemaVersion: 1, events: [event] },
+    });
+  });
+
+  it("exposes only validated live content status to extension pages", async () => {
+    const messageListeners: Array<
+      Parameters<BackgroundChromeApi["runtime"]["onMessage"]["addListener"]>[0]
+    > = [];
+    const connectListeners: Array<(port: RuntimePortLike) => void> = [];
+    const runtimeId = "abcdefghijklmnopabcdefghijklmnop";
+    const api: BackgroundChromeApi = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+          setAccessLevel: vi.fn(async () => undefined),
+        },
+      },
+      runtime: {
+        id: runtimeId,
+        onMessage: {
+          addListener: (listener) => messageListeners.push(listener),
+        },
+        onConnect: {
+          addListener: (listener) => connectListeners.push(listener),
+        },
+      },
+    };
+    bootstrapBackground(api);
+    const portMessages = new Set<(message: unknown) => void>();
+    const disconnects = new Set<() => void>();
+    const port: RuntimePortLike = {
+      name: "settings-v1",
+      sender: {
+        id: runtimeId,
+        url: "https://chatgpt.com/c/abc",
+        origin: "https://chatgpt.com",
+        frameId: 0,
+      },
+      postMessage: vi.fn(),
+      disconnect: vi.fn(),
+      onMessage: {
+        addListener: (listener) => portMessages.add(listener),
+        removeListener: (listener) => portMessages.delete(listener),
+      },
+      onDisconnect: {
+        addListener: (listener) => disconnects.add(listener),
+        removeListener: (listener) => disconnects.delete(listener),
+      },
+    };
+    connectListeners[0]?.(port);
+
+    const readStatus = () =>
+      new Promise<unknown>((resolve) => {
+        messageListeners[0]?.(
+          { type: "status.read" },
+          {
+            id: runtimeId,
+            url: `chrome-extension://${runtimeId}/popup.html`,
+            origin: `chrome-extension://${runtimeId}`,
+            frameId: 0,
+          },
+          resolve,
+        );
+      });
+    await expect(readStatus()).resolves.toMatchObject({
+      type: "status.result",
+      status: { state: "initializing", protectionEnabled: null },
+    });
+    await vi.waitFor(() => expect(port.postMessage).toHaveBeenCalled());
+
+    for (const listener of portMessages) {
+      listener({
+        type: "status.snapshot",
+        generation: 0,
+        status: {
+          state: "active",
+          application: "chatgpt",
+          protectionEnabled: true,
+        },
+      });
+    }
+    await expect(readStatus()).resolves.toMatchObject({
+      type: "status.result",
+      status: { state: "active", protectionEnabled: true },
+    });
+
+    for (const listener of disconnects) listener();
+    await expect(readStatus()).resolves.toMatchObject({
+      type: "status.result",
+      status: { state: "unavailable", protectionEnabled: null },
     });
   });
 });

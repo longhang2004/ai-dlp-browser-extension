@@ -13,8 +13,14 @@ const runtimeId = "abcdefghijklmnopabcdefghijklmnop";
 
 function port(overrides: Partial<RuntimePortLike> = {}): RuntimePortLike & {
   fireDisconnect(): void;
+  fireMessage(message: unknown): void;
+  invokeCapturedMessage(index: number, message: unknown): void;
+  invokeCapturedDisconnect(index: number): void;
 } {
   const disconnectListeners = new Set<() => void>();
+  const messageListeners = new Set<(message: unknown) => void>();
+  const capturedDisconnectListeners: Array<() => void> = [];
+  const capturedMessageListeners: Array<(message: unknown) => void> = [];
   return {
     name: "settings-v1",
     sender: {
@@ -29,13 +35,32 @@ function port(overrides: Partial<RuntimePortLike> = {}): RuntimePortLike & {
     onDisconnect: {
       addListener(listener) {
         disconnectListeners.add(listener);
+        capturedDisconnectListeners.push(listener);
       },
       removeListener(listener) {
         disconnectListeners.delete(listener);
       },
     },
+    onMessage: {
+      addListener(listener) {
+        messageListeners.add(listener);
+        capturedMessageListeners.push(listener);
+      },
+      removeListener(listener) {
+        messageListeners.delete(listener);
+      },
+    },
     fireDisconnect() {
       for (const listener of disconnectListeners) listener();
+    },
+    fireMessage(message) {
+      for (const listener of messageListeners) listener(message);
+    },
+    invokeCapturedMessage(index, message) {
+      capturedMessageListeners[index]?.(message);
+    },
+    invokeCapturedDisconnect(index) {
+      capturedDisconnectListeners[index]?.();
     },
     ...overrides,
   };
@@ -92,6 +117,7 @@ describe("settings ports", () => {
     await vi.waitFor(() => {
       expect(connected.postMessage).toHaveBeenCalledWith({
         type: "settings.snapshot",
+        generation: 0,
         envelope: expect.objectContaining({ schemaVersion: 1 }),
       });
     });
@@ -161,7 +187,251 @@ describe("settings ports", () => {
     expect(connected.postMessage).toHaveBeenCalledTimes(1);
     expect(connected.postMessage).toHaveBeenCalledWith({
       type: "settings.snapshot",
+      generation: 1,
       envelope: newEnvelope,
     });
+  });
+
+  it("reports initializing until an exact prompt-free content status arrives", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    manager.handleConnect(connected);
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+
+    expect(manager.readStatus(3)).toEqual({
+      state: "initializing",
+      application: "chatgpt",
+      protectionEnabled: null,
+      recentEventCount: 3,
+    });
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "disabled",
+        application: "chatgpt",
+        protectionEnabled: false,
+      },
+    });
+    expect(manager.readStatus(3).state).toBe("initializing");
+
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+      prompt: "reject this whole message",
+    });
+    expect(manager.readStatus(3).state).toBe("initializing");
+
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(3)).toEqual({
+      state: "active",
+      application: "chatgpt",
+      protectionEnabled: true,
+      recentEventCount: 3,
+    });
+  });
+
+  it("reports unavailable after the last content port disconnects", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    manager.handleConnect(connected);
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("active");
+
+    connected.fireDisconnect();
+    expect(manager.readStatus(0)).toEqual({
+      state: "unavailable",
+      application: "chatgpt",
+      protectionEnabled: null,
+      recentEventCount: 0,
+    });
+  });
+
+  it("aggregates multiple tabs conservatively", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const healthy = port();
+    const degraded = port();
+    manager.handleConnect(healthy);
+    manager.handleConnect(degraded);
+    await vi.waitFor(() => {
+      expect(healthy.postMessage).toHaveBeenCalled();
+      expect(degraded.postMessage).toHaveBeenCalled();
+    });
+    healthy.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("initializing");
+    degraded.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "degraded",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("degraded");
+
+    degraded.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "disabled",
+        application: "chatgpt",
+        protectionEnabled: false,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("degraded");
+  });
+
+  it("rejects early and stale acknowledgements across overlapping broadcasts", async () => {
+    const settingsStore = createSettingsStore(createMemoryStoragePort());
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore,
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    manager.handleConnect(connected);
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("initializing");
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("active");
+
+    const envelope = await settingsStore.read();
+    const disabledEnvelope = structuredClone(envelope);
+    disabledEnvelope.settings.protectionEnabled = false;
+    const first = manager.broadcast(envelope);
+    expect(manager.readStatus(0).state).toBe("initializing");
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("initializing");
+    const second = manager.broadcast(disabledEnvelope);
+    await Promise.all([first, second]);
+    expect(connected.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "settings.snapshot", generation: 2 }),
+    );
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 1,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("initializing");
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 2,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("initializing");
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 2,
+      status: {
+        state: "disabled",
+        application: "chatgpt",
+        protectionEnabled: false,
+      },
+    });
+    expect(manager.readStatus(0).state).toBe("disabled");
+  });
+
+  it("makes queued callbacks from a detached connection inert", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    manager.handleConnect(connected);
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+    connected.fireDisconnect();
+    manager.handleConnect(connected);
+    await vi.waitFor(() =>
+      expect(connected.postMessage).toHaveBeenCalledTimes(2),
+    );
+
+    connected.invokeCapturedMessage(0, {
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        protectionEnabled: true,
+      },
+    });
+    connected.invokeCapturedDisconnect(0);
+    expect(manager.readStatus(0).state).toBe("initializing");
   });
 });

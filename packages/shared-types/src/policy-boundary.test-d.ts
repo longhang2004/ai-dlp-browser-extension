@@ -16,6 +16,7 @@ import {
   type MaskedPreview,
   type AuditEventId,
   type AuditTimestamp,
+  type ContentStatusPortMessage,
   type PolicyConfiguration,
   type PolicyDecision,
   type PolicyFinding,
@@ -72,6 +73,9 @@ export type RuntimeRequestIsPromptFree = Assert<IsPromptFree<RuntimeRequest>>;
 export type RuntimeResponseIsPromptFree = Assert<IsPromptFree<RuntimeResponse>>;
 export type SettingsPortIsPromptFree = Assert<
   IsPromptFree<SettingsPortMessage>
+>;
+export type ContentStatusPortIsPromptFree = Assert<
+  IsPromptFree<ContentStatusPortMessage>
 >;
 export type AuditEventIsPromptFree = Assert<IsPromptFree<AuditEvent>>;
 export type AuditEnvelopeIsPromptFree = Assert<
@@ -528,6 +532,7 @@ const rejectedRuntimeErrorResponse: RuntimeErrorResponse =
 
 const settingsPortWithSanitizedText = {
   type: "settings.snapshot" as const,
+  generation: 0,
   envelope: {
     schemaVersion: 1 as const,
     settings: createDefaultProtectionSettings(),
@@ -540,6 +545,20 @@ const settingsPortWithSanitizedText = {
 // @ts-expect-error Settings port messages reject sanitized prompt text.
 const rejectedSettingsPortMessage: SettingsPortMessage =
   settingsPortWithSanitizedText;
+
+const contentStatusWithPrompt = {
+  type: "status.snapshot" as const,
+  generation: 0,
+  status: {
+    state: "active" as const,
+    application: "chatgpt" as const,
+    protectionEnabled: true as const,
+  },
+  prompt: "secret",
+};
+// @ts-expect-error Content status messages reject prompt text.
+const rejectedContentStatusMessage: ContentStatusPortMessage =
+  contentStatusWithPrompt;
 
 const settingsSaveWithNestedPrompt = {
   type: "settings.save" as const,
@@ -582,6 +601,7 @@ const rejectedSettingsResponseWithNestedPrompt: RuntimeResponse =
 
 const settingsPortWithNestedPrompt = {
   type: "settings.snapshot" as const,
+  generation: 0,
   envelope: {
     schemaVersion: 1 as const,
     settings: {
@@ -596,6 +616,7 @@ const rejectedSettingsPortWithNestedPrompt: SettingsPortMessage =
 
 const settingsPortWithAugmentedKeywords = {
   type: "settings.snapshot" as const,
+  generation: 0,
   envelope: {
     schemaVersion: 1 as const,
     settings: {
@@ -840,6 +861,7 @@ void rejectedRuntimeRequest;
 void rejectedRuntimeResponse;
 void rejectedRuntimeErrorResponse;
 void rejectedSettingsPortMessage;
+void rejectedContentStatusMessage;
 void rejectedDecisionAuditEvent;
 void rejectedEnforcementAuditEvent;
 void rejectedHealthAuditEvent;

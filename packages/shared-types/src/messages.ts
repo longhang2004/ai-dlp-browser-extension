@@ -5,6 +5,7 @@ import type {
   StoredSettingsEnvelope,
 } from "./settings.js";
 import type { ProtectionStatusSnapshot } from "./status.js";
+import type { ContentProtectionStatus } from "./status.js";
 import type { PromptFreeArray, PromptFreeBoundary } from "./privacy.js";
 
 export const SETTINGS_PORT_NAME = "settings-v1";
@@ -55,5 +56,12 @@ export type RuntimeResponse = PromptFreeBoundary &
 
 export type SettingsPortMessage = PromptFreeBoundary & {
   type: "settings.snapshot";
+  generation: number;
   envelope: StoredSettingsEnvelope;
+};
+
+export type ContentStatusPortMessage = PromptFreeBoundary & {
+  type: "status.snapshot";
+  generation: number;
+  status: ContentProtectionStatus;
 };

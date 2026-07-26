@@ -28,3 +28,20 @@ export type ProtectionStatusSnapshot =
       state: "disabled";
       protectionEnabled: false;
     });
+
+export type ContentProtectionStatus =
+  | (PromptFreeBoundary & {
+      state: "initializing";
+      application: "chatgpt";
+      protectionEnabled: null;
+    })
+  | (PromptFreeBoundary & {
+      state: "active" | "degraded";
+      application: "chatgpt";
+      protectionEnabled: true;
+    })
+  | (PromptFreeBoundary & {
+      state: "disabled";
+      application: "chatgpt";
+      protectionEnabled: false;
+    });

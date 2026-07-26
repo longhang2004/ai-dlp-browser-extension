@@ -46,6 +46,8 @@ export function bootstrapBackground(
     settingsStore,
     auditStore,
     broadcastSettings: async (envelope) => settingsPorts.broadcast(envelope),
+    readStatus: async () =>
+      settingsPorts.readStatus((await auditStore.read()).events.length),
   });
 
   api.runtime.onMessage.addListener(messageListener);

@@ -24,6 +24,7 @@ import {
   isAuditEvent,
   isAuditEventId,
   isAuditTimestamp,
+  isContentStatusPortMessage,
   isDecisionAuditEvent,
   isDisplayFinding,
   isEnforcementErrorAuditEvent,
@@ -1411,6 +1412,7 @@ describe("runtime message validation", () => {
     expect(
       isSettingsPortMessage({
         type: "settings.snapshot",
+        generation: 0,
         envelope: validSettingsEnvelope,
       }),
     ).toBe(true);
@@ -1418,7 +1420,65 @@ describe("runtime message validation", () => {
       isSettingsPortMessage({
         type: "settings.snapshot",
         envelope: validSettingsEnvelope,
+      }),
+    ).toBe(false);
+    expect(
+      isSettingsPortMessage({
+        type: "settings.snapshot",
+        generation: 0,
+        envelope: validSettingsEnvelope,
         prompt: "secret",
+      }),
+    ).toBe(false);
+    expect(
+      isContentStatusPortMessage({
+        type: "status.snapshot",
+        generation: 0,
+        status: {
+          state: "active",
+          application: "chatgpt",
+          protectionEnabled: true,
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isContentStatusPortMessage({
+        type: "status.snapshot",
+        status: {
+          state: "active",
+          application: "chatgpt",
+          protectionEnabled: true,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isContentStatusPortMessage({
+        type: "status.snapshot",
+        generation: 0,
+        status: {
+          state: "active",
+          application: "chatgpt",
+          protectionEnabled: true,
+        },
+        prompt: "secret",
+      }),
+    ).toBe(false);
+    expect(
+      isSettingsPortMessage({
+        type: "settings.snapshot",
+        generation: -1,
+        envelope: validSettingsEnvelope,
+      }),
+    ).toBe(false);
+    expect(
+      isContentStatusPortMessage({
+        type: "status.snapshot",
+        generation: 0.5,
+        status: {
+          state: "initializing",
+          application: "chatgpt",
+          protectionEnabled: null,
+        },
       }),
     ).toBe(false);
     expect(
@@ -1663,6 +1723,7 @@ describe("hostile object containment", () => {
       isAuditEvent,
       isAuditEventId,
       isAuditTimestamp,
+      isContentStatusPortMessage,
       isDecisionAuditEvent,
       isDisplayFinding,
       isEnforcementErrorAuditEvent,
@@ -1826,10 +1887,24 @@ describe("hostile object containment", () => {
       {
         value: {
           type: "settings.snapshot",
+          generation: 0,
           envelope: validSettingsEnvelope,
         },
         key: "type",
         validator: isSettingsPortMessage,
+      },
+      {
+        value: {
+          type: "status.snapshot",
+          generation: 0,
+          status: {
+            state: "initializing",
+            application: "chatgpt",
+            protectionEnabled: null,
+          },
+        },
+        key: "type",
+        validator: isContentStatusPortMessage,
       },
     ];
 

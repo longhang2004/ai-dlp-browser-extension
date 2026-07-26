@@ -118,11 +118,14 @@ class FakeAdapter implements ChatApplicationAdapter {
   inspectSubmissionCapabilities() {
     return { hasUnsupportedAttachment: false };
   }
+  getPromptReplacementCapability() {
+    return "unsupported" as const;
+  }
   readPrompt(): string {
     throw new Error("not used");
   }
-  replacePrompt(): void {
-    throw new Error("not used");
+  replacePrompt() {
+    return { ok: false as const, reason: "unsupported_editor" as const };
   }
   registerSubmitInterceptor(handler: SubmitInterceptor): () => void {
     this.interceptor = handler;

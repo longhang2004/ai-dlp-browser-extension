@@ -8,6 +8,8 @@ import type {
   ChatApplicationAdapter,
   ConsumedSubmissionAuthorization,
   LiveSubmissionContext,
+  PromptReplacementCapability,
+  PromptReplacementResult,
   SubmissionContentCapabilities,
   SubmitInterceptor,
 } from "../chat-application-adapter.js";
@@ -263,17 +265,28 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     };
   }
 
-  replacePrompt(context: LiveSubmissionContext, text: string): void {
+  getPromptReplacementCapability(
+    context: LiveSubmissionContext,
+  ): PromptReplacementCapability {
     this.#assertPromptContext(context);
-    if (context.composer instanceof HTMLTextAreaElement) {
-      const setValue = nativeTextareaValueSetter(context.composer);
-      if (setValue === null) {
-        context.composer.value = text;
-      } else {
-        setValue(text);
-      }
+    return context.composer instanceof HTMLTextAreaElement
+      ? "supported"
+      : "unsupported";
+  }
+
+  replacePrompt(
+    context: LiveSubmissionContext,
+    text: string,
+  ): PromptReplacementResult {
+    this.#assertPromptContext(context);
+    if (!(context.composer instanceof HTMLTextAreaElement)) {
+      return { ok: false, reason: "unsupported_editor" };
+    }
+    const setValue = nativeTextareaValueSetter(context.composer);
+    if (setValue === null) {
+      context.composer.value = text;
     } else {
-      context.composer.textContent = text;
+      setValue(text);
     }
     context.composer.dispatchEvent(
       new InputEvent("input", {
@@ -282,6 +295,9 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
         inputType: "insertText",
       }),
     );
+    return context.composer.value === text
+      ? { ok: true, verifiedText: text }
+      : { ok: false, reason: "replacement_not_acknowledged" };
   }
 
   registerSubmitInterceptor(handler: SubmitInterceptor): () => void {

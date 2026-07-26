@@ -19,6 +19,18 @@ export type SubmissionContentCapabilities = {
   hasUnsupportedAttachment: boolean;
 };
 
+export type PromptReplacementCapability = "supported" | "unsupported";
+
+export type PromptReplacementResult =
+  | { ok: true; verifiedText: string }
+  | {
+      ok: false;
+      reason:
+        | "unsupported_editor"
+        | "replacement_not_acknowledged"
+        | "context_changed";
+    };
+
 declare const consumedSubmissionAuthorizationBrand: unique symbol;
 
 export type ConsumedSubmissionAuthorization = {
@@ -39,8 +51,14 @@ export interface ChatApplicationAdapter {
   inspectSubmissionCapabilities(
     context: LiveSubmissionContext,
   ): SubmissionContentCapabilities;
+  getPromptReplacementCapability(
+    context: LiveSubmissionContext,
+  ): PromptReplacementCapability;
   readPrompt(context: LiveSubmissionContext): string;
-  replacePrompt(context: LiveSubmissionContext, text: string): void;
+  replacePrompt(
+    context: LiveSubmissionContext,
+    text: string,
+  ): PromptReplacementResult;
   registerSubmitInterceptor(handler: SubmitInterceptor): () => void;
   resumeSubmission(
     context: LiveSubmissionContext,

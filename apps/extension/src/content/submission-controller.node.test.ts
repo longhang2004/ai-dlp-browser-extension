@@ -47,6 +47,7 @@ type HarnessOptions = {
   evaluate?: (input: unknown) => PolicyDecision;
   auditDelay?: Promise<void>;
   hasAttachment?: boolean;
+  replacementCapability?: "supported" | "unsupported";
 };
 
 function createHarness(value: string | HarnessOptions = "clean prompt") {
@@ -70,15 +71,20 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
   const inspectSubmissionCapabilities = vi.fn(() => ({
     hasUnsupportedAttachment: hasAttachment,
   }));
+  const getPromptReplacementCapability = vi.fn(
+    () => harnessOptions.replacementCapability ?? "supported",
+  );
   const adapter: ChatApplicationAdapter = {
     id: "chatgpt",
     version: "1",
     matches: (url) => url.origin === "https://chatgpt.com",
     resolveCurrentSubmissionContext: vi.fn(() => context()),
     inspectSubmissionCapabilities,
+    getPromptReplacementCapability,
     readPrompt: vi.fn(() => currentPrompt),
     replacePrompt: vi.fn((_context, value) => {
       currentPrompt = value;
+      return { ok: true as const, verifiedText: value };
     }),
     registerSubmitInterceptor: vi.fn((handler) => {
       interceptor = handler;
@@ -147,6 +153,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
       hasAttachment = value;
     },
     inspectSubmissionCapabilities,
+    getPromptReplacementCapability,
     replaceComposer: () => {
       contextVersion += 1;
     },
@@ -537,7 +544,39 @@ describe("submission controller", () => {
     });
   });
 
-  it("classifies adapter prompt replacement failure as resume failure", async () => {
+  it("hides redaction for an unsupported editor and fails closed for automatic redact", async () => {
+    const finding = emailFinding();
+    const warned = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      action: "warn",
+      replacementCapability: "unsupported",
+    });
+    warned.fire();
+    await warned.controller.whenSettledForTesting();
+    expect(warned.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "warn", canRedact: false }),
+    );
+
+    const automatic = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      action: "redact",
+      replacementCapability: "unsupported",
+    });
+    automatic.fire();
+    await automatic.controller.whenSettledForTesting();
+    expect(automatic.adapter.replacePrompt).not.toHaveBeenCalled();
+    expect(automatic.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(automatic.events).toContainEqual(
+      expect.objectContaining({
+        kind: "enforcement_error",
+        errorCode: "redaction_unavailable",
+      }),
+    );
+  });
+
+  it("classifies adapter prompt replacement failure as unavailable redaction", async () => {
     const finding = emailFinding();
     const harness = createHarness({
       prompt: finding.matchedText,
@@ -555,7 +594,7 @@ describe("submission controller", () => {
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]).toMatchObject({
       kind: "enforcement_error",
-      errorCode: "resume_failure",
+      errorCode: "redaction_unavailable",
     });
   });
 

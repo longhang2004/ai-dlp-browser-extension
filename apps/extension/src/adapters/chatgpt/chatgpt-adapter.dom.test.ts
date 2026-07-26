@@ -67,6 +67,62 @@ afterEach(() => {
 });
 
 describe("ChatGptAdapter prompt operations", () => {
+  it("does not treat direct ProseMirror DOM mutation as acknowledged editor state", () => {
+    renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
+    const composer = document.querySelector("#prompt-textarea");
+    expect(composer).toBeInstanceOf(HTMLElement);
+    if (!(composer instanceof HTMLElement)) throw new Error("Missing editor.");
+    let editorModel = "Example prompt";
+    composer.addEventListener("input", () => {
+      // A ProseMirror-like model intentionally ignores foreign DOM mutation.
+      composer.textContent = editorModel;
+    });
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    expect(context).not.toBeNull();
+    if (context === null) throw new Error("Expected context.");
+    const replacementAdapter = adapter as unknown as {
+      getPromptReplacementCapability(
+        value: LiveSubmissionContext,
+      ): "supported" | "unsupported";
+      replacePrompt(
+        value: LiveSubmissionContext,
+        text: string,
+      ): { ok: boolean };
+    };
+
+    expect(replacementAdapter.getPromptReplacementCapability(context)).toBe(
+      "unsupported",
+    );
+    expect(replacementAdapter.replacePrompt(context, "[EMAIL]")).toEqual({
+      ok: false,
+      reason: "unsupported_editor",
+    });
+    expect(editorModel).toBe("Example prompt");
+    expect(adapter.readPrompt(context)).toBe("Example prompt");
+  });
+
+  it("verifies native textarea replacement through its value state", () => {
+    renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    expect(context).not.toBeNull();
+    if (context === null) throw new Error("Expected context.");
+    const replacementAdapter = adapter as unknown as {
+      getPromptReplacementCapability(
+        value: LiveSubmissionContext,
+      ): "supported" | "unsupported";
+    };
+
+    expect(replacementAdapter.getPromptReplacementCapability(context)).toBe(
+      "supported",
+    );
+    expect(adapter.replacePrompt(context, "[EMAIL]")).toEqual({
+      ok: true,
+      verifiedText: "[EMAIL]",
+    });
+  });
+
   it("detects only composer-scoped attachment evidence, not upload capability", () => {
     renderFixture(`
       <div data-testid="composer-attachment" id="outside">outside</div>
@@ -109,10 +165,8 @@ describe("ChatGptAdapter prompt operations", () => {
     expect(context && adapter.readPrompt(context)).toBe("Example prompt");
   });
 
-  it.each([
-    ["textarea", NATIVE_TEXTAREA_COMPOSER_FIXTURE],
-    ["contenteditable", CONTENTEDITABLE_COMPOSER_FIXTURE],
-  ])("reads and replaces a %s prompt without retaining it", (_kind, markup) => {
+  it("reads and replaces a native textarea prompt without retaining it", () => {
+    const markup = NATIVE_TEXTAREA_COMPOSER_FIXTURE;
     renderFixture(markup);
     const adapter = createAdapter();
     const context = adapter.resolveCurrentSubmissionContext();

@@ -37,6 +37,8 @@ const ERROR_COPY = Object.freeze({
     "Protection was reloaded or updated. Reload the page and try again.",
   unsupported_attachment:
     "This submission contains an attachment. Attachment inspection is not supported yet. Remove it and try again.",
+  redaction_unavailable:
+    "This editor cannot be redacted safely. Edit the prompt manually and try again.",
 } as const satisfies Record<EnforcementErrorCode, string>);
 
 function activeElementWithin(element: HTMLElement): Element | null {

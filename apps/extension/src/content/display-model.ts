@@ -60,11 +60,12 @@ export function createSubmissionDialogModel(
   kind: "warn" | "block",
   decision: PolicyDecision,
   findings: readonly SensitiveDataFinding[],
+  replacementSupported = true,
 ): ProtectionDialogModel {
   return createProtectionDialogModel({
     kind,
     findings: toDisplayFindings(findings),
     reasonCode: decision.reasonCode,
-    canRedact: kind === "warn" && findings.length > 0,
+    canRedact: kind === "warn" && findings.length > 0 && replacementSupported,
   });
 }

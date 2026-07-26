@@ -13,6 +13,10 @@ import {
   type ExtensionPageRuntime,
 } from "../ui/page-runtime.js";
 
+const SETTINGS_ACTIONS = POLICY_ACTIONS.filter(
+  (action) => action !== "redact",
+);
+
 type FormState = {
   protectionEnabled: boolean;
   emailAction: PolicyAction;
@@ -164,7 +168,7 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
                   })
                 }
               >
-                {POLICY_ACTIONS.map((action) => (
+                {SETTINGS_ACTIONS.map((action) => (
                   <option key={action} value={action}>
                     {action}
                   </option>
@@ -182,7 +186,7 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
                   })
                 }
               >
-                {POLICY_ACTIONS.map((action) => (
+                {SETTINGS_ACTIONS.map((action) => (
                   <option key={action} value={action}>
                     {action}
                   </option>

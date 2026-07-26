@@ -37,7 +37,12 @@ describe("options App", () => {
     await screen.findByRole("heading", { name: "Protection settings" });
 
     expect(screen.queryByLabelText(/API secret/u)).toBeNull();
-    await user.selectOptions(screen.getByLabelText("Email action"), "redact");
+    expect(
+      screen
+        .getAllByRole("option")
+        .some((option) => option.getAttribute("value") === "redact"),
+    ).toBe(false);
+    await user.selectOptions(screen.getByLabelText("Email action"), "allow");
     await user.selectOptions(screen.getByLabelText("Phone action"), "block");
     await user.clear(screen.getByLabelText("Protected keywords"));
     await user.type(
@@ -52,7 +57,7 @@ describe("options App", () => {
       type: "settings.save",
       settings: {
         protectionEnabled: true,
-        emailAction: "redact",
+        emailAction: "allow",
         phoneAction: "block",
         protectedKeywords: ["Internal only", "customer data"],
         auditRetentionLimit: 25,

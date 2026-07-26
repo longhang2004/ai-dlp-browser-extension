@@ -26,6 +26,7 @@ import type {
   CapturedSubmitAttempt,
   ChatApplicationAdapter,
   LiveSubmissionContext,
+  PromptReplacementCapability,
   SubmitInterceptionDisposition,
 } from "../adapters/chat-application-adapter.js";
 import type { ProtectionDialogController } from "../ui/protection-dialog/dialog-controller.js";
@@ -84,6 +85,7 @@ type ActiveAttempt = {
   decisionMetadata: SanitizedDecisionMetadata | null;
   findings: SensitiveDataFinding[];
   eventEmitted: boolean;
+  replacementCapability: PromptReplacementCapability;
 };
 
 type SanitizedDecisionMetadata = {
@@ -141,7 +143,11 @@ function capturePromptSynchronously(
   adapter: ChatApplicationAdapter,
   attempt: CapturedSubmitAttempt,
 ):
-  | { kind: "ready"; prompt: string }
+  | {
+      kind: "ready";
+      prompt: string;
+      replacementCapability: PromptReplacementCapability;
+    }
   | { kind: "error"; errorCode: EnforcementErrorCode } {
   try {
     const context = adapter.resolveCurrentSubmissionContext();
@@ -162,7 +168,12 @@ function capturePromptSynchronously(
     ) {
       return { kind: "error", errorCode: "unsupported_attachment" };
     }
-    return { kind: "ready", prompt: adapter.readPrompt(context) };
+    return {
+      kind: "ready",
+      prompt: adapter.readPrompt(context),
+      replacementCapability:
+        adapter.getPromptReplacementCapability(context),
+    };
   } catch {
     return { kind: "error", errorCode: "extension_context_invalidated" };
   }
@@ -381,6 +392,11 @@ export function createSubmissionController(
 
     let resumeContext = current;
     if (mode === "redacted") {
+      if (
+        options.adapter.getPromptReplacementCapability(current) !== "supported"
+      ) {
+        return { kind: "error", errorCode: "redaction_unavailable" };
+      }
       let sanitizedText: string;
       try {
         sanitizedText = redact(prompt, attempt.findings).sanitizedText;
@@ -388,9 +404,15 @@ export function createSubmissionController(
         return { kind: "error", errorCode: "detector_failure" };
       }
       try {
-        options.adapter.replacePrompt(current, sanitizedText);
+        const replacement = options.adapter.replacePrompt(
+          current,
+          sanitizedText,
+        );
+        if (!replacement.ok || replacement.verifiedText !== sanitizedText) {
+          return { kind: "error", errorCode: "redaction_unavailable" };
+        }
       } catch {
-        return { kind: "error", errorCode: "resume_failure" };
+        return { kind: "error", errorCode: "redaction_unavailable" };
       }
       const afterReplacementResult = resolveValidatedContext(
         attempt,
@@ -458,6 +480,7 @@ export function createSubmissionController(
       return;
     }
     attempt.promptSnapshot = capture.prompt;
+    attempt.replacementCapability = capture.replacementCapability;
 
     if (!isCurrent(attempt) || attempt.promptSnapshot === null) {
       finish(attempt, "cancelled");
@@ -494,6 +517,13 @@ export function createSubmissionController(
 
     const decision = attempt.decision;
     prepareDecisionMetadata(attempt);
+    if (
+      decision.action === "redact" &&
+      attempt.replacementCapability !== "supported"
+    ) {
+      await showError(attempt, "redaction_unavailable");
+      return;
+    }
     if (decision.action !== "block") {
       attempt.authorization = createSubmissionAuthorization(
         attempt.attempt.id,
@@ -534,6 +564,7 @@ export function createSubmissionController(
           "warn",
           decision,
           attempt.findings,
+          attempt.replacementCapability === "supported",
         );
         prepareDecisionMetadata(attempt, model.maskedPreview);
         state = "dialog";
@@ -590,6 +621,7 @@ export function createSubmissionController(
       decisionMetadata: null,
       findings: [],
       eventEmitted: false,
+      replacementCapability: "unsupported",
     };
     active = attempt;
     state = "evaluating";

@@ -15,6 +15,7 @@ const ERROR_COPY = {
   resume_failure: "Submission resume failure",
   extension_context_invalidated: "Extension context unavailable",
   unsupported_attachment: "Attachment unsupported",
+  redaction_unavailable: "Redaction unavailable",
 } as const;
 
 const HEALTH_COPY = {

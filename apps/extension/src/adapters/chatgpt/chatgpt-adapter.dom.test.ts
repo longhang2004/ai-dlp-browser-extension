@@ -450,6 +450,7 @@ describe("ChatGptAdapter interception", () => {
     `);
     const transitions: AdapterHealthTransition[] = [];
     const adapter = createAdapter({
+      healthGracePeriodMs: 1_000,
       onHealthTransition: (transition) => transitions.push(transition),
     });
     const attempts: unknown[] = [];
@@ -692,6 +693,7 @@ describe("ChatGptAdapter interception", () => {
     const transitions: AdapterHealthTransition[] = [];
     const handler = vi.fn(() => "intercept" as const);
     const adapter = createAdapter({
+      healthGracePeriodMs: 1_000,
       onHealthTransition: (transition) => transitions.push(transition),
     });
     adapter.registerSubmitInterceptor(handler);
@@ -710,7 +712,7 @@ describe("ChatGptAdapter interception", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it("waits through a grace period before one coalesced degradation", async () => {
+  it("uses the full ten-second default grace before one coalesced degradation", async () => {
     vi.useFakeTimers();
     const transitions: AdapterHealthTransition[] = [];
     const adapter = createAdapter({
@@ -719,7 +721,7 @@ describe("ChatGptAdapter interception", () => {
     adapter.registerSubmitInterceptor(() => "intercept");
 
     expect(transitions).toEqual([{ status: "waiting_for_composer" }]);
-    await vi.advanceTimersByTimeAsync(999);
+    await vi.advanceTimersByTimeAsync(9_999);
     expect(transitions).toEqual([{ status: "waiting_for_composer" }]);
     await vi.advanceTimersByTimeAsync(1);
     expect(transitions).toEqual([
@@ -729,10 +731,40 @@ describe("ChatGptAdapter interception", () => {
     document.body.append(document.createElement("div"));
     await Promise.resolve();
     await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(
       transitions.filter((transition) => transition.status === "degraded"),
     ).toHaveLength(1);
+  });
+
+  it("restarts the waiting lifecycle after SPA navigation without stale degradation", async () => {
+    vi.useFakeTimers();
+    let currentUrl = new URL("https://chatgpt.com/c/one");
+    const transitions: AdapterHealthTransition[] = [];
+    const adapter = createAdapter({
+      getCurrentUrl: () => new URL(currentUrl.href),
+      onHealthTransition: (transition) => transitions.push(transition),
+    });
+    adapter.registerSubmitInterceptor(() => "intercept");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(transitions.at(-1)).toEqual({
+      status: "degraded",
+      healthCode: "composer_not_found",
+    });
+
+    currentUrl = new URL("https://chatgpt.com/c/two");
+    document.body.append(document.createElement("div"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transitions.at(-1)).toEqual({ status: "waiting_for_composer" });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(transitions.at(-1)).toEqual({ status: "waiting_for_composer" });
+
+    renderFixture(CONTENTEDITABLE_COMPOSER_FIXTURE);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transitions.at(-1)).toEqual({ status: "healthy" });
   });
 
   it("does not install duplicate listeners and disposes all interception", () => {
@@ -944,6 +976,7 @@ describe("ChatGptAdapter health privacy", () => {
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const transitions: AdapterHealthTransition[] = [];
     const adapter = createAdapter({
+      healthGracePeriodMs: 1_000,
       onHealthTransition: (transition) => transitions.push(transition),
     });
     const context = adapter.resolveCurrentSubmissionContext();
@@ -970,6 +1003,7 @@ describe("ChatGptAdapter health privacy", () => {
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const transitions: AdapterHealthTransition[] = [];
     const adapter = createAdapter({
+      healthGracePeriodMs: 1_000,
       onHealthTransition: (transition) => transitions.push(transition),
     });
     adapter.registerSubmitInterceptor(() => "intercept");

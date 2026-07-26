@@ -28,6 +28,8 @@ export type AdapterHealthTransition =
   | { status: "healthy" }
   | { status: "degraded"; healthCode: AdapterHealthCode };
 
+export const DEFAULT_HEALTH_GRACE_PERIOD_MS = 10_000;
+
 export const CHATGPT_ADAPTER_ERROR_CODES = Object.freeze([
   "adapter_disposed",
   "interceptor_failure",
@@ -127,6 +129,10 @@ function cancelCapturedEvent(event: Event): void {
   event.stopImmediatePropagation();
 }
 
+function applicationLocation(applicationUrl: URL): string {
+  return `${applicationUrl.origin}${applicationUrl.pathname}${applicationUrl.search}${applicationUrl.hash}`;
+}
+
 function readStructuredContentEditable(composer: HTMLElement): string {
   const renderedText = composer.innerText;
   if (typeof renderedText === "string") {
@@ -198,6 +204,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   #healthCheckQueued = false;
   #lastHealth: "waiting_for_composer" | "healthy" | AdapterHealthCode | null =
     null;
+  #lastHealthApplicationLocation: string | null = null;
   #healthGraceTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #healthGracePeriodMs: number;
   #resumeInProgress = false;
@@ -211,7 +218,8 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
         new URL(options.document.defaultView?.location.href ?? "about:blank"));
     this.#onHealthTransition = options.onHealthTransition ?? null;
     this.#onAdapterError = options.onAdapterError ?? null;
-    this.#healthGracePeriodMs = options.healthGracePeriodMs ?? 1_000;
+    this.#healthGracePeriodMs =
+      options.healthGracePeriodMs ?? DEFAULT_HEALTH_GRACE_PERIOD_MS;
   }
 
   matches(url: URL): boolean {
@@ -393,6 +401,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#identityContexts.clear();
     this.#lastApplicationLocation = null;
     this.#lastHealth = null;
+    this.#lastHealthApplicationLocation = null;
     this.#healthCheckQueued = false;
     this.#resumeInProgress = false;
     this.#onHealthTransition = null;
@@ -567,7 +576,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   }
 
   #updateNavigationVersion(applicationUrl: URL): void {
-    const location = `${applicationUrl.origin}${applicationUrl.pathname}${applicationUrl.search}${applicationUrl.hash}`;
+    const location = applicationLocation(applicationUrl);
     if (this.#contextVersion === 0) {
       this.#contextVersion = 1;
     } else if (this.#lastApplicationLocation !== location) {
@@ -671,6 +680,13 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   }
 
   #runHealthCheck(forceDegraded = false): void {
+    const currentLocation = applicationLocation(this.#currentUrl());
+    if (this.#lastHealthApplicationLocation !== currentLocation) {
+      this.#clearHealthGrace();
+      this.#lastHealth = null;
+      this.#lastHealthApplicationLocation = currentLocation;
+      forceDegraded = false;
+    }
     const diagnosis = diagnoseSubmissionElements(this.#requireDocument());
     if (diagnosis.context !== null) {
       this.#clearHealthGrace();

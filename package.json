@@ -18,7 +18,7 @@
     "test:performance": "vitest run --project performance --disableConsoleIntercept",
     "test": "pnpm test:unit",
     "build": "pnpm --filter @ai-dlp/extension build",
-    "verify:artifact": "node scripts/verify-production-artifact.mjs"
+    "verify:artifact": "node --test scripts/artifact-security-rules.test.mjs && node scripts/verify-production-artifact.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

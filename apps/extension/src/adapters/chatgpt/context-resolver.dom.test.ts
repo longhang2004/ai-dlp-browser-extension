@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CONTENTEDITABLE_COMPOSER_FIXTURE,
   NATIVE_TEXTAREA_COMPOSER_FIXTURE,
+  PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE,
 } from "./fixtures.js";
 import {
   isSubmissionContextUsable,
@@ -144,5 +145,30 @@ describe("resolveSubmissionElements", () => {
     const resolved = resolveSubmissionElements(document);
     expect(resolved?.sendControl).toBe(document.querySelector("#inside"));
     expect(resolved?.sendControl).not.toBe(document.querySelector("#outside"));
+  });
+
+  it("resolves the production prompt-textarea and chooses Send over no-type tools", () => {
+    renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
+
+    const resolved = resolveSubmissionElements(document);
+
+    expect(resolved?.composer).toBe(document.querySelector("#prompt-textarea"));
+    expect(resolved?.sendControl).toBe(
+      document.querySelector('[data-testid="send-button"]'),
+    );
+    expect(resolved?.sendControl.getAttribute("aria-label")).toBe(
+      "Send prompt",
+    );
+  });
+
+  it("does not treat a generic no-type tool button as the send control", () => {
+    renderFixture(`
+      <form aria-label="Chat composer">
+        <button aria-label="Open tools">Tools</button>
+        <textarea></textarea>
+      </form>
+    `);
+
+    expect(resolveSubmissionElements(document)).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ import {
 import {
   CONTENTEDITABLE_COMPOSER_FIXTURE,
   NATIVE_TEXTAREA_COMPOSER_FIXTURE,
+  PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE,
 } from "./fixtures.js";
 
 const CHATGPT_URL = new URL("https://chatgpt.com/");
@@ -139,6 +140,62 @@ describe("ChatGptAdapter prompt operations", () => {
 });
 
 describe("ChatGptAdapter interception", () => {
+  it("intercepts production prompt-textarea Enter and Send but ignores tools", () => {
+    renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
+    const handler = vi.fn(() => "intercept" as const);
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor(handler);
+    const composer = document.querySelector("#prompt-textarea");
+    const send = document.querySelector('[data-testid="send-button"]');
+    const tools = document.querySelector('[aria-label="Open tools"]');
+    expect(composer).not.toBeNull();
+    expect(send).not.toBeNull();
+    expect(tools).not.toBeNull();
+    if (composer === null || send === null || tools === null) {
+      throw new Error("Missing production-shaped composer fixture.");
+    }
+
+    const enter = dispatchEnter(composer);
+    const shiftEnter = dispatchEnter(composer, { shiftKey: true });
+    const composingEnter = dispatchEnter(composer, { isComposing: true });
+    const sendClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    send.dispatchEvent(sendClick);
+    const toolsClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    tools.dispatchEvent(toolsClick);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(shiftEnter.defaultPrevented).toBe(false);
+    expect(composingEnter.defaultPrevented).toBe(false);
+    expect(sendClick.defaultPrevented).toBe(true);
+    expect(toolsClick.defaultPrevented).toBe(false);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed on a known prompt-textarea whose send control is unresolved", () => {
+    renderFixture(`
+      <form aria-label="Chat composer">
+        <div id="prompt-textarea" contenteditable="true" role="textbox"></div>
+      </form>
+    `);
+    const handler = vi.fn(() => "intercept" as const);
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor(handler);
+    const composer = document.querySelector("#prompt-textarea");
+    expect(composer).not.toBeNull();
+    if (composer === null) throw new Error("Missing composer.");
+
+    const enter = dispatchEnter(composer);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("captures associated clicks and Enter once, with metadata only", () => {
     renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
     const adapter = createAdapter();
@@ -237,7 +294,7 @@ describe("ChatGptAdapter interception", () => {
     renderFixture(`
       <form aria-label="Chat composer">
         <textarea readonly></textarea>
-        <button><span>Send</span></button>
+        <button aria-label="Send prompt"><span>Send</span></button>
       </form>
     `);
     const handler = vi.fn(() => "intercept" as const);

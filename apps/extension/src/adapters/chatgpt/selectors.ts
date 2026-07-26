@@ -13,8 +13,7 @@ export const CHATGPT_SELECTORS = Object.freeze({
     'textarea[aria-label="Message ChatGPT"], [role="textbox"][aria-label="Message ChatGPT"][contenteditable="true"], [role="textbox"][aria-label="Message ChatGPT"][contenteditable="plaintext-only"]',
   stableDataEditable:
     '[data-testid="composer-root"] textarea, [data-testid="composer-root"] [contenteditable="true"], [data-testid="composer-root"] [contenteditable="plaintext-only"], [data-testid="composer-textarea"][contenteditable="true"], [data-testid="composer-textarea"][contenteditable="plaintext-only"]',
-  nativeSubmit:
-    'button[type="submit"], input[type="submit"], button:not([type])',
+  nativeSubmit: 'button[type="submit"], input[type="submit"]',
   ariaSend:
     'button[aria-label="Send prompt"], button[aria-label="Send message"], [role="button"][aria-label="Send prompt"], [role="button"][aria-label="Send message"]',
   stableDataSend:
@@ -23,7 +22,7 @@ export const CHATGPT_SELECTORS = Object.freeze({
   composerRegion:
     'form, [role="form"][aria-label], [aria-label="Chat composer"], [data-testid="composer-root"]',
   knownSendCandidate:
-    'form[aria-label="Chat composer"] button[type="submit"], form[aria-label="Chat composer"] input[type="submit"], form[aria-label="Chat composer"] button:not([type]), [role="form"][aria-label="Chat composer"] button[type="submit"], [role="form"][aria-label="Chat composer"] input[type="submit"], [role="form"][aria-label="Chat composer"] button:not([type]), button[aria-label="Send prompt"], button[aria-label="Send message"], [role="button"][aria-label="Send prompt"], [role="button"][aria-label="Send message"], [data-testid="send-button"], [data-testid="fruitjuice-send-button"]',
+    'form[aria-label="Chat composer"] button[type="submit"], form[aria-label="Chat composer"] input[type="submit"], [role="form"][aria-label="Chat composer"] button[type="submit"], [role="form"][aria-label="Chat composer"] input[type="submit"], button[aria-label="Send prompt"], button[aria-label="Send message"], [role="button"][aria-label="Send prompt"], [role="button"][aria-label="Send message"], [data-testid="send-button"], [data-testid="fruitjuice-send-button"]',
 } as const);
 
 export const ORDERED_COMPOSER_SELECTORS = Object.freeze([

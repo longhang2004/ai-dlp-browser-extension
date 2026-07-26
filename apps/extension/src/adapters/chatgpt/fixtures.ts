@@ -25,3 +25,23 @@ export const CONTENTEDITABLE_COMPOSER_FIXTURE = `
     </section>
   </main>
 `;
+
+export const PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE = `
+  <main>
+    <form aria-label="Chat composer">
+      <button aria-label="Open tools">Tools</button>
+      <div
+        id="prompt-textarea"
+        class="ProseMirror"
+        contenteditable="true"
+        role="textbox"
+      ><p>Example prompt</p></div>
+      <button
+        type="button"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      ><span>Send</span></button>
+      <button type="button" aria-label="Stop generating">Stop</button>
+    </form>
+  </main>
+`;

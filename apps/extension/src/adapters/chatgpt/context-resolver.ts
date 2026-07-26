@@ -129,39 +129,31 @@ function findAssociatedSendControl(
 ): HTMLElement | null {
   const form = nativeFormOwner(composer);
   if (form !== null) {
-    const nativeSubmit = findFormSubmitControl(document, form);
-    if (nativeSubmit !== null) {
-      return nativeSubmit;
-    }
+    const stableDataSend = firstUsable(
+      form,
+      CHATGPT_SELECTORS.stableDataSend,
+      isUsableSendControl,
+    );
+    if (stableDataSend !== null) return stableDataSend;
     const ariaSend = firstUsable(
       form,
       CHATGPT_SELECTORS.ariaSend,
       isUsableSendControl,
     );
-    if (ariaSend !== null) {
-      return ariaSend;
-    }
-    return firstUsable(
-      form,
-      CHATGPT_SELECTORS.stableDataSend,
-      isUsableSendControl,
-    );
+    if (ariaSend !== null) return ariaSend;
+    return findFormSubmitControl(document, form);
   }
 
   const region = composer.closest(CHATGPT_SELECTORS.composerRegion);
   if (!(region instanceof HTMLElement)) {
     return null;
   }
-  if (region.matches(CHATGPT_SELECTORS.semanticRoleFormRegion)) {
-    const localNativeSubmit = firstUsable(
-      region,
-      CHATGPT_SELECTORS.nativeSubmit,
-      isUsableSendControl,
-    );
-    if (localNativeSubmit !== null) {
-      return localNativeSubmit;
-    }
-  }
+  const stableDataSend = firstUsable(
+    region,
+    CHATGPT_SELECTORS.stableDataSend,
+    isUsableSendControl,
+  );
+  if (stableDataSend !== null) return stableDataSend;
   const ariaSend = firstUsable(
     region,
     CHATGPT_SELECTORS.ariaSend,
@@ -170,11 +162,13 @@ function findAssociatedSendControl(
   if (ariaSend !== null) {
     return ariaSend;
   }
-  return firstUsable(
-    region,
-    CHATGPT_SELECTORS.stableDataSend,
-    isUsableSendControl,
-  );
+  return region.matches(CHATGPT_SELECTORS.semanticRoleFormRegion)
+    ? firstUsable(
+        region,
+        CHATGPT_SELECTORS.nativeSubmit,
+        isUsableSendControl,
+      )
+    : null;
 }
 
 function strategyFor(selectorIndex: number): SubmissionResolutionStrategy {

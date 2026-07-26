@@ -91,6 +91,13 @@ function collectFixtureStrings(value, output = []) {
   } else if (Array.isArray(value)) {
     for (const item of value) collectFixtureStrings(item, output);
   } else if (isPlainObject(value)) {
+    if (
+      Object.keys(value).length === 1 &&
+      Array.isArray(value.parts) &&
+      value.parts.every((part) => typeof part === "string")
+    ) {
+      output.push(value.parts.join(""));
+    }
     for (const item of Object.values(value))
       collectFixtureStrings(item, output);
   }

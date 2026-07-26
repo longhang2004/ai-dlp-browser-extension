@@ -4,11 +4,17 @@ import sensitiveValues from "../../../../tests/fixtures/sensitive-values.json";
 
 import { detectAwsAccessKeys } from "./aws-access-key.js";
 
+function materializeFixture(value: { parts: string[] }): string {
+  return value.parts.join("");
+}
+
+const awsAccessKey = {
+  longLived: materializeFixture(sensitiveValues.awsAccessKey.longLived),
+  temporary: materializeFixture(sensitiveValues.awsAccessKey.temporary),
+};
+
 describe("detectAwsAccessKeys", () => {
-  it.each([
-    sensitiveValues.awsAccessKey.longLived,
-    sensitiveValues.awsAccessKey.temporary,
-  ])(
+  it.each([awsAccessKey.longLived, awsAccessKey.temporary])(
     "detects a supported access key ID with exact source range",
     (accessKey) => {
       const prompt = `Credential: ${accessKey}.`;
@@ -33,19 +39,19 @@ describe("detectAwsAccessKeys", () => {
     "AKIAABCDEFGHIJKLMNOPQ",
     "ASIAabcdefgh12345678",
     "ABCDABCDEFGHIJKLMNOP",
-    `X${sensitiveValues.awsAccessKey.longLived}`,
-    `${sensitiveValues.awsAccessKey.longLived}X`,
-    `_${sensitiveValues.awsAccessKey.longLived}`,
-    `${sensitiveValues.awsAccessKey.longLived}_`,
-    `𐐀${sensitiveValues.awsAccessKey.longLived}`,
-    `${sensitiveValues.awsAccessKey.longLived}𝟙`,
-    `\u0301${sensitiveValues.awsAccessKey.longLived}`,
+    `X${awsAccessKey.longLived}`,
+    `${awsAccessKey.longLived}X`,
+    `_${awsAccessKey.longLived}`,
+    `${awsAccessKey.longLived}_`,
+    `𐐀${awsAccessKey.longLived}`,
+    `${awsAccessKey.longLived}𝟙`,
+    `\u0301${awsAccessKey.longLived}`,
   ])("rejects malformed or embedded token %s", (prompt) => {
     expect(detectAwsAccessKeys(prompt)).toEqual([]);
   });
 
   it("returns multiple keys in stable source order", () => {
-    const { longLived, temporary } = sensitiveValues.awsAccessKey;
+    const { longLived, temporary } = awsAccessKey;
     const prompt = `${temporary}; then ${longLived}`;
 
     expect(

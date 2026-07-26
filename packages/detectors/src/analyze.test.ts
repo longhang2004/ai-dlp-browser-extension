@@ -4,6 +4,10 @@ import sensitiveValues from "../../../tests/fixtures/sensitive-values.json";
 
 import { MAX_PROMPT_CODE_UNITS, analyzePrompt } from "./analyze.js";
 
+function materializeFixture(value: { parts: string[] }): string {
+  return value.parts.join("");
+}
+
 describe("analyzePrompt", () => {
   it("returns no findings for an empty prompt", () => {
     expect(analyzePrompt("", { protectedKeywords: [] })).toEqual([]);
@@ -19,7 +23,9 @@ describe("analyzePrompt", () => {
 
   it("runs the complete detector suite and returns canonical source order", () => {
     const { validVisa } = sensitiveValues.paymentCard;
-    const { longLived } = sensitiveValues.awsAccessKey;
+    const longLived = materializeFixture(
+      sensitiveValues.awsAccessKey.longLived,
+    );
     const { mediumMixed } = sensitiveValues.apiSecret;
     const { projectCode } = sensitiveValues.protectedKeyword;
     const prompt = [

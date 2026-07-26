@@ -20,12 +20,25 @@ type SensitiveFixture = {
   privateKey: { generic: string };
 };
 
-const sensitive = JSON.parse(
+type RawSensitiveFixture = Omit<SensitiveFixture, "awsAccessKey"> & {
+  awsAccessKey: {
+    longLived: { parts: string[] };
+  };
+};
+
+const rawSensitive = JSON.parse(
   readFileSync(
     resolve(process.cwd(), "tests/fixtures/sensitive-values.json"),
     "utf8",
   ),
-) as SensitiveFixture;
+) as RawSensitiveFixture;
+
+const sensitive: SensitiveFixture = {
+  ...rawSensitive,
+  awsAccessKey: {
+    longLived: rawSensitive.awsAccessKey.longLived.parts.join(""),
+  },
+};
 
 async function saveSettings(
   page: Parameters<typeof sendRuntimeMessage>[0],

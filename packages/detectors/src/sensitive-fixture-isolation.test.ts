@@ -24,11 +24,26 @@ function collectLeaves(value: unknown): string[] {
   if (value === null || typeof value !== "object") {
     return [];
   }
+  if (
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    "parts" in value &&
+    Array.isArray(value.parts) &&
+    value.parts.every((part) => typeof part === "string")
+  ) {
+    return [value.parts.join(""), ...value.parts];
+  }
 
   return Object.values(value).flatMap(collectLeaves);
 }
 
 describe("dedicated sensitive fixture isolation", () => {
+  it("does not commit complete provider-shaped AWS access key fixtures", () => {
+    expect(JSON.stringify(sensitiveValues)).not.toMatch(
+      /(?:AKIA|ASIA)[A-Z0-9]{16}/u,
+    );
+  });
+
   it("keeps every inventoried fixture leaf out of production TypeScript", () => {
     const productionSources = import.meta.glob(
       [
@@ -71,7 +86,9 @@ describe("dedicated sensitive fixture isolation", () => {
       ]),
     );
 
-    for (const fixtureValue of collectLeaves(sensitiveValues)) {
+    for (const fixtureValue of collectLeaves(sensitiveValues).filter(
+      (value) => value.length >= 6,
+    )) {
       for (const [productionFile, source] of Object.entries(
         productionSources,
       )) {

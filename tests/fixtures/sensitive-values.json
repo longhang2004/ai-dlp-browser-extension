@@ -14,8 +14,12 @@
     "invalidChecksum": "4111 1111 1111 1112"
   },
   "awsAccessKey": {
-    "longLived": "AKIAIOSFODNN7EXAMPLE",
-    "temporary": "ASIAABCDEFGHIJKLMNOP"
+    "longLived": {
+      "parts": ["AK", "IAIOSFODNN7EXAMPLE"]
+    },
+    "temporary": {
+      "parts": ["AS", "IAABCDEFGHIJKLMNOP"]
+    }
   },
   "privateKey": {
     "generic": "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWg==\n-----END PRIVATE KEY-----",

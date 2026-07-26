@@ -1,5 +1,3 @@
-import { POLICY_ACTIONS } from "./policy.js";
-import type { PolicyAction } from "./policy.js";
 import type {
   PromptFreeArray,
   PromptFreeBoundary,
@@ -19,12 +17,19 @@ import {
   snapshotStructuredValue,
 } from "./validation-helpers.js";
 
-export type ConfigurableAction = PolicyAction;
+export const CONFIGURABLE_PROTECTION_ACTIONS = Object.freeze([
+  "allow",
+  "warn",
+  "block",
+] as const);
+
+export type ConfigurableProtectionAction =
+  (typeof CONFIGURABLE_PROTECTION_ACTIONS)[number];
 
 export type ProtectionSettings = PromptFreeBoundary & {
   protectionEnabled: boolean;
-  emailAction: ConfigurableAction;
-  phoneAction: ConfigurableAction;
+  emailAction: ConfigurableProtectionAction;
+  phoneAction: ConfigurableProtectionAction;
   protectedKeywords: PromptFreeArray<string>;
   auditRetentionLimit: number;
 };
@@ -36,8 +41,8 @@ export type StoredSettingsEnvelope = PromptFreeBoundary & {
 
 export type ReadonlyProtectionSettings = PromptFreeBoundary & {
   readonly protectionEnabled: boolean;
-  readonly emailAction: ConfigurableAction;
-  readonly phoneAction: ConfigurableAction;
+  readonly emailAction: ConfigurableProtectionAction;
+  readonly phoneAction: ConfigurableProtectionAction;
   readonly protectedKeywords: ReadonlyPromptFreeArray<string>;
   readonly auditRetentionLimit: number;
 };
@@ -142,9 +147,13 @@ export function isProtectionSettingsSnapshot(
       ]) ||
       typeof value.protectionEnabled !== "boolean" ||
       typeof value.emailAction !== "string" ||
-      !POLICY_ACTIONS.includes(value.emailAction as PolicyAction) ||
+      !CONFIGURABLE_PROTECTION_ACTIONS.includes(
+        value.emailAction as ConfigurableProtectionAction,
+      ) ||
       typeof value.phoneAction !== "string" ||
-      !POLICY_ACTIONS.includes(value.phoneAction as PolicyAction) ||
+      !CONFIGURABLE_PROTECTION_ACTIONS.includes(
+        value.phoneAction as ConfigurableProtectionAction,
+      ) ||
       !isDenseExactArray(
         value.protectedKeywords,
         0,

@@ -890,3 +890,10 @@ void rejectedValidationErrorWithAugmentedErrors;
 void rejectedAuditWithAugmentedCategories;
 void rejectedAuditWithAugmentedRules;
 void rejectedAuditEnvelopeWithAugmentedEvents;
+
+const v1SettingsWithoutRedact = createDefaultProtectionSettings();
+// @ts-expect-error Persisted Milestone 1 settings cannot request redaction.
+v1SettingsWithoutRedact.emailAction = "redact";
+// @ts-expect-error Persisted Milestone 1 settings cannot request redaction.
+v1SettingsWithoutRedact.phoneAction = "redact";
+void v1SettingsWithoutRedact;

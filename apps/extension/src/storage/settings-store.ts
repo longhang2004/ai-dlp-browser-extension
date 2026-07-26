@@ -1,4 +1,5 @@
 import {
+  CONFIGURABLE_PROTECTION_ACTIONS,
   POLICY_ACTIONS,
   areUnicodeCaseInsensitiveEquivalent,
   createDefaultProtectionSettings,
@@ -7,6 +8,7 @@ import {
   MAX_PROTECTED_KEYWORD_COUNT,
   normalizeProtectedKeyword,
   type ProtectionSettings,
+  type PolicyAction,
   type SettingsValidationError,
   type StoredSettingsEnvelope,
 } from "@ai-dlp/shared-types";
@@ -44,6 +46,39 @@ function cloneEnvelope(
     return defaultEnvelope();
   }
   return clone;
+}
+
+function migrateLegacyRedactEnvelope(
+  value: unknown,
+): StoredSettingsEnvelope | null {
+  if (
+    !hasPlainDataFields(value) ||
+    Reflect.ownKeys(value).length !== 2 ||
+    !Object.hasOwn(value, "schemaVersion") ||
+    !Object.hasOwn(value, "settings") ||
+    value.schemaVersion !== 1 ||
+    !hasPlainDataFields(value.settings)
+  ) {
+    return null;
+  }
+  const settings = value.settings;
+  const emailAction = settings.emailAction;
+  const phoneAction = settings.phoneAction;
+  if (
+    typeof emailAction !== "string" ||
+    !POLICY_ACTIONS.includes(emailAction as PolicyAction) ||
+    typeof phoneAction !== "string" ||
+    !POLICY_ACTIONS.includes(phoneAction as PolicyAction) ||
+    (emailAction !== "redact" && phoneAction !== "redact")
+  ) {
+    return null;
+  }
+  const migrated = validateAndNormalizeSettings({
+    ...settings,
+    emailAction: emailAction === "redact" ? "warn" : emailAction,
+    phoneAction: phoneAction === "redact" ? "warn" : phoneAction,
+  });
+  return migrated.ok ? { schemaVersion: 1, settings: migrated.settings } : null;
 }
 
 function hasPlainDataFields(value: unknown): value is Record<string, unknown> {
@@ -146,13 +181,13 @@ export function validateAndNormalizeSettings(
   }
   if (
     typeof value.emailAction !== "string" ||
-    !POLICY_ACTIONS.includes(value.emailAction as never)
+    !CONFIGURABLE_PROTECTION_ACTIONS.includes(value.emailAction as never)
   ) {
     errors.push({ field: "emailAction", code: "invalid_action" });
   }
   if (
     typeof value.phoneAction !== "string" ||
-    !POLICY_ACTIONS.includes(value.phoneAction as never)
+    !CONFIGURABLE_PROTECTION_ACTIONS.includes(value.phoneAction as never)
   ) {
     errors.push({ field: "phoneAction", code: "invalid_action" });
   }
@@ -210,9 +245,15 @@ export function createSettingsStore(
       return serialize(async () => {
         await storageReady;
         const stored = await storage.read(SETTINGS_STORAGE_KEY);
-        return isStoredSettingsEnvelope(stored)
-          ? cloneEnvelope(stored)
-          : defaultEnvelope();
+        if (isStoredSettingsEnvelope(stored)) {
+          return cloneEnvelope(stored);
+        }
+        const migrated = migrateLegacyRedactEnvelope(stored);
+        if (migrated === null) {
+          return defaultEnvelope();
+        }
+        await storage.write(SETTINGS_STORAGE_KEY, cloneEnvelope(migrated));
+        return cloneEnvelope(migrated);
       });
     },
     save(candidate) {

@@ -16,46 +16,24 @@ const settings = {
 };
 
 describe("options App", () => {
-  it("normalizes legacy redact settings to visible fail-safe actions", async () => {
-    const user = userEvent.setup();
+  it("does not render or submit an invalid redact runtime response", async () => {
     const legacySettings = {
       ...settings,
       emailAction: "redact" as const,
       phoneAction: "redact" as const,
     };
-    const sendMessage = vi
-      .fn()
-      .mockResolvedValueOnce({
-        type: "settings.result",
-        envelope: { schemaVersion: 1, settings: legacySettings },
-      })
-      .mockImplementation(async (request: unknown) => {
-        const candidate = request as { settings: typeof settings };
-        return {
-          type: "settings.saved",
-          envelope: { schemaVersion: 1, settings: candidate.settings },
-        };
-      });
+    const sendMessage = vi.fn().mockResolvedValueOnce({
+      type: "settings.result",
+      envelope: { schemaVersion: 1, settings: legacySettings },
+    });
 
     render(<App runtime={{ sendMessage }} />);
 
     expect(
-      ((await screen.findByLabelText("Email action")) as HTMLSelectElement)
-        .value,
-    ).toBe("warn");
-    expect(
-      (screen.getByLabelText("Phone action") as HTMLSelectElement).value,
-    ).toBe("warn");
-    await user.click(screen.getByRole("button", { name: "Save settings" }));
-
-    expect(sendMessage).toHaveBeenLastCalledWith({
-      type: "settings.save",
-      settings: {
-        ...settings,
-        emailAction: "warn",
-        phoneAction: "warn",
-      },
-    });
+      await screen.findByText("Settings are currently unavailable."),
+    ).not.toBeNull();
+    expect(screen.queryByLabelText("Email action")).toBeNull();
+    expect(sendMessage).toHaveBeenCalledOnce();
   });
 
   it("exposes only Milestone 1 settings and saves normalized values", async () => {

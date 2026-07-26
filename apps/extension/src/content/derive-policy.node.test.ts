@@ -33,7 +33,7 @@ describe("derivePolicy", () => {
     const settings = createDefaultProtectionSettings();
     settings.protectionEnabled = false;
     settings.emailAction = "allow";
-    settings.phoneAction = "redact";
+    settings.phoneAction = "block";
     settings.protectedKeywords = ["internal"];
     settings.auditRetentionLimit = 999;
 
@@ -42,7 +42,7 @@ describe("derivePolicy", () => {
       categoryActions: {
         ...expectedDefaults.categoryActions,
         email: "allow",
-        phone: "redact",
+        phone: "block",
       },
     });
   });

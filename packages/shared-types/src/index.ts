@@ -106,13 +106,14 @@ export type { RedactionResult } from "./redaction.js";
 export type { PromptFreeArray, ReadonlyPromptFreeArray } from "./privacy.js";
 export {
   cloneProtectionSettings,
+  CONFIGURABLE_PROTECTION_ACTIONS,
   createDefaultProtectionSettings,
   DEFAULT_PROTECTION_SETTINGS,
   SETTINGS_VALIDATION_ERROR_CODES,
   SETTINGS_VALIDATION_FIELDS,
 } from "./settings.js";
 export type {
-  ConfigurableAction,
+  ConfigurableProtectionAction,
   ProtectionSettings,
   ReadonlyProtectionSettings,
   SettingsValidationError,

@@ -119,11 +119,11 @@ describe("message router", () => {
       .envelope;
     const saved = await invoke(listener, {
       type: "settings.save",
-      settings: { ...envelope.settings, emailAction: "redact" },
+      settings: { ...envelope.settings, emailAction: "block" },
     });
     expect(saved.response).toMatchObject({
       type: "settings.saved",
-      envelope: { settings: { emailAction: "redact" } },
+      envelope: { settings: { emailAction: "block" } },
     });
     expect(broadcast).toHaveBeenCalledOnce();
 
@@ -143,6 +143,10 @@ describe("message router", () => {
   });
 
   it.each([
+    [
+      { emailAction: "redact" },
+      [{ field: "emailAction", code: "invalid_action" }],
+    ],
     [
       { emailAction: "steal" },
       [{ field: "emailAction", code: "invalid_action" }],
@@ -308,21 +312,21 @@ describe("message router", () => {
 
     const first = invoke(listener, {
       type: "settings.save",
-      settings: { ...defaults, emailAction: "redact" },
+      settings: { ...defaults, emailAction: "allow" },
     });
     const second = invoke(listener, {
       type: "settings.save",
       settings: { ...defaults, emailAction: "block" },
     });
 
-    await vi.waitFor(() => expect(broadcastActions).toEqual(["redact"]));
+    await vi.waitFor(() => expect(broadcastActions).toEqual(["allow"]));
     await expect(settingsStore.read()).resolves.toMatchObject({
-      settings: { emailAction: "redact" },
+      settings: { emailAction: "allow" },
     });
     releaseFirstBroadcast();
     await Promise.all([first, second]);
 
-    expect(broadcastActions).toEqual(["redact", "block"]);
+    expect(broadcastActions).toEqual(["allow", "block"]);
     await expect(settingsStore.read()).resolves.toMatchObject({
       settings: { emailAction: "block" },
     });
@@ -370,17 +374,17 @@ describe("message router", () => {
       type: "settings.save",
       settings: {
         ...defaults,
-        emailAction: "redact",
+        emailAction: "allow",
         auditRetentionLimit: 1,
       },
     });
     expect(first.response).toMatchObject({
       type: "settings.saved",
-      envelope: { settings: { emailAction: "redact", auditRetentionLimit: 1 } },
+      envelope: { settings: { emailAction: "allow", auditRetentionLimit: 1 } },
     });
-    expect(broadcasts).toEqual(["redact:1"]);
+    expect(broadcasts).toEqual(["allow:1"]);
     await expect(settingsStore.read()).resolves.toMatchObject({
-      settings: { emailAction: "redact", auditRetentionLimit: 1 },
+      settings: { emailAction: "allow", auditRetentionLimit: 1 },
     });
 
     failPruning = false;
@@ -400,7 +404,7 @@ describe("message router", () => {
       },
     });
     expect(second.response).toMatchObject({ type: "settings.saved" });
-    expect(broadcasts).toEqual(["redact:1", "block:2"]);
+    expect(broadcasts).toEqual(["allow:1", "block:2"]);
   });
 
   it("does not broadcast when settings persistence fails before commit", async () => {
@@ -448,7 +452,7 @@ describe("message router", () => {
         type: "settings.save",
         settings: {
           protectionEnabled: true,
-          emailAction: "redact",
+          emailAction: "block",
           phoneAction: "warn",
           protectedKeywords: [],
           auditRetentionLimit: 100,
@@ -457,7 +461,7 @@ describe("message router", () => {
     ).resolves.toMatchObject({
       response: {
         type: "settings.saved",
-        envelope: { settings: { emailAction: "redact" } },
+        envelope: { settings: { emailAction: "block" } },
       },
     });
     expect(broadcast).toHaveBeenCalledOnce();

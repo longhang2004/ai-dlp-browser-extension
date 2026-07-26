@@ -1,7 +1,7 @@
 import {
-  POLICY_ACTIONS,
+  CONFIGURABLE_PROTECTION_ACTIONS,
   normalizeProtectedKeyword,
-  type PolicyAction,
+  type ConfigurableProtectionAction,
   type ProtectionSettings,
   type SettingsValidationError,
 } from "@ai-dlp/shared-types";
@@ -13,16 +13,10 @@ import {
   type ExtensionPageRuntime,
 } from "../ui/page-runtime.js";
 
-const SETTINGS_ACTIONS = POLICY_ACTIONS.filter((action) => action !== "redact");
-
-function toVisibleSettingsAction(action: PolicyAction): PolicyAction {
-  return action === "redact" ? "warn" : action;
-}
-
 type FormState = {
   protectionEnabled: boolean;
-  emailAction: PolicyAction;
-  phoneAction: PolicyAction;
+  emailAction: ConfigurableProtectionAction;
+  phoneAction: ConfigurableProtectionAction;
   protectedKeywords: string;
   auditRetentionLimit: string;
 };
@@ -39,8 +33,8 @@ const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
 function toFormState(settings: ProtectionSettings): FormState {
   return {
     protectionEnabled: settings.protectionEnabled,
-    emailAction: toVisibleSettingsAction(settings.emailAction),
-    phoneAction: toVisibleSettingsAction(settings.phoneAction),
+    emailAction: settings.emailAction,
+    phoneAction: settings.phoneAction,
     protectedKeywords: settings.protectedKeywords.join("\n"),
     auditRetentionLimit: String(settings.auditRetentionLimit),
   };
@@ -166,11 +160,12 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
                 onChange={(event) =>
                   setForm({
                     ...form,
-                    emailAction: event.target.value as PolicyAction,
+                    emailAction: event.target
+                      .value as ConfigurableProtectionAction,
                   })
                 }
               >
-                {SETTINGS_ACTIONS.map((action) => (
+                {CONFIGURABLE_PROTECTION_ACTIONS.map((action) => (
                   <option key={action} value={action}>
                     {action}
                   </option>
@@ -184,11 +179,12 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
                 onChange={(event) =>
                   setForm({
                     ...form,
-                    phoneAction: event.target.value as PolicyAction,
+                    phoneAction: event.target
+                      .value as ConfigurableProtectionAction,
                   })
                 }
               >
-                {SETTINGS_ACTIONS.map((action) => (
+                {CONFIGURABLE_PROTECTION_ACTIONS.map((action) => (
                   <option key={action} value={action}>
                     {action}
                   </option>

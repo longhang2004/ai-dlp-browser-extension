@@ -6,6 +6,66 @@ import { createMemoryStoragePort } from "./storage-port.js";
 import { SETTINGS_STORAGE_KEY, createSettingsStore } from "./settings-store.js";
 
 describe("settings store", () => {
+  it.each(["email", "phone", "both"] as const)(
+    "migrates legacy %s redact settings to warn and persists once",
+    async (field) => {
+      const legacy = {
+        schemaVersion: 1,
+        settings: {
+          ...createDefaultProtectionSettings(),
+          ...(field === "email" || field === "both"
+            ? { emailAction: "redact" }
+            : {}),
+          ...(field === "phone" || field === "both"
+            ? { phoneAction: "redact" }
+            : {}),
+        },
+      };
+      const durable = createMemoryStoragePort({
+        [SETTINGS_STORAGE_KEY]: legacy,
+      });
+      const write = vi.fn((key: string, value: unknown) =>
+        durable.write(key, value),
+      );
+      const store = createSettingsStore({
+        read: (key) => durable.read(key),
+        write,
+      });
+
+      const first = await store.read();
+      const second = await store.read();
+
+      expect(first.settings.emailAction).toBe("warn");
+      expect(first.settings.phoneAction).toBe("warn");
+      expect(second).toEqual(first);
+      expect(write).toHaveBeenCalledOnce();
+      expect(write).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, {
+        schemaVersion: 1,
+        settings: {
+          ...createDefaultProtectionSettings(),
+          emailAction: "warn",
+          phoneAction: "warn",
+        },
+      });
+    },
+  );
+
+  it("rejects new redact settings instead of persisting them", async () => {
+    const storage = createMemoryStoragePort();
+    const store = createSettingsStore(storage);
+
+    await expect(
+      store.save({
+        ...createDefaultProtectionSettings(),
+        emailAction: "redact",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      fieldErrors: [{ field: "emailAction", code: "invalid_action" }],
+    });
+    await expect(storage.read(SETTINGS_STORAGE_KEY)).resolves.toBeUndefined();
+  });
+
   it("does not touch local storage before trusted-context restriction succeeds", async () => {
     let release = (): void => undefined;
     const storageReady = new Promise<void>((resolve) => {
@@ -66,7 +126,7 @@ describe("settings store", () => {
     const store = createSettingsStore(storage);
     const result = await store.save({
       protectionEnabled: true,
-      emailAction: "redact",
+      emailAction: "warn",
       phoneAction: "block",
       protectedKeywords: ["  Nội bộ  ", "Project Atlas"],
       auditRetentionLimit: 1_000,
@@ -78,7 +138,7 @@ describe("settings store", () => {
         schemaVersion: 1,
         settings: {
           protectionEnabled: true,
-          emailAction: "redact",
+          emailAction: "warn",
           phoneAction: "block",
           protectedKeywords: ["Nội bộ", "Project Atlas"],
           auditRetentionLimit: 1_000,
@@ -162,7 +222,7 @@ describe("settings store", () => {
     const store = createSettingsStore(storage);
     const first = store.save({
       ...createDefaultProtectionSettings(),
-      emailAction: "redact",
+      emailAction: "allow",
     });
     const second = store.save({
       ...createDefaultProtectionSettings(),
@@ -208,14 +268,14 @@ describe("settings store", () => {
     await expect(
       store.save({
         ...createDefaultProtectionSettings(),
-        emailAction: "redact",
+        emailAction: "block",
       }),
     ).resolves.toMatchObject({
       ok: true,
-      envelope: { settings: { emailAction: "redact" } },
+      envelope: { settings: { emailAction: "block" } },
     });
     await expect(store.read()).resolves.toMatchObject({
-      settings: { emailAction: "redact" },
+      settings: { emailAction: "block" },
     });
   });
 });

@@ -123,6 +123,53 @@ describe("settings ports", () => {
     });
   });
 
+  it("migrates legacy redact before the initial content snapshot is sent", async () => {
+    const storage = createMemoryStoragePort({
+      settings: {
+        schemaVersion: 1,
+        settings: {
+          protectionEnabled: true,
+          emailAction: "redact",
+          phoneAction: "redact",
+          protectedKeywords: [],
+          auditRetentionLimit: 100,
+        },
+      },
+    });
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(storage),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+
+    manager.handleConnect(connected);
+    await vi.waitFor(() =>
+      expect(connected.postMessage).toHaveBeenCalledOnce(),
+    );
+
+    expect(connected.postMessage).toHaveBeenCalledWith({
+      type: "settings.snapshot",
+      generation: 0,
+      envelope: {
+        schemaVersion: 1,
+        settings: {
+          protectionEnabled: true,
+          emailAction: "warn",
+          phoneAction: "warn",
+          protectedKeywords: [],
+          auditRetentionLimit: 100,
+        },
+      },
+    });
+    expect(
+      JSON.stringify(vi.mocked(connected.postMessage).mock.calls),
+    ).not.toContain("redact");
+    await expect(storage.read("settings")).resolves.toMatchObject({
+      settings: { emailAction: "warn", phoneAction: "warn" },
+    });
+  });
+
   it("broadcasts saved snapshots and forgets disconnected or throwing ports", async () => {
     const manager = createSettingsPortManager({
       runtimeId,
@@ -167,7 +214,7 @@ describe("settings ports", () => {
     const baselineStore = createSettingsStore(createMemoryStoragePort());
     const oldEnvelope = await baselineStore.read();
     const newEnvelope = structuredClone(oldEnvelope);
-    newEnvelope.settings.emailAction = "redact";
+    newEnvelope.settings.emailAction = "block";
     const manager = createSettingsPortManager({
       runtimeId,
       settingsStore: {

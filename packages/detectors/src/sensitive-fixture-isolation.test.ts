@@ -37,6 +37,8 @@ describe("dedicated sensitive fixture isolation", () => {
         "../../../apps/*/public/**/*.{html,json,css}",
         "../../../apps/*/*.{html,json,css}",
         "../../../apps/*/vite*.{ts,js,mjs,cjs}",
+        "../../../docs/**/*.{md,mdx,txt,json,html,css}",
+        "../../../README.md",
         "../../../*.{ts,tsx,js,mjs,cjs,json,html,css}",
         "../../../scripts/**/*.{ts,tsx,js,mjs,cjs,json,html,css}",
         "!**/*.test.ts",

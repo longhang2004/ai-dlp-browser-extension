@@ -173,6 +173,10 @@ test("email and Vietnamese phone warnings support one-shot bypass and Shift+Ente
   const dialog = protectionDialog(chatPage);
   await expect(dialog).toContainText("Email address");
   await expect(dialog).toContainText("Phone number");
+  await expect(dialog).toContainText("[EMAIL]");
+  await expect(dialog).toContainText("[PHONE]");
+  await expect(dialog).not.toContainText(sensitive.email.valid);
+  await expect(dialog).not.toContainText(sensitive.phone.vietnameseDomestic);
   await dialog.getByRole("button", { name: "Send anyway" }).click();
   await expect.poll(() => submissionValues(chatPage)).toEqual([`${prompt}\n`]);
 

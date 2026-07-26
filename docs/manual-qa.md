@@ -16,7 +16,8 @@ not copy fixture values into documentation, screenshots, tickets, or logs.
 
 3. Load `apps/extension/dist` unpacked in Chromium/Chrome 102+.
 4. Open the popup. Do not rely on enforcement unless it says **Protection is
-   active**. `initializing`, `degraded`, and `unavailable` are not active.
+   active**. `initializing`, `waiting_for_composer`, `degraded`, and
+   `unavailable` are not active.
 5. Use a test ChatGPT conversation with no production or customer data.
 
 ## Automated production-build checks — successful on 2026-07-26
@@ -49,8 +50,14 @@ date. Never record the submitted fixture value.
 - Warning shows category/confidence/placeholder information only.
 - Cancel restores focus and does not submit.
 - Send anyway works once and a second attempt requires a new decision.
-- Redact replaces every finding with the documented placeholder and submits
-  once.
+- Native textarea redaction replaces every finding with the documented
+  placeholder and submits once. Current ProseMirror/contenteditable must not
+  show Redact and continue; automatic redact must show fixed fail-closed
+  guidance.
+- An attachment-only prompt and text plus attachment are blocked without bypass;
+  removing the attachment permits a new attempt. Do not record the filename.
+- A large paste converted by ChatGPT into an attachment is blocked as an
+  unsupported attachment.
 - Card, AWS key, and private-key fixtures block without bypass.
 - A prompt of exactly 100,000 UTF-16 code units is inspected.
 - A prompt of 100,001 code units is stopped with split-prompt guidance and no
@@ -64,6 +71,11 @@ date. Never record the submitted fixture value.
   through.
 - Re-enabling protection returns to active only after a fresh validated
   snapshot.
+- Disabled mode creates no protection observer or health event. Delayed
+  rendering reports `waiting_for_composer` before active or grace-expired
+  degraded.
+- With visible tool/voice controls, only the semantic Send control is captured
+  and resumed.
 - The audit page shows no prompt text or matched value and clears only after
   confirmation.
 - The open Shadow root is inspectable and focus remains contained in the dialog.
@@ -73,7 +85,10 @@ date. Never record the submitted fixture value.
 Interactive QA against an authenticated live ChatGPT session was not performed
 during the 2026-07-26 automated run because no authenticated browser session was
 used. Those items are **unavailable**, not passed. The local production-match
-fixture and unpacked-extension behavior are covered by Playwright.
+fixture and unpacked-extension behavior are covered by Playwright. The
+production-shaped `#prompt-textarea[contenteditable="true"]` fixture, attachment
+presence, tool-button ambiguity, and ProseMirror replacement refusal were
+verified automatically on 2026-07-26; this is not a claim of live compatibility.
 
 ## Failure reporting
 

@@ -29,6 +29,7 @@ audit data, and production logs are completely prompt-free.
 | Settings                 | `chrome.storage.local`                     | Until changed or extension data is removed         | Local version-1 envelope             |
 | Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-1 envelope |
 | Status snapshots         | Settings port and extension pages          | Current connection/page lifetime                   | Not durable                          |
+| Attachment presence flag | Adapter/controller active attempt          | Synchronous checks and active attempt only         | Fixed boolean only; no file metadata |
 
 No backend, telemetry endpoint, remote API, analytics SDK, or central audit
 collector exists in Milestone 1.
@@ -69,6 +70,19 @@ Prompts longer than 100,000 UTF-16 code units are not partially scanned and are
 not silently submitted. The attempt stops, a fixed content-free error asks the
 user to split the prompt, no send-anyway action is offered, and only a
 `prompt_too_large` enforcement event may be stored.
+
+## Attachments and editor replacement
+
+The adapter checks only fixed, composer-scoped attachment-presence evidence. It
+never reads or records a filename, path, MIME type, preview, attachment
+contents, or accessible text. An attachment produces only the fixed
+`unsupported_attachment` enforcement code and cannot be bypassed.
+
+Native textarea replacement uses the native value setter and verifies the
+textarea value before resume. Contenteditable and ProseMirror editors are
+classified as replacement-unsupported because DOM mutation does not prove their
+internal model changed. Those editors are never mutated for redaction; automatic
+redaction produces only `redaction_unavailable`.
 
 ## Local storage boundary
 

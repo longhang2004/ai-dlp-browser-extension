@@ -144,14 +144,11 @@ including the extension's host element.
 
 ### 6.3 Protection disabled
 
-The content script keeps one validated settings object in memory. Once settings
-initialization is complete, the submission handler checks
-`protectionEnabled` synchronously before the adapter suppresses an event.
-
-When protection is disabled, the handler returns `pass_through`. The adapter
-allows the original browser/page event to proceed without `preventDefault`,
-propagation suppression, prompt reading, detection, policy evaluation, dialogs,
-authorization, audit construction, or adapter resume logic.
+The content script keeps one validated settings object in memory, but creates
+no adapter, controller, protection dialog, submission listeners, health
+observer, health timer, or health auditing while `protectionEnabled` is false.
+The original browser/page event therefore proceeds without extension
+interception, prompt reading, detection, policy, authorization, or audit work.
 
 Settings are loaded and validated before the submission interceptor is
 registered. During the short initialization window, the extension does not
@@ -166,8 +163,8 @@ controller cancels that attempt, invalidates authorization, and removes the
 dialog without submitting. A warning that had already reached a user-visible
 dialog is finalized as `policyAction: "warn", resolution: "cancelled"`; an
 attempt cancelled before a policy decision produces no decision event. Future
-events pass through normally. Re-enabling protection reuses the idempotent
-interceptor with the new validated cache. Disabling protection is an explicit
+events pass through normally. Re-enabling protection creates exactly one fresh
+idempotent runtime with the new validated cache. Disabling protection is an explicit
 settings-page action and is unavailable from protection dialogs.
 
 ### 6.4 Prompt size
@@ -198,8 +195,10 @@ The warning dialog displays:
 - A placeholder-only masked preview such as
   `… [EMAIL] … [PROTECTED_KEYWORD] …`.
 - A concise explanation.
-- Cancel, Send anyway, and Redact and continue actions. The redact action is
-  shown only when a sanitized result can be produced.
+- Cancel, Send anyway, and conditional Redact and continue actions. Redaction
+  is shown only when every finding is redactable and the active editor reports
+  verified replacement support. Direct contenteditable/ProseMirror DOM
+  mutation is not verified support.
 
 The block dialog displays:
 
@@ -284,6 +283,7 @@ User submission candidate
   -> Synchronous settings gate
   -> disabled: original event passes through unchanged
   -> enabled: ChatGPT adapter captures and prevents candidate event
+  -> adapter checks composer-scoped attachment presence; attachments stop
   -> Submission controller serializes the attempt
   -> Size guard rejects oversized prompt before detector execution
   -> Detector orchestrator returns transient SensitiveDataFinding[]
@@ -292,8 +292,9 @@ User submission candidate
   -> Controller creates sanitized DisplayFinding[] and safe audit model
   -> allow: controller issues and consumes a one-shot authorization
   -> warn: UI requires explicit cancel, bypass, or redact action
-  -> redact: controller revalidates live context, invokes pure redaction,
-     replaces the current prompt, then authorizes once
+  -> redact: controller requires verified editor replacement capability,
+     revalidates live context, invokes pure redaction, verifies replacement,
+     then authorizes once
   -> block/error: attempt remains stopped
   -> adapter re-resolves live DOM and performs one browser-specific resume
   -> background accepts only schema-validated, privacy-safe audit messages
@@ -628,7 +629,9 @@ type EnforcementErrorCode =
   | "policy_failure"
   | "ui_failure"
   | "resume_failure"
-  | "extension_context_invalidated";
+  | "extension_context_invalidated"
+  | "unsupported_attachment"
+  | "redaction_unavailable";
 
 type EnforcementErrorAuditEvent = {
   kind: "enforcement_error";
@@ -760,8 +763,17 @@ interface ChatApplicationAdapter {
 
   matches(url: URL): boolean;
   resolveCurrentSubmissionContext(): LiveSubmissionContext | null;
+  inspectSubmissionCapabilities(
+    context: LiveSubmissionContext,
+  ): { hasUnsupportedAttachment: boolean };
+  getPromptReplacementCapability(
+    context: LiveSubmissionContext,
+  ): "supported" | "unsupported";
   readPrompt(context: LiveSubmissionContext): string;
-  replacePrompt(context: LiveSubmissionContext, text: string): void;
+  replacePrompt(
+    context: LiveSubmissionContext,
+    text: string,
+  ): PromptReplacementResult;
 
   registerSubmitInterceptor(
     handler: (
@@ -775,6 +787,13 @@ interface ChatApplicationAdapter {
   ): void;
 }
 ```
+
+`PromptReplacementResult` is either `{ok: true, verifiedText}` or a fixed
+failure reason (`unsupported_editor`, `replacement_not_acknowledged`, or
+`context_changed`). Milestone 1 supports verified replacement for native
+textareas. It deliberately returns `unsupported_editor` for
+contenteditable/ProseMirror because assigning `textContent` and dispatching
+synthetic input does not prove the editor model changed.
 
 These DOM-bearing contracts live under `apps/extension/src/adapters/`; none is
 exported from `packages/shared-types`. `CapturedSubmitAttempt` deliberately
@@ -993,6 +1012,14 @@ Fixture-based adapter tests include at least:
 
 Additional fixtures are added for every selector regression fixed later.
 
+The production selector set includes
+`#prompt-textarea[contenteditable="true"]` without trusting the ID alone.
+Send resolution prefers composer-associated `data-testid="send-button"`,
+stable Send accessible labels, `button[type="submit"]`, then
+`input[type="submit"]`. Generic `button:not([type])` is forbidden. Attachment
+evidence is centralized and scoped to the current composer; dormant file inputs
+and attachment-like elements outside that region are ignored.
+
 ### 13.2 Dynamic rendering and SPA behavior
 
 Document-level delegated capture listeners survive replacement of composer and
@@ -1095,7 +1122,7 @@ Tests must prove prevention of:
 - Active-composer replacement even when prompt text is unchanged.
 - Approval expiry before resume.
 
-### 13.4 Missing selectors
+### 13.4 Missing selectors and health grace
 
 If a known candidate event is captured but the composer or send control cannot
 be resolved, the event remains stopped and a content-free recoverable error is
@@ -1105,6 +1132,11 @@ If ChatGPT changes to an entirely unknown DOM or programmatic submission path,
 the extension may be unable to identify and intercept the attempt. The popup
 must report that protection is not confirmed rather than claiming a healthy
 state. This limitation is documented in manual QA and the threat model.
+
+After validated settings, absent composer DOM reports `waiting_for_composer`
+without an audit event. A valid context transitions to `active`. Only grace
+expiry, a strong unresolved submission candidate, or unrecovered loss of a
+previously active context transitions to coalesced `degraded`.
 
 ## 14. Extension pages
 
@@ -1133,6 +1165,10 @@ Allows:
 
 All inputs are validated before the complete v1 settings envelope is saved.
 Strict default block rules and allow-audit configuration are not exposed.
+Automatic `redact` is not offered in the Milestone 1 settings UI because the
+supported production ProseMirror editor lacks verified replacement support.
+Legacy/local v1 redact configuration remains fail-closed on unsupported
+editors and is exercised only by the verified native-textarea path.
 
 ### 14.3 Local audit
 
@@ -1208,8 +1244,9 @@ the built artifact is searched independently from source.
 
 ### 16.6 Unsupported platforms and user disablement
 
-Other browsers, ChatGPT desktop/mobile apps, other AI sites, attachments, and
-unsupported DOM variants are outside enforcement. In an unmanaged deployment,
+Other browsers, ChatGPT desktop/mobile apps, other AI sites, attachment
+contents, and unsupported DOM variants are outside inspection. Composer
+attachment presence is fail-closed. In an unmanaged deployment,
 the user can disable or uninstall the extension or disable protection in
 settings. Managed deployment is future work.
 
@@ -1533,8 +1570,9 @@ Milestone 1 is acceptable only when:
 12. An AWS access key ID is blocked.
 13. A complete PEM private key is blocked.
 14. A high-confidence contextual API secret is blocked.
-15. Warned findings can be redacted with approved placeholders before one
-    resumed submission.
+15. Warned findings can be redacted before one resumed submission only when the
+    active editor provides verified replacement support. Unsupported automatic
+    redaction fails closed with `redaction_unavailable`.
 16. The policy engine receives only four-field `PolicyFinding` metadata; its
     strict input/output contains no prompt, matched/redacted text, offsets,
     sanitized text, or returned original findings.
@@ -1557,7 +1595,8 @@ Milestone 1 is acceptable only when:
 28. Send-control replacement uses only a freshly resolved, enabled control
     associated with the current composer; disconnected original elements are
     never resumed.
-29. Delayed rendering, SPA replacement, duplicate initialization, and adapter
+29. Delayed rendering reports `waiting_for_composer` during its grace period;
+    SPA replacement, duplicate initialization, health coalescing, and adapter
     cleanup pass automated tests.
 30. At least two semantic composer DOM fixtures pass adapter tests.
 31. Browser-specific contracts containing DOM elements, events, or `URL` remain
@@ -1587,6 +1626,16 @@ Milestone 1 is acceptable only when:
     fail validation.
 45. Compile-time and runtime tests enforce the metadata-only policy boundary and
     reject every forbidden field listed in Section 20.2.
+46. Composer-scoped attachments are detected at capture and immediately before
+    resume, blocked without bypass, and represented only by
+    `unsupported_attachment`.
+47. `#prompt-textarea[contenteditable]` and strict semantic Send resolution pass
+    production-shaped fixtures; generic no-type tool buttons are never Send.
+48. Disabled protection creates no adapter/controller/dialog/interceptor,
+    MutationObserver, health timer, or health audit runtime.
+49. A clean GitHub Actions job pins actions by commit SHA, rebuilds from clean
+    output, runs artifact and browser verification, and uploads no profiles or
+    secret fixtures.
 
 ## 24. Required completion verification
 
@@ -1612,8 +1661,10 @@ unless the corresponding check ran.
   never active. Managed or fail-closed startup behavior is future work.
 - ChatGPT can change its DOM or submission behavior without notice.
 - Unknown programmatic submission mechanisms may bypass DOM interception.
-- The extension does not inspect attachments, files, images, prior messages, or
-  generated responses.
+- The extension detects and blocks composer attachments but does not inspect
+  their contents, filenames, paths, MIME types, previews, files, or images.
+- ProseMirror/contenteditable automatic redaction is disabled until a stable
+  editor-state replacement mechanism can be proven. Users must edit manually.
 - Deterministic detectors have false positives and false negatives.
 - Generic international phone matching is inherently ambiguous.
 - Open Shadow DOM and an isolated execution world do not prevent host-page DOM

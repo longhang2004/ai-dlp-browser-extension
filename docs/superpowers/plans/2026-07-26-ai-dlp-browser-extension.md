@@ -98,7 +98,8 @@ Create under `packages/shared-types/src/`:
   envelope.
 - `display.ts`: `DisplayFinding`, dialog models/intents.
 - `messages.ts`: closed one-time and settings-port message unions.
-- `status.ts`: `initializing | active | disabled | degraded | unavailable`.
+- `status.ts`: `initializing | waiting_for_composer | active | disabled |
+  degraded | unavailable`.
 - `validators.ts`: strict allowlisted validation helpers.
 - `index.ts`: intentional platform-independent exports only.
 
@@ -685,3 +686,36 @@ Then:
   sole type gate, `ReactDOM.render`, async `runtime.onMessage` listeners,
   dynamic worker imports, page-world scripts, broad permissions, runtime
   DOM-class selectors, `innerHTML`, `eval`, `new Function`, and remote assets.
+
+## 6. PR #1 security-review remediation addendum
+
+Implemented on 2026-07-26 as focused regression-tested commits:
+
+- Strict Send resolution removes generic no-type buttons and prioritizes
+  composer-associated stable data, accessible Send labels, and native submit
+  controls.
+- Production-shaped `#prompt-textarea[contenteditable]` resolution and
+  strong-candidate fail-closed interception cover Enter, Shift+Enter, IME, and
+  click behavior.
+- `inspectSubmissionCapabilities` detects only composer-scoped attachment
+  presence. The controller checks it at capture and immediately before resume;
+  `unsupported_attachment` has no bypass and no file metadata.
+- Prompt replacement has an explicit capability/result. Native textarea
+  replacement is verified; contenteditable/ProseMirror replacement is
+  unsupported, warning redaction is hidden, and automatic redaction fails
+  closed with `redaction_unavailable`. The settings UI no longer offers
+  automatic redact.
+- Disabled settings create no protection runtime and fully dispose the current
+  adapter, controller, dialog, listeners, observer, timer, attempt, and
+  authorization when protection is turned off.
+- Health uses `initializing → waiting_for_composer → active`, a fake-timer
+  grace period, immediate degradation for strong unresolved candidates, and
+  coalesced degraded auditing.
+- `.github/workflows/ci.yml` pins actions by commit SHA, uses the locked
+  Node/pnpm versions and dependency cache, deletes old build output, runs the
+  complete source/build/artifact/browser gate, uploads the extension only after
+  success, and uploads only failure traces/screenshots/error context.
+
+Live authenticated ChatGPT verification remains a manual QA gate. Automated
+fixtures prove the documented DOM variants but are not a claim that the current
+live site was inspected.

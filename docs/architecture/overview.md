@@ -40,18 +40,22 @@ redacted prompt text, or offsets.
 1. The content script opens the `settings-v1` port and reports `initializing`.
 2. The service worker validates the sender and sends a versioned settings
    snapshot.
-3. Only after validation does the content script create and register the
-   interceptor. It then reports `active`, `disabled`, or `degraded`.
+3. Disabled settings create no protection runtime. Enabled settings create and
+   register one runtime, which reports `waiting_for_composer` until a valid
+   composer is confirmed, then `active`, or `degraded` after the grace period.
 4. Click or unmodified Enter is captured synchronously. Shift+Enter, IME, and
    modifier combinations pass through.
 5. The controller reads the current prompt synchronously and retains it only for
    the active attempt.
-6. Inputs over 100,000 UTF-16 code units stop before detection.
+6. Composer-scoped attachment presence is checked before analysis and again
+   immediately before resume. Attachments stop with no content inspection.
+   Inputs over 100,000 UTF-16 code units stop before detection.
 7. Findings are converted separately into metadata-only policy findings and
    placeholder-only display findings.
-8. The controller handles allow, warn, redact, or block. Before any resumed
-   submission it re-resolves the URL, composer, send control, context version,
-   and current text.
+8. The controller handles allow, warn, redact, or block. Redaction is offered
+   only for an editor with verified replacement support; ProseMirror is
+   unsupported and fails closed. Before any resumed submission it re-resolves
+   the URL, composer, send control, context version, and current text.
 9. A one-shot authorization is consumed exactly once. Modified prompts, stale
    dialogs, replaced composers, cancelled attempts, and duplicate events cannot
    reuse it.
@@ -81,9 +85,10 @@ inspectable for accessibility and testing. The host page can still remove or
 disrupt it, so it is not a security boundary.
 
 The popup cannot report active protection until a validated snapshot has been
-applied and interception registered. Disconnecting the settings port disposes
-interception and reports `unavailable` until a fresh connection and snapshot
-complete.
+applied, interception registered, and a valid composer confirmed. Disconnecting
+the settings port or disabling protection disposes interception and reports
+`unavailable` until a fresh connection and snapshot complete. Delayed rendering
+reports `waiting_for_composer` without health audit noise.
 
 ## Build topology
 

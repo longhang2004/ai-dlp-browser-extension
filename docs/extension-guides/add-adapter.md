@@ -11,7 +11,10 @@ Browser-specific adapters implement `ChatApplicationAdapter` in
 
 - match only the intended application URL;
 - resolve the live composer and associated enabled send control;
-- synchronously read or replace the active prompt;
+- synchronously read the active prompt and explicitly report whether safe
+  replacement is supported;
+- inspect prompt-free submission capabilities such as unsupported attachment
+  presence without reading attachment metadata or contents;
 - synchronously capture click/Enter attempts;
 - expose the browser-specific resume operation;
 - dispose every listener, observer, reference, and callback.
@@ -36,10 +39,11 @@ must never interpolate composer contents.
 Centralize all selectors in one adapter module and prefer, in order:
 
 1. stable semantic elements and native form relationships;
-2. `textarea` and editable textbox semantics;
-3. ARIA roles and labels;
-4. stable data attributes;
-5. documented last-resort fallbacks.
+2. the verified `#prompt-textarea[contenteditable]` semantic identity;
+3. `textarea` and editable textbox semantics;
+4. ARIA roles and labels;
+5. stable data attributes;
+6. documented last-resort fallbacks.
 
 Generated or styling-oriented CSS classes are not primary selectors. Broad
 composer and send-control selectors must be constrained to the same local form
@@ -54,6 +58,16 @@ The controller, not the adapter, owns the one-shot authorization. Before resume,
 the controller re-resolves and validates URL, context version, composer, send
 control, and prompt text. The adapter performs one guarded synchronous resume
 and clears its guard in `finally`.
+
+Send resolution must prefer composer-associated stable Send data attributes,
+Send accessible labels, `button[type=submit]`, and `input[type=submit]`. Generic
+no-type buttons are not submit candidates. Attachment selectors remain
+centralized and scoped to the resolved composer region; dormant file inputs and
+page-external attachment-like elements are not attachment evidence.
+
+`replacePrompt` returns an explicit verified result. Native textarea support
+must verify the value used by the submit path. Direct `textContent` assignment
+plus synthetic events is not sufficient for ProseMirror/contenteditable.
 
 Tests must cover click/Enter capture, Shift+Enter/modifiers/IME pass-through,
 recursive interception, double events, dynamic element replacement, stale

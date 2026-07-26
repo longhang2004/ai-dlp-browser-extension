@@ -42,15 +42,18 @@ Security goals are:
 | Message spoofing                                                       | Sender ID, top-frame, origin, URL, schema, generation, and envelope validation; no externally connectable surface                          | Compromised extension context remains trusted by the browser model                       |
 | Corrupted settings weaken strict categories                            | Safe defaults plus exact v1 policy validation; card/AWS/private-key and API-secret defaults cannot be weakened by settings                 | User-configurable email/phone actions may intentionally allow those categories           |
 | Oversized input causes partial or expensive scanning                   | Reject over 100,000 UTF-16 units before detection; fixed error and no bypass                                                               | Large supported prompts still consume local CPU within the tested budget                 |
-| Extension startup or worker disconnect creates false confidence        | Status remains `initializing`/`unavailable`; interception registers only after a fresh validated snapshot                                  | Submissions during initialization are intentionally not intercepted                      |
+| Attachment bypasses text-only inspection                               | Composer-scoped presence is checked at capture and immediately before resume; fixed error, no bypass, and no file metadata                 | Attachment contents are not inspected                                                    |
+| DOM-only ProseMirror replacement submits stale editor state            | Contenteditable replacement is unsupported; UI hides redaction and automatic redaction fails closed                                        | Users must edit contenteditable prompts manually                                         |
+| Extension startup or worker disconnect creates false confidence        | Status remains `initializing`/`waiting_for_composer`/`unavailable`; activation requires settings and a valid composer                      | Submissions during initialization are intentionally not intercepted                      |
 
 ## Explicit non-goals and limitations
 
 - The extension is not tamper-proof against the host page, the browser owner, or
   local malware.
 - Open Shadow DOM and isolated worlds are not security boundaries.
-- Milestone 1 does not inspect attachments, files, images, pasted rich objects,
-  ChatGPT apps, other sites, or network requests made by ChatGPT.
+- Milestone 1 detects and blocks composer attachments but does not inspect
+  files, images, attachment contents, pasted rich objects, ChatGPT apps, other
+  sites, or network requests made by ChatGPT.
 - A user can disable protection, disable the extension, or uninstall it in an
   unmanaged environment.
 - Managed fail-closed startup, forced installation, signed policy, centralized
@@ -66,3 +69,9 @@ it cannot turn a block into an allow or cause duplicate submission.
 Before validated settings initialization completes, no interceptor is
 registered. Submissions in that brief interval pass through and status remains
 `initializing`, never `active`.
+
+After settings initialization, ordinary delayed composer rendering reports
+`waiting_for_composer` without an audit event. A grace-period expiry or a strong
+unresolved submission candidate can transition to one coalesced degraded event.
+Disabled protection owns no adapter, controller, dialog, listeners, observer,
+timer, or health-audit runtime.

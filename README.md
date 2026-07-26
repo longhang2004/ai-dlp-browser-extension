@@ -20,6 +20,10 @@ blocked.
 - Ordinary clean `allow` decisions are not stored.
 - Prompts over 100,000 UTF-16 code units are stopped with content-free guidance
   and no bypass.
+- Composer-scoped attachments are detected but never inspected; while protection
+  is enabled, their submission is stopped with no bypass.
+- Automatic replacement is supported only for verified native textareas.
+  ProseMirror/contenteditable redaction is disabled and fails closed.
 - The dialog uses open Shadow DOM for CSS/component isolation and inspection,
   not as a security boundary.
 - The production manifest grants only `storage`; there are no host permissions,
@@ -43,6 +47,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm test:browser
+pnpm test:e2e
 pnpm test:performance
 pnpm build
 pnpm verify:artifact
@@ -52,10 +57,10 @@ pnpm verify:artifact
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
 
-The latest verified Phase 13 run on 2026-07-26 passed 638 unit/DOM tests, 7
-Chromium integration tests, and 4 performance scenarios. The production build
-contained 12 files; 43 URL literals were classified with zero fetching and zero
-unreviewed URLs.
+The latest remediation run on 2026-07-26 passed 657 unit/DOM tests before final
+documentation verification, 7 Chromium integration tests, and 4 performance
+scenarios. The production build contained 12 files; 43 URL literals were
+classified with zero fetching and zero unreviewed URLs.
 
 ## Load the unpacked extension
 
@@ -66,26 +71,28 @@ unreviewed URLs.
 5. Open ChatGPT and confirm the popup reports **Protection is active** before
    relying on interception.
 
-The popup reports `initializing`, `active`, `disabled`, `degraded`, or
-`unavailable`. A submission made before validated settings initialization
-completes is not intercepted, and the extension never calls that interval
-active.
+The popup reports `initializing`, `waiting_for_composer`, `active`, `disabled`,
+`degraded`, or `unavailable`. A submission made before validated settings
+initialization completes is not intercepted, and the extension never calls that
+interval active.
 
 ## Settings and audit
 
 The options page exposes protection enablement, email and phone actions,
 protected keywords, and a local audit-retention limit from 1 to 1,000 events.
-Payment cards, AWS access keys, and private keys always block; protected
-keywords warn; high-confidence API secrets block and medium-confidence API
-secrets warn.
+The settings UI does not offer automatic `redact`; warning redaction is shown
+only when the active editor reports verified replacement support. Payment cards,
+AWS access keys, and private keys always block; protected keywords warn;
+high-confidence API secrets block and medium-confidence API secrets warn.
 
 The audit page stores only privacy-safe decision metadata and enforcement or
 adapter-health errors. Clearing the audit log requires explicit confirmation.
 
 ## Scope
 
-Milestone 1 does not inspect attachments, other websites, ChatGPT desktop or
-mobile applications, network traffic, or content submitted before settings
+Milestone 1 detects and blocks composer attachments but does not inspect their
+contents. It does not inspect other websites, ChatGPT desktop or mobile
+applications, network traffic, or content submitted before settings
 initialization. Enterprise policy, forced installation, central audit export,
 and tamper resistance are future work; see
 [managed deployment](docs/managed-deployment.md).

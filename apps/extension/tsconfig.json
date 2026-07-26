@@ -12,8 +12,8 @@
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test-d.ts"],
   "references": [
-    { "path": "../../packages/shared-types" },
-    { "path": "../../packages/detectors" },
-    { "path": "../../packages/policy-engine" }
+    { "path": "../../packages/shared-types/tsconfig.json" },
+    { "path": "../../packages/detectors/tsconfig.json" },
+    { "path": "../../packages/policy-engine/tsconfig.json" }
   ]
 }

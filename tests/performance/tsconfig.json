@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ES2023"],
+    "noEmit": true,
+    "tsBuildInfoFile": "../../node_modules/.cache/typescript/performance.tsbuildinfo",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["**/*.ts"],
+  "references": [{ "path": "../../packages/detectors/tsconfig.json" }]
+}

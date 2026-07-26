@@ -15,7 +15,7 @@
     "typecheck": "tsc --build --pretty false",
     "test:unit": "vitest run --project unit --project node --project dom",
     "test:browser": "pnpm build && playwright test",
-    "test:performance": "vitest run --project performance",
+    "test:performance": "vitest run --project performance --disableConsoleIntercept",
     "test": "pnpm test:unit",
     "build": "pnpm --filter @ai-dlp/extension build",
     "verify:artifact": "node scripts/verify-production-artifact.mjs"

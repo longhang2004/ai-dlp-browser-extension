@@ -8,5 +8,5 @@
     "tsBuildInfoFile": "../../node_modules/.cache/typescript/policy-engine.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test-d.ts"],
-  "references": [{ "path": "../shared-types" }]
+  "references": [{ "path": "../shared-types/tsconfig.json" }]
 }

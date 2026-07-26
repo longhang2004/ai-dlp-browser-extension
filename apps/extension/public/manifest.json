@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "AI DLP for ChatGPT",
+  "version": "0.1.0",
+  "description": "Privacy-first local protection for sensitive ChatGPT prompts.",
+  "minimum_chrome_version": "102",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AI DLP status"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle",
+      "all_frames": false,
+      "world": "ISOLATED"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; worker-src 'self'; connect-src 'none'; img-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline';"
+  }
+}

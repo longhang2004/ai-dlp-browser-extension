@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "literal": "https://react.dev/errors/",
+      "filePattern": "assets/*.js",
+      "classification": "inert_framework_error_reference",
+      "justification": "React production error decoder reference; the bundle contains no request API that consumes this string."
+    },
+    {
+      "literal": "https://react.dev/errors/",
+      "filePattern": "content-script.js",
+      "classification": "inert_framework_error_reference",
+      "justification": "React production error decoder reference; the bundle contains no request API that consumes this string."
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.tooling.json" },
+    { "path": "./packages/shared-types/tsconfig.json" },
+    { "path": "./packages/detectors/tsconfig.json" },
+    { "path": "./packages/policy-engine/tsconfig.json" },
+    { "path": "./apps/extension/tsconfig.json" },
+    { "path": "./tests/e2e/tsconfig.json" },
+    { "path": "./tests/performance/tsconfig.json" }
+  ]
+}

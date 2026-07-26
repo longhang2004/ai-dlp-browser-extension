@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": true,
+    "noEmit": false,
+    "outDir": "../../node_modules/.cache/typescript/build/detectors",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../node_modules/.cache/typescript/detectors.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.test-d.ts"],
+  "references": [{ "path": "../shared-types/tsconfig.json" }]
+}

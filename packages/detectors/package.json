@@ -1,0 +1,18 @@
+{
+  "name": "@ai-dlp/detectors",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --build tsconfig.json --pretty false"
+  },
+  "dependencies": {
+    "@ai-dlp/shared-types": "workspace:*"
+  }
+}

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build --config vite.pages.config.ts && vite build --config vite.content.config.ts",
+    "build": "vite build --config vite.pages.config.ts && vite build --config vite.content.config.ts && pnpm test:build-topology && node scripts/verify-build-topology.mjs",
+    "test:build-topology": "node --test scripts/build-topology-rules.test.mjs",
     "typecheck": "tsc --build tsconfig.json --pretty false"
   },
   "dependencies": {

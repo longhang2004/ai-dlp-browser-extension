@@ -8,6 +8,7 @@ import type {
   ChatApplicationAdapter,
   ConsumedSubmissionAuthorization,
   LiveSubmissionContext,
+  SubmissionContentCapabilities,
   SubmitInterceptor,
 } from "../chat-application-adapter.js";
 import {
@@ -249,6 +250,17 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     return context.composer instanceof HTMLTextAreaElement
       ? context.composer.value
       : readStructuredContentEditable(context.composer);
+  }
+
+  inspectSubmissionCapabilities(
+    context: LiveSubmissionContext,
+  ): SubmissionContentCapabilities {
+    this.#assertPromptContext(context);
+    const region = context.composer.closest(CHATGPT_SELECTORS.composerRegion);
+    return {
+      hasUnsupportedAttachment:
+        region?.querySelector(CHATGPT_SELECTORS.attachmentEvidence) !== null,
+    };
   }
 
   replacePrompt(context: LiveSubmissionContext, text: string): void {

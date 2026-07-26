@@ -15,6 +15,10 @@ export type LiveSubmissionContext = {
   contextVersion: number;
 };
 
+export type SubmissionContentCapabilities = {
+  hasUnsupportedAttachment: boolean;
+};
+
 declare const consumedSubmissionAuthorizationBrand: unique symbol;
 
 export type ConsumedSubmissionAuthorization = {
@@ -32,6 +36,9 @@ export interface ChatApplicationAdapter {
 
   matches(url: URL): boolean;
   resolveCurrentSubmissionContext(): LiveSubmissionContext | null;
+  inspectSubmissionCapabilities(
+    context: LiveSubmissionContext,
+  ): SubmissionContentCapabilities;
   readPrompt(context: LiveSubmissionContext): string;
   replacePrompt(context: LiveSubmissionContext, text: string): void;
   registerSubmitInterceptor(handler: SubmitInterceptor): () => void;

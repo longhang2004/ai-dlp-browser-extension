@@ -46,6 +46,7 @@ type HarnessOptions = {
   analyze?: () => SensitiveDataFinding[];
   evaluate?: (input: unknown) => PolicyDecision;
   auditDelay?: Promise<void>;
+  hasAttachment?: boolean;
 };
 
 function createHarness(value: string | HarnessOptions = "clean prompt") {
@@ -54,6 +55,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
   let currentPrompt = prompt;
   let contextVersion = 1;
   let currentUrl = new URL("https://chatgpt.com/");
+  let hasAttachment = harnessOptions.hasAttachment ?? false;
   const composer = { isConnected: true } as HTMLElement;
   const sendControl = { isConnected: true } as HTMLElement;
   const context = (): LiveSubmissionContext => ({
@@ -65,11 +67,15 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
   let interceptor:
     Parameters<ChatApplicationAdapter["registerSubmitInterceptor"]>[0] | null =
     null;
+  const inspectSubmissionCapabilities = vi.fn(() => ({
+    hasUnsupportedAttachment: hasAttachment,
+  }));
   const adapter: ChatApplicationAdapter = {
     id: "chatgpt",
     version: "1",
     matches: (url) => url.origin === "https://chatgpt.com",
     resolveCurrentSubmissionContext: vi.fn(() => context()),
+    inspectSubmissionCapabilities,
     readPrompt: vi.fn(() => currentPrompt),
     replacePrompt: vi.fn((_context, value) => {
       currentPrompt = value;
@@ -137,6 +143,10 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     setPrompt: (value: string) => {
       currentPrompt = value;
     },
+    setAttachment: (value: boolean) => {
+      hasAttachment = value;
+    },
+    inspectSubmissionCapabilities,
     replaceComposer: () => {
       contextVersion += 1;
     },
@@ -204,6 +214,89 @@ describe("submission privacy boundaries", () => {
 });
 
 describe("submission controller", () => {
+  it("fails closed before analysis when an attachment is present", async () => {
+    const analyze = vi.fn(() => []);
+    const filename = "confidential-board-plan.pdf";
+    const harness = createHarness({
+      prompt: "",
+      hasAttachment: true,
+      analyze,
+    });
+
+    expect(harness.fire()).toBe("intercept");
+    await harness.controller.whenSettledForTesting();
+
+    expect(analyze).not.toHaveBeenCalled();
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.dialog.show).toHaveBeenCalledWith({
+      kind: "error",
+      errorCode: "unsupported_attachment",
+    });
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      kind: "enforcement_error",
+      errorCode: "unsupported_attachment",
+    });
+    expect(JSON.stringify(harness.events)).not.toContain(filename);
+  });
+
+  it("invalidates warning approval when an attachment appears", async () => {
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const finding = emailFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      action: "warn",
+    });
+    harness.dialog.show.mockImplementationOnce(
+      () => new Promise((resolve) => (settle = resolve)),
+    );
+    harness.fire();
+    await vi.waitFor(() => expect(harness.dialog.show).toHaveBeenCalled());
+
+    harness.setAttachment(true);
+    settle("bypass");
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.events).toContainEqual(
+      expect.objectContaining({
+        kind: "enforcement_error",
+        errorCode: "unsupported_attachment",
+      }),
+    );
+  });
+
+  it("rechecks attachment capability immediately before a clean allow resumes", async () => {
+    const harness = createHarness();
+    harness.inspectSubmissionCapabilities
+      .mockReturnValueOnce({ hasUnsupportedAttachment: false })
+      .mockReturnValueOnce({ hasUnsupportedAttachment: true });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.events).toContainEqual(
+      expect.objectContaining({
+        kind: "enforcement_error",
+        errorCode: "unsupported_attachment",
+      }),
+    );
+  });
+
+  it("evaluates a new submission normally after its attachment is removed", async () => {
+    const harness = createHarness({ hasAttachment: true });
+    harness.fire("attached");
+    await harness.controller.whenSettledForTesting();
+    harness.setAttachment(false);
+
+    harness.fire("attachment-removed");
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.adapter.resumeSubmission).toHaveBeenCalledOnce();
+  });
+
   it("allows a clean prompt once without a persisted audit event", async () => {
     const harness = createHarness();
     expect(harness.fire()).toBe("intercept");

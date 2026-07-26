@@ -86,6 +86,7 @@ export const ENFORCEMENT_ERROR_CODES = Object.freeze([
   "ui_failure",
   "resume_failure",
   "extension_context_invalidated",
+  "unsupported_attachment",
 ] as const);
 
 export type EnforcementErrorCode = (typeof ENFORCEMENT_ERROR_CODES)[number];

@@ -35,6 +35,8 @@ const ERROR_COPY = Object.freeze({
     "The submission could not be resumed. Close this message and try again.",
   extension_context_invalidated:
     "Protection was reloaded or updated. Reload the page and try again.",
+  unsupported_attachment:
+    "This submission contains an attachment. Attachment inspection is not supported yet. Remove it and try again.",
 } as const satisfies Record<EnforcementErrorCode, string>);
 
 function activeElementWithin(element: HTMLElement): Element | null {

@@ -14,6 +14,7 @@ const ERROR_COPY = {
   ui_failure: "Dialog failure",
   resume_failure: "Submission resume failure",
   extension_context_invalidated: "Extension context unavailable",
+  unsupported_attachment: "Attachment unsupported",
 } as const;
 
 const HEALTH_COPY = {

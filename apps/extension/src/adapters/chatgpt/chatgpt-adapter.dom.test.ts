@@ -67,6 +67,39 @@ afterEach(() => {
 });
 
 describe("ChatGptAdapter prompt operations", () => {
+  it("detects only composer-scoped attachment evidence, not upload capability", () => {
+    renderFixture(`
+      <div data-testid="composer-attachment" id="outside">outside</div>
+      <form aria-label="Chat composer">
+        <textarea></textarea>
+        <input type="file" />
+        <div data-testid="composer-attachment" id="inside">
+          <button aria-label="Remove attachment">Remove</button>
+        </div>
+        <button type="submit">Send</button>
+      </form>
+    `);
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    expect(context).not.toBeNull();
+    if (context === null) throw new Error("Expected context.");
+    const inspect = (
+      adapter as unknown as {
+        inspectSubmissionCapabilities(
+          value: LiveSubmissionContext,
+        ): { hasUnsupportedAttachment: boolean };
+      }
+    ).inspectSubmissionCapabilities;
+
+    expect(inspect.call(adapter, context)).toEqual({
+      hasUnsupportedAttachment: true,
+    });
+    document.querySelector("#inside")?.remove();
+    expect(inspect.call(adapter, context)).toEqual({
+      hasUnsupportedAttachment: false,
+    });
+  });
+
   it("reads structured text from the production prompt-textarea", () => {
     renderFixture(PRODUCTION_PROSEMIRROR_COMPOSER_FIXTURE);
     const adapter = createAdapter();

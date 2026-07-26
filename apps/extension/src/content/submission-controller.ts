@@ -140,7 +140,9 @@ function isSendControlEnabled(element: HTMLElement): boolean {
 function capturePromptSynchronously(
   adapter: ChatApplicationAdapter,
   attempt: CapturedSubmitAttempt,
-): string | null {
+):
+  | { kind: "ready"; prompt: string }
+  | { kind: "error"; errorCode: EnforcementErrorCode } {
   try {
     const context = adapter.resolveCurrentSubmissionContext();
     if (
@@ -150,11 +152,19 @@ function capturePromptSynchronously(
       !isElementConnected(context.composer) ||
       !isSendControlEnabled(context.sendControl)
     ) {
-      return null;
+      return {
+        kind: "error",
+        errorCode: "extension_context_invalidated",
+      };
     }
-    return adapter.readPrompt(context);
+    if (
+      adapter.inspectSubmissionCapabilities(context).hasUnsupportedAttachment
+    ) {
+      return { kind: "error", errorCode: "unsupported_attachment" };
+    }
+    return { kind: "ready", prompt: adapter.readPrompt(context) };
   } catch {
-    return null;
+    return { kind: "error", errorCode: "extension_context_invalidated" };
   }
 }
 
@@ -322,7 +332,9 @@ export function createSubmissionController(
   function resolveValidatedContext(
     attempt: ActiveAttempt,
     expectedPrompt: string,
-  ): LiveSubmissionContext | null {
+  ):
+    | { kind: "ready"; context: LiveSubmissionContext }
+    | { kind: "error"; errorCode: EnforcementErrorCode } {
     let context: LiveSubmissionContext | null;
     try {
       context = options.adapter.resolveCurrentSubmissionContext();
@@ -334,12 +346,21 @@ export function createSubmissionController(
         !isSendControlEnabled(context.sendControl) ||
         options.adapter.readPrompt(context) !== expectedPrompt
       ) {
-        return null;
+        return {
+          kind: "error",
+          errorCode: "extension_context_invalidated",
+        };
+      }
+      if (
+        options.adapter.inspectSubmissionCapabilities(context)
+          .hasUnsupportedAttachment
+      ) {
+        return { kind: "error", errorCode: "unsupported_attachment" };
       }
     } catch {
-      return null;
+      return { kind: "error", errorCode: "extension_context_invalidated" };
     }
-    return context;
+    return { kind: "ready", context };
   }
 
   function performApprovedResumeSynchronously(
@@ -352,10 +373,11 @@ export function createSubmissionController(
       return { kind: "authorization_invalid" };
     }
 
-    const current = resolveValidatedContext(attempt, prompt);
-    if (current === null) {
-      return { kind: "error", errorCode: "extension_context_invalidated" };
+    const currentResult = resolveValidatedContext(attempt, prompt);
+    if (currentResult.kind === "error") {
+      return currentResult;
     }
+    const current = currentResult.context;
 
     let resumeContext = current;
     if (mode === "redacted") {
@@ -370,11 +392,14 @@ export function createSubmissionController(
       } catch {
         return { kind: "error", errorCode: "resume_failure" };
       }
-      const afterReplacement = resolveValidatedContext(attempt, sanitizedText);
-      if (afterReplacement === null) {
-        return { kind: "error", errorCode: "extension_context_invalidated" };
+      const afterReplacementResult = resolveValidatedContext(
+        attempt,
+        sanitizedText,
+      );
+      if (afterReplacementResult.kind === "error") {
+        return afterReplacementResult;
       }
-      resumeContext = afterReplacement;
+      resumeContext = afterReplacementResult.context;
     }
 
     const consumed = consumeSubmissionAuthorization(
@@ -424,14 +449,15 @@ export function createSubmissionController(
   }
 
   async function processAttempt(attempt: ActiveAttempt): Promise<void> {
-    attempt.promptSnapshot = capturePromptSynchronously(
+    const capture = capturePromptSynchronously(
       options.adapter,
       attempt.attempt,
     );
-    if (attempt.promptSnapshot === null) {
-      await showError(attempt, "extension_context_invalidated");
+    if (capture.kind === "error") {
+      await showError(attempt, capture.errorCode);
       return;
     }
+    attempt.promptSnapshot = capture.prompt;
 
     if (!isCurrent(attempt) || attempt.promptSnapshot === null) {
       finish(attempt, "cancelled");

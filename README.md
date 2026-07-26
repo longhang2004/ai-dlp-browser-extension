@@ -57,7 +57,7 @@ pnpm verify:artifact
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
 
-The latest remediation run on 2026-07-26 passed 658 unit/DOM tests, 7 Chromium
+The latest remediation run on 2026-07-26 passed 660 unit/DOM tests, 7 Chromium
 integration tests, and 4 performance scenarios. The production build contained
 12 files; 43 URL literals were classified with zero fetching and zero unreviewed
 URLs.

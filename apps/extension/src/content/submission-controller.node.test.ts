@@ -247,6 +247,38 @@ describe("submission controller", () => {
     expect(JSON.stringify(harness.events)).not.toContain(filename);
   });
 
+  it.each([
+    {
+      scenario: "text plus attachment",
+      prompt: "Harmless visible text",
+    },
+    {
+      scenario: "large paste converted to an attachment",
+      prompt: "Visible attachment summary",
+    },
+  ])("never allows $scenario", async ({ prompt }) => {
+    const harness = createHarness({
+      prompt,
+      hasAttachment: true,
+      action: "allow",
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.dialog.show).toHaveBeenCalledWith({
+      kind: "error",
+      errorCode: "unsupported_attachment",
+    });
+    expect(harness.events).toEqual([
+      expect.objectContaining({
+        kind: "enforcement_error",
+        errorCode: "unsupported_attachment",
+      }),
+    ]);
+  });
+
   it("invalidates warning approval when an attachment appears", async () => {
     let settle!: (intent: ProtectionDialogIntent) => void;
     const finding = emailFinding();

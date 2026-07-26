@@ -100,6 +100,22 @@ describe("ProtectionDialog", () => {
     ).not.toBeNull();
     expect(screen.getByRole("button", { name: "Close" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Send anyway" })).toBeNull();
+
+    rerender(
+      <ProtectionDialog
+        request={{ kind: "error", errorCode: "unsupported_attachment" }}
+        onIntent={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "This submission contains an attachment. Attachment inspection is not supported yet. Remove it and try again.",
+      ),
+    ).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Send anyway" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Redact and continue" }),
+    ).toBeNull();
   });
 });
 

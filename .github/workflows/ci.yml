@@ -70,7 +70,9 @@ jobs:
         run: pnpm verify:artifact
 
       - name: Compute canonical extension digest
-        run: pnpm artifact:digest > ai-dlp-extension-${REVIEWED_COMMIT}.sha256
+        run:
+          node scripts/canonical-dist-digest.mjs apps/extension/dist >
+          ai-dlp-extension-${REVIEWED_COMMIT}.sha256
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium

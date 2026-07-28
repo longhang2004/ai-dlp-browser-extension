@@ -20,7 +20,6 @@ test("pins a least-privilege clean CI gate with all security checks", () => {
     "pnpm test:performance",
     "pnpm build",
     "pnpm verify:artifact",
-    "pnpm artifact:digest",
     "pnpm test:e2e",
   ]) {
     assert.ok(workflow.includes(command), `missing CI command: ${command}`);
@@ -32,6 +31,12 @@ test("pins a least-privilege clean CI gate with all security checks", () => {
     ),
   );
   assert.ok(workflow.includes("ref: ${{ env.REVIEWED_COMMIT }}"));
+  assert.ok(
+    workflow.includes(
+      "node scripts/canonical-dist-digest.mjs apps/extension/dist >",
+    ),
+  );
+  assert.doesNotMatch(workflow, /pnpm artifact:digest >/u);
   assert.match(
     workflow,
     /name: ai-dlp-extension-\$\{\{ env\.REVIEWED_COMMIT \}\}\.sha256/u,

@@ -30,22 +30,175 @@ function event(
     detectorCategories: ["email"],
     matchedRuleIds: ["warn.email"],
     findingCount: 1,
+    reasonCode: "policy_match",
+    attachmentPresent: false,
     adapterVersion: CHATGPT_ADAPTER_VERSION,
     ...overrides,
   } as AuditEvent;
 }
 
 describe("audit store", () => {
-  it("returns an empty v1 envelope for missing, corrupt, or unsupported storage", async () => {
+  it("returns an empty v2 envelope for missing, corrupt, or unsupported storage", async () => {
     for (const initial of [
       {},
       { audit: "corrupt" },
-      { audit: { schemaVersion: 2, events: [] } },
+      { audit: { schemaVersion: 3, events: [] } },
     ]) {
       const storage = createMemoryStoragePort(initial);
       const store = createAuditStore(storage, createSettingsStore(storage));
-      expect(await store.read()).toEqual({ schemaVersion: 1, events: [] });
+      expect(await store.read()).toEqual({ schemaVersion: 2, events: [] });
     }
+  });
+
+  it("strictly migrates valid v1 history to v2 with decision metadata and preserves adapter version 1", async () => {
+    const legacyDecision = {
+      kind: "decision",
+      id: event(1).id,
+      timestamp: event(1).timestamp,
+      application: "chatgpt",
+      policyAction: "warn",
+      resolution: "cancelled",
+      detectorCategories: ["email"],
+      matchedRuleIds: ["warn.email"],
+      findingCount: 1,
+      adapterVersion: "1",
+    };
+    const storage = createMemoryStoragePort({
+      audit: { schemaVersion: 1, events: [legacyDecision] },
+    });
+    const store = createAuditStore(storage, createSettingsStore(storage));
+
+    await expect(store.read()).resolves.toEqual({
+      schemaVersion: 2,
+      events: [
+        {
+          ...legacyDecision,
+          reasonCode: "policy_match",
+          attachmentPresent: false,
+        },
+      ],
+    });
+    await expect(storage.read("audit")).resolves.toMatchObject({
+      schemaVersion: 2,
+    });
+  });
+
+  it("does not partially migrate a v1 envelope containing an invalid event", async () => {
+    const storage = createMemoryStoragePort({
+      audit: {
+        schemaVersion: 1,
+        events: [
+          {
+            kind: "decision",
+            id: event(1).id,
+            timestamp: event(1).timestamp,
+            application: "chatgpt",
+            policyAction: "warn",
+            resolution: "cancelled",
+            detectorCategories: ["email"],
+            matchedRuleIds: ["warn.email"],
+            findingCount: 1,
+            adapterVersion: "1",
+            filename: "must-not-migrate.txt",
+          },
+        ],
+      },
+    });
+    const store = createAuditStore(storage, createSettingsStore(storage));
+
+    await expect(store.read()).resolves.toEqual({
+      schemaVersion: 2,
+      events: [],
+    });
+  });
+
+  it("rejects health codes that did not exist in the v1 audit schema", async () => {
+    const storage = createMemoryStoragePort({
+      audit: {
+        schemaVersion: 1,
+        events: [
+          {
+            kind: "adapter_health",
+            id: event(1).id,
+            timestamp: event(1).timestamp,
+            application: "chatgpt",
+            status: "degraded",
+            healthCode: "ambiguous_submission_context",
+            adapterVersion: "1",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      createAuditStore(storage, createSettingsStore(storage)).read(),
+    ).resolves.toEqual({ schemaVersion: 2, events: [] });
+  });
+
+  it("rejects v1 event arrays with hidden or symbolic metadata", async () => {
+    const legacyDecision = {
+      kind: "decision",
+      id: event(1).id,
+      timestamp: event(1).timestamp,
+      application: "chatgpt",
+      policyAction: "warn",
+      resolution: "cancelled",
+      detectorCategories: ["email"],
+      matchedRuleIds: ["warn.email"],
+      findingCount: 1,
+      adapterVersion: "1",
+    };
+    const events = [legacyDecision];
+    Object.defineProperty(events, Symbol("private-data"), {
+      enumerable: false,
+      value: "must-not-cross",
+    });
+    let storedAudit: unknown = { schemaVersion: 1, events };
+    const storage = {
+      async read(key: string) {
+        return key === "audit" ? storedAudit : undefined;
+      },
+      async write(key: string, value: unknown) {
+        if (key === "audit") storedAudit = value;
+      },
+      async remove() {},
+    };
+
+    await expect(
+      createAuditStore(storage, createSettingsStore(storage)).read(),
+    ).resolves.toEqual({ schemaVersion: 2, events: [] });
+  });
+
+  it("accepts attachment-only decisions without findings, masked excerpts, or file metadata", async () => {
+    const storage = createMemoryStoragePort();
+    const store = createAuditStore(storage, createSettingsStore(storage));
+    const attachmentDecision = event(1, {
+      policyAction: "warn",
+      resolution: "attachment_bypassed",
+      detectorCategories: [],
+      matchedRuleIds: ["attachment.unsupported"],
+      findingCount: 0,
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+    });
+
+    await expect(store.append(attachmentDecision)).resolves.toBe("persisted");
+    await expect(store.read()).resolves.toEqual({
+      schemaVersion: 2,
+      events: [attachmentDecision],
+    });
+    expect(JSON.stringify(attachmentDecision)).not.toMatch(
+      /filename|fileCount|mime|size|content|label|html/iu,
+    );
+  });
+
+  it("accepts adapter version 1 only as migrated history, not a new append", async () => {
+    const storage = createMemoryStoragePort();
+    const store = createAuditStore(storage, createSettingsStore(storage));
+
+    await expect(
+      store.append({ ...event(1), adapterVersion: "1" }),
+    ).rejects.toThrow("Invalid audit event.");
   });
 
   it("drops all allow decisions, including valid stored allow events", async () => {
@@ -55,19 +208,20 @@ describe("audit store", () => {
       detectorCategories: [],
       matchedRuleIds: ["allow.no-findings"],
       findingCount: 0,
+      reasonCode: "no_findings",
     });
     const storage = createMemoryStoragePort({
-      audit: { schemaVersion: 1, events: [allow] },
+      audit: { schemaVersion: 2, events: [allow] },
     });
     const store = createAuditStore(storage, createSettingsStore(storage));
 
     await expect(store.read()).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       events: [],
     });
     await expect(store.append(allow)).resolves.toBe("dropped");
     await expect(store.read()).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       events: [],
     });
   });
@@ -202,7 +356,7 @@ describe("audit store", () => {
     };
     const storage = createMemoryStoragePort({
       audit: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         events: [first, retried, afterRecovery],
       },
     });
@@ -226,7 +380,7 @@ describe("audit store", () => {
     await store.append(event(2));
     await store.clear();
     await expect(store.read()).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       events: [],
     });
   });
@@ -258,7 +412,7 @@ describe("audit store", () => {
 
     await expect(store.read()).rejects.toThrow("fixed audit read failure");
     await expect(store.read()).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       events: [],
     });
     await expect(store.append(event(1))).rejects.toThrow(
@@ -272,7 +426,7 @@ describe("audit store", () => {
 
   it("retries failed retention pruning on a later append", async () => {
     const durable = createMemoryStoragePort({
-      audit: { schemaVersion: 1, events: [event(1), event(2), event(3)] },
+      audit: { schemaVersion: 2, events: [event(1), event(2), event(3)] },
     });
     const settings = createSettingsStore(createMemoryStoragePort());
     await settings.save({

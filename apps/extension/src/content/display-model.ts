@@ -61,11 +61,20 @@ export function createSubmissionDialogModel(
   decision: PolicyDecision,
   findings: readonly SensitiveDataFinding[],
   replacementSupported = true,
+  attachmentPresent = false,
 ): ProtectionDialogModel {
+  if (decision.reasonCode === "no_findings") {
+    throw new Error("A no-findings decision cannot create a dialog.");
+  }
   return createProtectionDialogModel({
     kind,
     findings: toDisplayFindings(findings),
     reasonCode: decision.reasonCode,
-    canRedact: kind === "warn" && findings.length > 0 && replacementSupported,
+    attachmentPresent,
+    canRedact:
+      kind === "warn" &&
+      findings.length > 0 &&
+      !attachmentPresent &&
+      replacementSupported,
   });
 }

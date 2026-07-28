@@ -1,4 +1,5 @@
 import {
+  CHATGPT_ADAPTER_VERSION,
   isAuditEvent,
   isStoredAuditEnvelope,
   type AdapterHealthAuditEvent,
@@ -21,7 +22,7 @@ export interface AuditStore {
 }
 
 function emptyEnvelope(): StoredAuditEnvelope {
-  return { schemaVersion: 1, events: [] };
+  return { schemaVersion: 2, events: [] };
 }
 
 function isPersistable(event: AuditEvent): boolean {
@@ -35,14 +36,187 @@ function isSameHealthRetransmission(
   return previous.kind === "adapter_health" && previous.id === next.id;
 }
 
-function sanitizeEnvelope(value: unknown): StoredAuditEnvelope {
-  if (!isStoredAuditEnvelope(value)) {
-    return emptyEnvelope();
+function isPlainDataRecord(value: unknown): value is Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (Object.getPrototypeOf(value) !== Object.prototype &&
+      Object.getPrototypeOf(value) !== null)
+  ) {
+    return false;
+  }
+  return Reflect.ownKeys(value).every((key) => {
+    if (typeof key !== "string") return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return (
+      descriptor !== undefined &&
+      descriptor.enumerable &&
+      Object.hasOwn(descriptor, "value")
+    );
+  });
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const keys = Reflect.ownKeys(value);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    keys.every(
+      (key) =>
+        typeof key === "string" &&
+        (required.includes(key) || optional.includes(key)),
+    )
+  );
+}
+
+function isPlainDenseDataArray(
+  value: unknown,
+  maximumLength: number,
+): value is unknown[] {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    value.length > maximumLength
+  ) {
+    return false;
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes("length")) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    const key = String(index);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      descriptor === undefined ||
+      !descriptor.enumerable ||
+      !Object.hasOwn(descriptor, "value")
+    ) {
+      return false;
+    }
+  }
+  return keys.every(
+    (key) =>
+      key === "length" ||
+      (typeof key === "string" &&
+        Number.isSafeInteger(Number(key)) &&
+        String(Number(key)) === key &&
+        Number(key) >= 0 &&
+        Number(key) < value.length),
+  );
+}
+
+function migrateV1Event(value: unknown): AuditEvent | null {
+  if (
+    !isPlainDataRecord(value) ||
+    value.adapterVersion !== "1" ||
+    value.application !== "chatgpt"
+  ) {
+    return null;
+  }
+  let migrated: unknown;
+  if (value.kind === "decision") {
+    if (
+      !hasExactKeys(
+        value,
+        [
+          "kind",
+          "id",
+          "timestamp",
+          "application",
+          "policyAction",
+          "resolution",
+          "detectorCategories",
+          "matchedRuleIds",
+          "findingCount",
+          "adapterVersion",
+        ],
+        ["maskedExcerpt"],
+      )
+    ) {
+      return null;
+    }
+    migrated = {
+      ...value,
+      reasonCode:
+        Array.isArray(value.matchedRuleIds) &&
+        value.matchedRuleIds.length === 1 &&
+        value.matchedRuleIds[0] === "allow.no-findings"
+          ? "no_findings"
+          : "policy_match",
+      attachmentPresent: false,
+    };
+  } else if (value.kind === "enforcement_error") {
+    if (
+      !hasExactKeys(value, [
+        "kind",
+        "id",
+        "timestamp",
+        "application",
+        "errorCode",
+        "adapterVersion",
+      ])
+    ) {
+      return null;
+    }
+    migrated = value;
+  } else if (value.kind === "adapter_health") {
+    if (
+      value.healthCode === "ambiguous_submission_context" ||
+      !hasExactKeys(value, [
+        "kind",
+        "id",
+        "timestamp",
+        "application",
+        "status",
+        "healthCode",
+        "adapterVersion",
+      ])
+    ) {
+      return null;
+    }
+    migrated = value;
+  } else {
+    return null;
+  }
+  return isAuditEvent(migrated) ? structuredClone(migrated) : null;
+}
+
+function migrateV1Envelope(value: unknown): StoredAuditEnvelope | null {
+  if (
+    !isPlainDataRecord(value) ||
+    !hasExactKeys(value, ["schemaVersion", "events"]) ||
+    value.schemaVersion !== 1 ||
+    !isPlainDenseDataArray(value.events, 1_000)
+  ) {
+    return null;
+  }
+  const events: AuditEvent[] = [];
+  for (const candidate of value.events) {
+    const migrated = migrateV1Event(candidate);
+    if (migrated === null) return null;
+    events.push(migrated);
+  }
+  return { schemaVersion: 2, events };
+}
+
+function sanitizeEnvelope(value: unknown): {
+  envelope: StoredAuditEnvelope;
+  migrated: boolean;
+} {
+  const migratedEnvelope = migrateV1Envelope(value);
+  const source = isStoredAuditEnvelope(value) ? value : migratedEnvelope;
+  if (source === null) {
+    return { envelope: emptyEnvelope(), migrated: false };
   }
 
   const events: AuditEvent[] = [];
   const healthEventIds = new Set<string>();
-  for (const candidate of value.events) {
+  for (const candidate of source.events) {
     if (!isPersistable(candidate)) {
       continue;
     }
@@ -54,7 +228,10 @@ function sanitizeEnvelope(value: unknown): StoredAuditEnvelope {
     }
     events.push(structuredClone(candidate));
   }
-  return { schemaVersion: 1, events };
+  return {
+    envelope: { schemaVersion: 2, events },
+    migrated: migratedEnvelope !== null,
+  };
 }
 
 export function createAuditStore(
@@ -67,15 +244,17 @@ export function createAuditStore(
   async function readAndEnforceRetention(): Promise<StoredAuditEnvelope> {
     await storageReady;
     const stored = await storage.read(AUDIT_STORAGE_KEY);
-    const envelope = sanitizeEnvelope(stored);
+    const sanitized = sanitizeEnvelope(stored);
+    const envelope = sanitized.envelope;
     const retention = (await settingsStore.read()).settings.auditRetentionLimit;
     const retainedEvents = envelope.events.slice(-retention);
     const shouldRewrite =
-      isStoredAuditEnvelope(stored) &&
-      (stored.events.length !== retainedEvents.length ||
-        envelope.events.length !== retainedEvents.length);
+      sanitized.migrated ||
+      (isStoredAuditEnvelope(stored) &&
+        (stored.events.length !== retainedEvents.length ||
+          envelope.events.length !== retainedEvents.length));
     const retained: StoredAuditEnvelope = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       events: retainedEvents,
     };
     if (shouldRewrite) {
@@ -102,7 +281,10 @@ export function createAuditStore(
     async append(candidate) {
       return serialize(async () => {
         await storageReady;
-        if (!isAuditEvent(candidate)) {
+        if (
+          !isAuditEvent(candidate) ||
+          candidate.adapterVersion !== CHATGPT_ADAPTER_VERSION
+        ) {
           throw new Error("Invalid audit event.");
         }
         const event = structuredClone(candidate);

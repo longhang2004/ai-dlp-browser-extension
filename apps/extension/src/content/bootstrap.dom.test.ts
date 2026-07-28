@@ -90,13 +90,14 @@ function settingsSnapshot(enabled = true, generation = 0) {
     protectionEnabled: enabled,
     emailAction: "warn",
     phoneAction: "warn",
+    attachmentAction: "warn",
     protectedKeywords: [],
     auditRetentionLimit: 100,
   };
   return {
     type: "settings.snapshot" as const,
     generation,
-    envelope: { schemaVersion: 1 as const, settings },
+    envelope: { schemaVersion: 2 as const, settings },
   };
 }
 
@@ -119,7 +120,10 @@ class FakeAdapter implements ChatApplicationAdapter {
     return null;
   }
   inspectSubmissionCapabilities() {
-    return { hasUnsupportedAttachment: false };
+    return {
+      attachmentPresent: false,
+      attachmentStateFingerprint: {} as never,
+    };
   }
   getPromptReplacementCapability() {
     return "unsupported" as const;

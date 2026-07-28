@@ -1,6 +1,6 @@
 # Privacy-First AI DLP Browser Extension — Milestone 1 Design
 
-- **Status:** Implemented; merge blocked on authenticated live ChatGPT QA
+- **Status:** Approved attachment-policy and ambiguous-composer revision in implementation
 - **Date:** 2026-07-26
 - **Milestone:** Chromium Manifest V3 extension for ChatGPT
 - **Audience:** Engineering, security, privacy, and product reviewers
@@ -281,13 +281,13 @@ samples, cross-package integration, and performance fixtures.
 
 ```text
 Content-script bootstrap
-  -> Load and validate v1 settings into memory
+  -> Load and validate v2 settings into memory
   -> Register interceptor; report active only after initialization
 User submission candidate
   -> Synchronous settings gate
   -> disabled: original event passes through unchanged
   -> enabled: ChatGPT adapter captures and prevents candidate event
-  -> adapter checks composer-scoped attachment presence; attachments stop
+  -> adapter snapshots attachment presence and an opaque structural fingerprint
   -> Submission controller serializes the attempt
   -> Size guard rejects oversized prompt before detector execution
   -> Detector orchestrator returns transient SensitiveDataFinding[]
@@ -477,8 +477,9 @@ type DisplayFinding = {
 type ProtectionDialogModel = {
   kind: "warn" | "block";
   findings: DisplayFinding[];
-  maskedPreview: string;
-  reasonCode: string;
+  maskedPreview?: string;
+  reasonCode: "policy_match" | "unsupported_attachment";
+  attachmentPresent: boolean;
   canRedact: boolean;
 };
 ```
@@ -501,7 +502,7 @@ type PolicyFinding = {
 };
 
 type PolicyConfiguration = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   categoryActions: Record<
     Exclude<SensitiveDataCategory, "api_secret">,
     PolicyAction
@@ -510,18 +511,24 @@ type PolicyConfiguration = {
     high: PolicyAction;
     medium: PolicyAction;
   };
+  attachmentAction: "allow" | "warn" | "block";
 };
 
 type PolicyInput = {
   application: "chatgpt";
   findings: PolicyFinding[];
+  attachmentPresent: boolean;
   policy: PolicyConfiguration;
 };
 
 type PolicyDecision = {
   action: PolicyAction;
   matchedRuleIds: string[];
-  reasonCode: string;
+  reasonCode:
+    | "no_findings"
+    | "policy_match"
+    | "unsupported_attachment";
+  attachmentPresent: boolean;
 };
 ```
 
@@ -537,6 +544,12 @@ prompt text. `PolicyDecision` does not echo findings because the controller
 already owns them. The controller derives `canRedact` from the original finding
 categories without computing or passing a sanitized prompt to the UI.
 
+Attachment presence adds the fixed `attachment.unsupported` rule. Text and
+attachment actions combine using `block > warn > allow`. For a combined
+decision, `reasonCode` is `policy_match` only when text is strictly stronger;
+`unsupported_attachment` wins ties. Rule ordering is deterministic. Attachment-
+only decisions contain zero findings and no masked preview.
+
 ### 10.5 User settings
 
 ```typescript
@@ -546,12 +559,13 @@ type ProtectionSettings = {
   protectionEnabled: boolean;
   emailAction: ConfigurableProtectionAction;
   phoneAction: ConfigurableProtectionAction;
+  attachmentAction: ConfigurableProtectionAction;
   protectedKeywords: string[];
   auditRetentionLimit: number;
 };
 
 type StoredSettingsEnvelope = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   settings: ProtectionSettings;
 };
 ```
@@ -561,6 +575,7 @@ Defaults:
 - `protectionEnabled: true`
 - `emailAction: "warn"`
 - `phoneAction: "warn"`
+- `attachmentAction: "warn"`
 - `protectedKeywords: []`
 - `auditRetentionLimit: 100`
 
@@ -569,17 +584,19 @@ trimmed, deduplicated case-insensitively, limited to 100 entries, and each entry
 is 1 through 100 UTF-16 code units. Invalid saves are rejected with field-level
 errors. Invalid stored data causes the entire settings object to fall back to
 the safe defaults above; an invalid value must never disable protection.
-The sole V1 migration recognizes an otherwise valid version-1 settings envelope
-whose email or phone action is `redact`, converts every such action atomically
-to `warn`, persists the normalized envelope once, and only then broadcasts it.
-New save requests containing `redact` are rejected.
+The sole migration recognizes a strictly valid version-1 settings envelope,
+preserves its existing choices, converts any legacy email or phone `redact`
+action atomically to `warn`, adds `attachmentAction: "warn"`, persists the V2
+envelope once, and only then broadcasts it. New save requests containing
+`redact` are rejected. Invalid V2 attachment actions fall back to safe defaults,
+never `allow`.
 
-The controller derives, but does not separately persist, the complete v1 policy
+The controller derives, but does not separately persist, the complete v2 policy
 from validated settings:
 
 ```typescript
 const policy: PolicyConfiguration = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   categoryActions: {
     email: settings.emailAction,
     phone: settings.phoneAction,
@@ -592,10 +609,11 @@ const policy: PolicyConfiguration = {
     high: "block",
     medium: "warn",
   },
+  attachmentAction: settings.attachmentAction,
 };
 ```
 
-Only email and phone actions are configurable in Milestone 1. The v1 policy
+Only email, phone, and attachment actions are configurable in Milestone 1. The v2 policy
 validator requires exactly the six non-API category keys and exactly the `high`
 and `medium` API-secret keys. It rejects missing keys, unknown keys (including
 `api_secret` under `categoryActions` or `low` under `apiSecretActions`), invalid
@@ -606,7 +624,7 @@ values other than `block`, and `apiSecretActions.medium` values other than
 
 Consequently corrupted or hand-edited configuration cannot weaken fixed strict
 categories. Strict-category or API-secret overrides require a future schema and
-managed-policy design rather than an unvalidated v1 object.
+managed-policy design rather than an unvalidated v2 object.
 
 ### 10.6 Versioned audit storage
 
@@ -615,6 +633,7 @@ type DecisionResolution =
   | "submitted"
   | "cancelled"
   | "bypassed"
+  | "attachment_bypassed"
   | "redacted"
   | "blocked";
 
@@ -628,6 +647,11 @@ type DecisionAuditEvent = {
   detectorCategories: SensitiveDataCategory[];
   matchedRuleIds: string[];
   findingCount: number;
+  reasonCode:
+    | "no_findings"
+    | "policy_match"
+    | "unsupported_attachment";
+  attachmentPresent: boolean;
   maskedExcerpt?: string;
   adapterVersion: string;
 };
@@ -658,6 +682,7 @@ type AdapterHealthAuditEvent = {
   application: "chatgpt";
   status: "degraded";
   healthCode:
+    | "ambiguous_submission_context"
     | "composer_not_found"
     | "send_control_not_found"
     | "unsupported_dom_variant";
@@ -670,7 +695,7 @@ type AuditEvent =
   | AdapterHealthAuditEvent;
 
 type StoredAuditEnvelope = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   events: AuditEvent[];
 };
 ```
@@ -696,6 +721,7 @@ Decision mappings are exact:
 |---|---|---|
 | Warning + Cancel | `warn` | `cancelled` |
 | Warning + Send anyway | `warn` | `bypassed` |
+| Attachment or combined warning + Send anyway | `warn` | `attachment_bypassed` |
 | Warning + Redact | `warn` | `redacted` |
 | Automatic redaction | `redact` | `redacted` |
 | Block | `block` | `blocked` |
@@ -714,18 +740,20 @@ joined by separators. It cannot contain user-authored text.
 The only migration/fallback behavior in Milestone 1 is:
 
 1. Read the configured storage key as unknown data.
-2. Require an object with exactly the supported `schemaVersion: 1` envelope.
-3. Normalize an otherwise exact legacy V1 email/phone `redact` action to
-   `warn`, persist the complete normalized envelope once, and broadcast only
-   normalized settings.
-4. Validate every contained field/event; new `redact` saves are invalid.
-5. On a missing, corrupted, invalid, or unsupported settings envelope, return
+2. Accept exact V2 envelopes, or strictly valid V1 envelopes eligible for the
+   single migration.
+3. Normalize legacy V1 email/phone `redact` to `warn`, add attachment `warn`,
+   persist the complete V2 settings envelope once, and broadcast only V2.
+4. Migrate strictly valid V1 audit events to V2 by adding required reason and
+   `attachmentPresent: false` metadata; retain adapter version 1 for history.
+5. Validate every contained field/event; new `redact` saves are invalid.
+6. On a missing, corrupted, invalid, or unsupported settings envelope, return
    safe default settings.
-6. On a missing, corrupted, invalid, or unsupported audit envelope, return an
+7. On a missing, corrupted, invalid, or unsupported audit envelope, return an
    empty audit list.
 
 No migration registry, version chain, or speculative migration framework is
-introduced beyond that exact legacy-V1 normalization.
+introduced beyond these exact V1-to-V2 migrations.
 
 ### 10.7 Runtime messages
 
@@ -780,7 +808,10 @@ interface ChatApplicationAdapter {
   resolveCurrentSubmissionContext(): LiveSubmissionContext | null;
   inspectSubmissionCapabilities(
     context: LiveSubmissionContext,
-  ): { hasUnsupportedAttachment: boolean };
+  ): {
+    attachmentPresent: boolean;
+    attachmentStateFingerprint: AttachmentStateFingerprint;
+  };
   getPromptReplacementCapability(
     context: LiveSubmissionContext,
   ): "supported" | "unsupported";
@@ -802,6 +833,13 @@ interface ChatApplicationAdapter {
   ): void;
 }
 ```
+
+`AttachmentStateFingerprint` is an opaque, adapter-owned identity. It is
+replaced whenever attachment evidence is added, removed, replaced, or mutated
+within the captured submission region. Its construction uses only structural
+element identity and mutation versioning. It must never read or encode names,
+paths, extensions, MIME types, sizes, preview text, contents, labels,
+accessible text, or HTML.
 
 `PromptReplacementResult` is either `{ok: true, verifiedText}` or a fixed
 failure reason (`unsupported_editor`, `replacement_not_acknowledged`, or
@@ -1045,6 +1083,16 @@ never replaced by the first usable composer elsewhere in the document. The
 adapter carries only an opaque identity across asynchronous work and resolves
 that exact weakly held composer/region again before analysis and resume.
 
+One shared collector identifies the exact Send control, gathers every usable
+composer associated with that control and validated region, deduplicates
+elements matching multiple selectors, and returns none, unique, or ambiguous.
+Disconnected, hidden, inert, `aria-hidden`, disabled, read-only, and
+non-editable composers are excluded. Ambiguity degrades immediately with
+`ambiguous_submission_context`; only genuine absence receives the health grace
+period. An ambiguous event is synchronously prevented but carries no usable
+context identity, so it cannot reach analysis, authorization, findings UI, or
+resume.
+
 ### 13.2 Dynamic rendering and SPA behavior
 
 Document-level delegated capture listeners survive replacement of composer and
@@ -1275,9 +1323,10 @@ the built artifact is searched independently from source.
 
 Other browsers, ChatGPT desktop/mobile apps, other AI sites, attachment
 contents, and unsupported DOM variants are outside inspection. Composer
-attachment presence is fail-closed. In an unmanaged deployment,
-the user can disable or uninstall the extension or disable protection in
-settings. Managed deployment is future work.
+attachment presence follows the configured block, warn, or allow policy; warn
+is the default. In an unmanaged deployment, the user can disable or uninstall
+the extension or disable protection in settings. Managed deployment is future
+work.
 
 ## 17. Error handling and safe failure
 
@@ -1459,18 +1508,22 @@ Development follows test-driven development for every behavior:
 - Selector and resume errors do not include composer contents.
 - The exact captured complete submission region includes attachment evidence
   before/after nested forms and excludes evidence owned by other composers.
+- Prompt, URL, context/region identity, Send ownership, attachment presence, and
+  the opaque attachment fingerprint are snapshotted and revalidated immediately
+  before authorization consumption and resume.
 - Warning dialogs never offer ChatGPT redaction; internal redact decisions
   neither mutate nor resume the composer and fail with
   `redaction_unavailable`.
 
 ### 20.5 Storage and messaging tests
 
-- Valid v1 settings and audit envelopes.
+- Valid v2 settings and audit envelopes.
 - Missing, invalid, corrupted, and unsupported versions.
 - Safe settings fallback never disables protection.
 - Invalid configuration saves are rejected.
-- Legacy V1 email/phone `redact` values migrate atomically to `warn`, persist
-  once, and are never broadcast; new redact saves are rejected.
+- Strictly valid V1 settings and audit history migrate atomically to V2 and
+  persist once. Settings preserve choices, normalize `redact` to `warn`, and
+  add attachment `warn`; new redact saves are rejected.
 - Raw prompt, `matchedText`, findings, and arbitrary metadata are rejected.
 - All six policy-action/resolution mappings are validated.
 - Events with `policyAction: "allow"` are dropped.
@@ -1652,7 +1705,8 @@ Milestone 1 is acceptable only when:
     `redactedText`, `start`, and `end` may exist as implementation identifiers
     but must never contain build-time fixture data or be logged, persisted,
     messaged, or rendered.
-35. Settings and audit data use validated `schemaVersion: 1` envelopes.
+35. Settings, audit, and policy data use validated `schemaVersion: 2` contracts
+    with strict one-time V1 migration.
 36. Audit retention is enforced and clear-history works.
 37. Popup, options, and audit pages meet their functional and empty-state
     requirements.
@@ -1663,15 +1717,15 @@ Milestone 1 is acceptable only when:
 41. No remote network calls are made by extension code.
 42. Manual QA results and any unavailable checks are explicitly distinguished.
 43. Documentation contains reproducible commands that were actually verified.
-44. V1 policy configuration uses exact non-API category and high/medium
+44. V2 policy configuration uses exact non-API category and high/medium
     API-secret action maps; missing, unknown, invalid, or weakened fixed actions
     fail validation.
 45. Compile-time and runtime tests enforce the metadata-only policy boundary and
     reject every forbidden field listed in Section 20.2.
 46. Attachments in the exact captured complete submission region, including
-    siblings before/after a nested form, are detected before analysis and
-    immediately before resume, blocked without bypass, and represented only by
-    `unsupported_attachment`.
+    siblings before/after a nested form, are represented only by presence plus
+    an opaque structural fingerprint and follow configurable block, warn, or
+    allow policy. Warn bypass is one-shot and state-bound.
 47. `#prompt-textarea[contenteditable]` and strict semantic Send resolution pass
     production-shaped fixtures; generic no-type tool buttons are never Send.
 48. Disabled protection creates no adapter/controller/dialog/interceptor,
@@ -1684,6 +1738,12 @@ Milestone 1 is acceptable only when:
 51. Enter and Send interception resolves from the exact event target and
     adapter-owned weak context identity; no other valid composer can satisfy or
     resume the captured attempt.
+52. One Send control with multiple usable composers is synchronously stopped,
+    immediately degraded as `ambiguous_submission_context`, and cannot produce
+    a real controller context, analysis, findings, authorization, or resume.
+53. CI publishes a canonical SHA-256 for the commit-addressed extension
+    artifact; authenticated QA records that exact digest and uses the downloaded
+    artifact rather than a later local build.
 
 ## 24. Required completion verification
 
@@ -1709,8 +1769,9 @@ unless the corresponding check ran.
   never active. Managed or fail-closed startup behavior is future work.
 - ChatGPT can change its DOM or submission behavior without notice.
 - Unknown programmatic submission mechanisms may bypass DOM interception.
-- The extension detects and blocks composer attachments but does not inspect
-  their contents, filenames, paths, MIME types, previews, files, or images.
+- The extension detects composer attachments but does not inspect their
+  contents, filenames, paths, MIME types, previews, files, or images. Attachment
+  policy can block, warn, or allow; warn is the default.
 - All ChatGPT automatic redaction, including native textarea,
   ProseMirror/contenteditable, is disabled until application-state submission
   can be proven. Users must edit manually.

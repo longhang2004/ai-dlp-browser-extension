@@ -21,8 +21,9 @@ never replaces a ChatGPT composer automatically.
 - Ordinary clean `allow` decisions are not stored.
 - Prompts over 100,000 UTF-16 code units are stopped with content-free guidance
   and no bypass.
-- Composer-scoped attachments are detected but never inspected; while protection
-  is enabled, their submission is stopped with no bypass.
+- Composer-scoped attachments are detected but never inspected. Their policy is
+  configurable as block, warn with a one-shot bypass, or allow; the safe default
+  is warn.
 - Automatic ChatGPT replacement is unsupported for every current editor,
   including native textareas and ProseMirror/contenteditable. A legacy or
   internal redact decision fails closed without changing or submitting content.
@@ -53,16 +54,17 @@ pnpm test:e2e
 pnpm test:performance
 pnpm build
 pnpm verify:artifact
+pnpm artifact:digest
 ```
 
 `pnpm test:browser` uses Playwright's bundled Chromium, loads the production
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
 
-The latest remediation run on 2026-07-26 passed 680 unit/DOM tests, 7 Chromium
-integration tests, and 4 performance scenarios. The production build contained
-12 files; 43 URL literals were classified with zero fetching and zero unreviewed
-URLs.
+The latest remediation run on 2026-07-28 passed 723 unit/DOM/node tests, 10
+Chromium integration tests, and 4 performance scenarios. The production build
+contained 12 files; 43 URL literals were classified with zero fetching and zero
+unreviewed URLs.
 
 ## Load the unpacked extension
 
@@ -80,22 +82,25 @@ interval active.
 
 ## Settings and audit
 
-The options page exposes protection enablement, email and phone actions,
-protected keywords, and a local audit-retention limit from 1 to 1,000 events.
-The settings UI does not offer automatic `redact`. Persisted V1 settings accept
-only `allow`, `warn`, or `block`; legacy V1 email/phone `redact` values migrate
-to `warn` at the storage boundary before broadcast. Payment cards, AWS access
-keys, and private keys always block; protected keywords warn; high-confidence
-API secrets block and medium-confidence API secrets warn.
+The options page exposes protection enablement, email, phone, and attachment
+actions, protected keywords, and a local audit-retention limit from 1 to 1,000
+events. The settings UI does not offer automatic `redact`. Persisted settings
+use a V2 envelope. Strictly valid V1 settings migrate once, preserving choices,
+normalizing legacy email/phone `redact` to `warn`, and adding the default
+attachment action `warn`. Invalid attachment actions fall back to `warn`, never
+`allow`. Payment cards, AWS access keys, and private keys always block;
+protected keywords warn; high-confidence API secrets block and medium-confidence
+API secrets warn.
 
 The audit page stores only privacy-safe decision metadata and enforcement or
 adapter-health errors. Clearing the audit log requires explicit confirmation.
 
 ## Scope
 
-Milestone 1 detects and blocks composer attachments but does not inspect their
-contents. It does not inspect other websites, ChatGPT desktop or mobile
-applications, network traffic, or content submitted before settings
+Milestone 1 detects composer attachments but does not inspect their contents.
+The configured attachment action controls whether submission blocks, warns, or
+proceeds without a dialog. It does not inspect other websites, ChatGPT desktop
+or mobile applications, network traffic, or content submitted before settings
 initialization. Enterprise policy, forced installation, central audit export,
 and tamper resistance are future work; see
 [managed deployment](docs/managed-deployment.md).

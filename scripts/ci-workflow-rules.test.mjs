@@ -20,11 +20,16 @@ test("pins a least-privilege clean CI gate with all security checks", () => {
     "pnpm test:performance",
     "pnpm build",
     "pnpm verify:artifact",
+    "pnpm artifact:digest",
     "pnpm test:e2e",
   ]) {
     assert.ok(workflow.includes(command), `missing CI command: ${command}`);
   }
   assert.ok(workflow.includes("rm -rf apps/extension/dist"));
+  assert.match(
+    workflow,
+    /name: ai-dlp-extension-\$\{\{ github\.sha \}\}\.sha256/u,
+  );
   assert.ok(workflow.includes("artifacts/playwright/**/trace.zip"));
   assert.doesNotMatch(workflow, /ai-dlp-playwright|sensitive-values\.json/u);
 });

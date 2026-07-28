@@ -12,6 +12,7 @@ const SETTINGS_CANDIDATE_KEYS = new Set([
   "protectionEnabled",
   "emailAction",
   "phoneAction",
+  "attachmentAction",
   "protectedKeywords",
   "auditRetentionLimit",
 ]);

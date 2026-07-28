@@ -20,16 +20,17 @@ audit data, and production logs are completely prompt-free.
 
 ## Data inventory
 
-| Data                     | Location                                   | Lifetime                                           | Persisted or transmitted             |
-| ------------------------ | ------------------------------------------ | -------------------------------------------------- | ------------------------------------ |
-| Raw composer text        | Adapter call and active controller attempt | Until the synchronous adapter call or attempt ends | Never                                |
-| `matchedText`, offsets   | Detector/redaction/controller memory       | Active attempt only                                | Never                                |
-| Policy finding metadata  | Controller and policy engine               | Policy evaluation only                             | Never as original findings           |
-| Display finding metadata | Controller and dialog                      | Active dialog only                                 | Placeholder/category/confidence only |
-| Settings                 | `chrome.storage.local`                     | Until changed or extension data is removed         | Local version-1 envelope             |
-| Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-1 envelope |
-| Status snapshots         | Settings port and extension pages          | Current connection/page lifetime                   | Not durable                          |
-| Attachment presence flag | Adapter/controller active attempt          | Synchronous checks and active attempt only         | Fixed boolean only; no file metadata |
+| Data                     | Location                                   | Lifetime                                           | Persisted or transmitted              |
+| ------------------------ | ------------------------------------------ | -------------------------------------------------- | ------------------------------------- |
+| Raw composer text        | Adapter call and active controller attempt | Until the synchronous adapter call or attempt ends | Never                                 |
+| `matchedText`, offsets   | Detector/redaction/controller memory       | Active attempt only                                | Never                                 |
+| Policy finding metadata  | Controller and policy engine               | Policy evaluation only                             | Never as original findings            |
+| Display finding metadata | Controller and dialog                      | Active dialog only                                 | Placeholder/category/confidence only  |
+| Settings                 | `chrome.storage.local`                     | Until changed or extension data is removed         | Local version-2 envelope              |
+| Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-2 envelope  |
+| Status snapshots         | Settings port and extension pages          | Current connection/page lifetime                   | Not durable                           |
+| Attachment presence flag | Adapter/controller active attempt          | Synchronous checks and active attempt only         | Fixed boolean only; no file metadata  |
+| Attachment fingerprint   | Adapter/controller active attempt          | Replaced on structural identity or mutation change | Opaque identity only; never persisted |
 
 No backend, telemetry endpoint, remote API, analytics SDK, or central audit
 collector exists in Milestone 1.
@@ -39,7 +40,7 @@ collector exists in Milestone 1.
 The settings envelope contains:
 
 - protection enabled/disabled;
-- email and phone actions;
+- email, phone, and attachment actions;
 - normalized protected keywords;
 - audit retention limit.
 
@@ -59,10 +60,12 @@ Clean allow decisions are dropped. The decision event shape can represent a
 future explicitly configured allow audit, but Milestone 1 neither exposes nor
 enables it.
 
-Decision records contain action, resolution, categories, rule IDs, finding
-count, adapter version, timestamp, and optionally a preview made only from
-approved placeholders. They never contain raw text, matched values, prompt
-excerpts, offsets, or sanitized prompt text.
+Decision records contain action, resolution, reason code, attachment presence,
+categories, rule IDs, finding count, adapter version, timestamp, and optionally
+a preview made only from approved placeholders. Attachment-only records contain
+zero findings, no preview, and only the fixed `attachment.unsupported` rule.
+They never contain raw text, matched values, filenames, attachment counts,
+prompt excerpts, offsets, or sanitized prompt text.
 
 ## Oversized prompts
 
@@ -76,9 +79,17 @@ user to split the prompt, no send-anyway action is offered, and only a
 The adapter checks only fixed attachment-presence evidence within the exact
 composer-owned submission region. That region includes the active composer,
 associated Send control, and attachment chips/previews even when those are
-siblings of a nested form. It never reads or records a filename, path, MIME
-type, preview, attachment contents, or accessible text. An attachment produces
-only the fixed `unsupported_attachment` enforcement code and cannot be bypassed.
+siblings of a nested form. It builds an opaque fingerprint exclusively from
+structural element identity and mutation versioning. It never reads or records a
+filename, path, extension, MIME type, size, preview, attachment contents, label,
+accessible text, or HTML.
+
+The attachment setting is `block`, `warn`, or `allow`, defaulting to `warn`.
+Warning bypass is one-shot and is invalidated by any prompt, navigation,
+composer, region, Send ownership, attachment-presence, or fingerprint change.
+New decisions use the fixed `attachment.unsupported` policy rule and
+`unsupported_attachment` reason; they do not emit an unsupported-attachment
+enforcement error. That error code remains readable only for migrated history.
 
 Every current ChatGPT editor, including native textarea, contenteditable, and
 ProseMirror variants, is replacement-unsupported. A DOM property equality check

@@ -34,6 +34,7 @@ export function composerFixtureHtml(): string {
       <form aria-label="Chat composer" id="composer-form">
         <label for="prompt-textarea">Message ChatGPT</label>
         <textarea id="prompt-textarea" aria-label="Message ChatGPT"></textarea>
+        <div id="attachment-slot"></div>
         <button type="submit" aria-label="Send prompt">Send</button>
       </form>
       <output id="submission-count">0</output>
@@ -175,6 +176,29 @@ export async function setComposerText(
 ): Promise<void> {
   const composer = page.locator("#prompt-textarea");
   await composer.fill(value);
+}
+
+export async function setStructuralAttachment(
+  page: Page,
+  present: boolean,
+  marker = "private-attachment-name.txt",
+): Promise<void> {
+  await page.evaluate(
+    ({ shouldBePresent, privateMarker }) => {
+      const slot = document.querySelector("#attachment-slot");
+      if (!(slot instanceof HTMLElement)) {
+        throw new Error("Attachment fixture slot is unavailable.");
+      }
+      slot.replaceChildren();
+      if (shouldBePresent) {
+        const attachment = document.createElement("div");
+        attachment.dataset.testid = "composer-attachment";
+        attachment.textContent = privateMarker;
+        slot.append(attachment);
+      }
+    },
+    { shouldBePresent: present, privateMarker: marker },
+  );
 }
 
 export async function submissionValues(page: Page): Promise<string[]> {

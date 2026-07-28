@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatGptAdapter } from "../adapters/chatgpt/chatgpt-adapter.js";
 import {
+  AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE,
   MULTI_COMPOSER_FIXTURE,
   NATIVE_TEXTAREA_COMPOSER_FIXTURE,
 } from "../adapters/chatgpt/fixtures.js";
@@ -84,6 +85,7 @@ function createHarness(prompt: string, action: "warn" | "redact" = "warn") {
       action,
       matchedRuleIds: ["warn.email"],
       reasonCode: "policy_match",
+      attachmentPresent: false,
     }),
     eventId: () => "00000000-0000-4000-8000-000000000001",
     wallClockNow: () => new Date("2026-07-26T00:00:00.000Z"),
@@ -109,6 +111,70 @@ afterEach(() => {
 });
 
 describe("submission controller with the semantic ChatGPT adapter", () => {
+  it("does not analyze, authorize, show findings, allow, or resume an ambiguous shared-Send attempt", async () => {
+    const parsed = new DOMParser().parseFromString(
+      AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE,
+      "text/html",
+    );
+    document.body.replaceChildren(...parsed.body.childNodes);
+    const adapter = new ChatGptAdapter({
+      document,
+      getCurrentUrl: () => new URL("https://chatgpt.com/"),
+    });
+    const analyze = vi.fn(() => [findingFor("private prompt sentinel")]);
+    const evaluate = vi.fn(() => ({
+      action: "allow" as const,
+      matchedRuleIds: ["allow.no-findings"],
+      reasonCode: "no_findings" as const,
+      attachmentPresent: false,
+    }));
+    const events: AuditEvent[] = [];
+    const dialog = {
+      show: vi.fn(async () => "cancel" as const),
+      cancel: vi.fn(),
+    };
+    const controller = createSubmissionController({
+      adapter,
+      settings: () => createDefaultProtectionSettings(),
+      dialog,
+      audit: { append: async (event) => void events.push(event) },
+      analyze,
+      evaluate,
+    });
+    controller.register();
+    const resumed = vi.fn();
+    document.querySelector("#shared-send")?.addEventListener("click", resumed);
+
+    try {
+      const click = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+      });
+      document.querySelector("#shared-send")?.dispatchEvent(click);
+      await controller.whenSettledForTesting();
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(analyze).not.toHaveBeenCalled();
+      expect(evaluate).not.toHaveBeenCalled();
+      expect(resumed).not.toHaveBeenCalled();
+      expect(dialog.show).toHaveBeenCalledWith({
+        kind: "error",
+        errorCode: "extension_context_invalidated",
+      });
+      expect(JSON.stringify(dialog.show.mock.calls)).not.toContain("findings");
+      expect(controller.getDiagnosticsForTesting()).toMatchObject({
+        hasActiveAttempt: false,
+        hasPromptSnapshot: false,
+        hasSensitiveFindings: false,
+        hasAuthorization: false,
+      });
+      expect(JSON.stringify(events)).not.toContain("private prompt sentinel");
+    } finally {
+      controller.dispose();
+      adapter.dispose();
+    }
+  });
+
   it("analyzes and resumes only the event-targeted second composer", async () => {
     const parsed = new DOMParser().parseFromString(
       MULTI_COMPOSER_FIXTURE,
@@ -152,6 +218,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
         action: "warn",
         matchedRuleIds: ["warn.email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     });
     controller.register();
@@ -215,6 +282,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
         action: "warn",
         matchedRuleIds: ["warn.email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     });
     controller.register();
@@ -277,6 +345,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
         action: "warn",
         matchedRuleIds: ["warn.email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     });
     controller.register();
@@ -430,6 +499,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
         action: "warn",
         matchedRuleIds: ["warn.email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
       eventId: () => "00000000-0000-4000-8000-000000000001",
       wallClockNow: () => new Date("2026-07-26T00:00:00.000Z"),

@@ -20,7 +20,7 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           events: [
             {
               kind: "enforcement_error",
@@ -71,7 +71,7 @@ describe("audit App", () => {
     const sendMessage = vi.fn().mockResolvedValue({
       type: "audit.result",
       envelope: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         events: [
           {
             kind: "enforcement_error",
@@ -107,7 +107,7 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           events: [
             {
               kind: "enforcement_error",
@@ -141,7 +141,7 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           events: [
             {
               kind: "enforcement_error",
@@ -187,5 +187,38 @@ describe("audit App", () => {
       await screen.findByText("The audit log is currently unavailable."),
     ).not.toBeNull();
     expect(document.body.textContent).not.toContain("x");
+  });
+
+  it("renders attachment decisions without findings, category metadata, or filenames", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({
+      type: "audit.result",
+      envelope: {
+        schemaVersion: 2,
+        events: [
+          {
+            kind: "decision",
+            id: createAuditEventId("00000000-0000-4000-8000-000000000002"),
+            timestamp: createAuditTimestamp("2026-07-26T12:00:01.000Z"),
+            application: "chatgpt",
+            policyAction: "warn",
+            resolution: "attachment_bypassed",
+            detectorCategories: [],
+            matchedRuleIds: ["attachment.unsupported"],
+            findingCount: 0,
+            reasonCode: "unsupported_attachment",
+            attachmentPresent: true,
+            adapterVersion: CHATGPT_ADAPTER_VERSION,
+          },
+        ],
+      },
+    });
+    render(<App runtime={{ sendMessage }} />);
+
+    expect(
+      await screen.findByText("Attached file contents were not inspected."),
+    ).not.toBeNull();
+    expect(document.body.textContent).not.toContain("findings");
+    expect(document.body.textContent).not.toContain("filename");
+    expect(document.body.textContent).not.toContain("email");
   });
 });

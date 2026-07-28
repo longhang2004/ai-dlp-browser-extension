@@ -8,7 +8,7 @@ import type { ProtectionStatusSnapshot } from "./status.js";
 import type { ContentProtectionStatus } from "./status.js";
 import type { PromptFreeArray, PromptFreeBoundary } from "./privacy.js";
 
-export const SETTINGS_PORT_NAME = "settings-v1";
+export const SETTINGS_PORT_NAME = "settings-v2";
 
 export type RuntimeRequest = PromptFreeBoundary &
   (

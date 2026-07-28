@@ -30,12 +30,13 @@ export type ProtectionSettings = PromptFreeBoundary & {
   protectionEnabled: boolean;
   emailAction: ConfigurableProtectionAction;
   phoneAction: ConfigurableProtectionAction;
+  attachmentAction: ConfigurableProtectionAction;
   protectedKeywords: PromptFreeArray<string>;
   auditRetentionLimit: number;
 };
 
 export type StoredSettingsEnvelope = PromptFreeBoundary & {
-  schemaVersion: 1;
+  schemaVersion: 2;
   settings: ProtectionSettings;
 };
 
@@ -43,6 +44,7 @@ export type ReadonlyProtectionSettings = PromptFreeBoundary & {
   readonly protectionEnabled: boolean;
   readonly emailAction: ConfigurableProtectionAction;
   readonly phoneAction: ConfigurableProtectionAction;
+  readonly attachmentAction: ConfigurableProtectionAction;
   readonly protectedKeywords: ReadonlyPromptFreeArray<string>;
   readonly auditRetentionLimit: number;
 };
@@ -52,6 +54,7 @@ export const SETTINGS_VALIDATION_FIELDS = Object.freeze([
   "protectionEnabled",
   "emailAction",
   "phoneAction",
+  "attachmentAction",
   "protectedKeywords",
   "auditRetentionLimit",
 ] as const);
@@ -84,7 +87,7 @@ export type SettingsValidationError = PromptFreeBoundary &
         code: "required" | "invalid_type";
       }
     | {
-        field: "emailAction" | "phoneAction";
+        field: "emailAction" | "phoneAction" | "attachmentAction";
         code: "required" | "invalid_action";
       }
     | {
@@ -107,6 +110,7 @@ export const DEFAULT_PROTECTION_SETTINGS: ReadonlyProtectionSettings =
     protectionEnabled: true,
     emailAction: "warn",
     phoneAction: "warn",
+    attachmentAction: "warn",
     protectedKeywords: Object.freeze([]),
     auditRetentionLimit: 100,
   });
@@ -142,6 +146,7 @@ export function isProtectionSettingsSnapshot(
         "protectionEnabled",
         "emailAction",
         "phoneAction",
+        "attachmentAction",
         "protectedKeywords",
         "auditRetentionLimit",
       ]) ||
@@ -153,6 +158,10 @@ export function isProtectionSettingsSnapshot(
       typeof value.phoneAction !== "string" ||
       !CONFIGURABLE_PROTECTION_ACTIONS.includes(
         value.phoneAction as ConfigurableProtectionAction,
+      ) ||
+      typeof value.attachmentAction !== "string" ||
+      !CONFIGURABLE_PROTECTION_ACTIONS.includes(
+        value.attachmentAction as ConfigurableProtectionAction,
       ) ||
       !isDenseExactArray(
         value.protectedKeywords,
@@ -186,6 +195,7 @@ export function cloneProtectionSettings(
     protectionEnabled: snapshot.protectionEnabled,
     emailAction: snapshot.emailAction,
     phoneAction: snapshot.phoneAction,
+    attachmentAction: snapshot.attachmentAction,
     protectedKeywords: [...snapshot.protectedKeywords],
     auditRetentionLimit: snapshot.auditRetentionLimit,
   };

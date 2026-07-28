@@ -108,3 +108,27 @@ export const REVIEWER_MULTI_COMPOSER_FIXTURE = `
     </section>
   </main>
 `;
+
+export const AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE = `
+  <main>
+    <section data-testid="composer-root" id="shared-composer-root">
+      <div
+        id="prompt-a"
+        contenteditable="true"
+        role="textbox"
+        aria-label="Message ChatGPT"
+      >Prompt A</div>
+      <div
+        id="prompt-textarea"
+        contenteditable="true"
+        role="textbox"
+      >Prompt B</div>
+      <button
+        id="shared-send"
+        type="button"
+        data-testid="send-button"
+        aria-label="Send prompt"
+      >Send</button>
+    </section>
+  </main>
+`;

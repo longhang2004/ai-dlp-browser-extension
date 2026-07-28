@@ -10,6 +10,7 @@ import {
   type AdapterHealthTransition,
 } from "./chatgpt-adapter.js";
 import {
+  AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE,
   CONTENTEDITABLE_COMPOSER_FIXTURE,
   MULTI_COMPOSER_FIXTURE,
   NATIVE_TEXTAREA_COMPOSER_FIXTURE,
@@ -157,17 +158,20 @@ describe("ChatGptAdapter prompt operations", () => {
     const inspect = (
       adapter as unknown as {
         inspectSubmissionCapabilities(value: LiveSubmissionContext): {
-          hasUnsupportedAttachment: boolean;
+          attachmentPresent: boolean;
+          attachmentStateFingerprint: object;
         };
       }
     ).inspectSubmissionCapabilities;
 
     expect(inspect.call(adapter, context)).toEqual({
-      hasUnsupportedAttachment: true,
+      attachmentPresent: true,
+      attachmentStateFingerprint: expect.any(Object),
     });
     document.querySelector("#inside")?.remove();
     expect(inspect.call(adapter, context)).toEqual({
-      hasUnsupportedAttachment: false,
+      attachmentPresent: false,
+      attachmentStateFingerprint: expect.any(Object),
     });
   });
 
@@ -188,7 +192,8 @@ describe("ChatGptAdapter prompt operations", () => {
     if (context === null) throw new Error("Expected submission context.");
 
     expect(adapter.inspectSubmissionCapabilities(context)).toEqual({
-      hasUnsupportedAttachment: true,
+      attachmentPresent: true,
+      attachmentStateFingerprint: expect.any(Object),
     });
   });
 
@@ -207,7 +212,8 @@ describe("ChatGptAdapter prompt operations", () => {
     if (context === null) throw new Error("Expected submission context.");
 
     expect(adapter.inspectSubmissionCapabilities(context)).toEqual({
-      hasUnsupportedAttachment: true,
+      attachmentPresent: true,
+      attachmentStateFingerprint: expect.any(Object),
     });
   });
 
@@ -240,7 +246,8 @@ describe("ChatGptAdapter prompt operations", () => {
         document.querySelector('[data-testid="composer-root"]'),
       );
       expect(adapter.inspectSubmissionCapabilities(context)).toEqual({
-        hasUnsupportedAttachment: true,
+        attachmentPresent: true,
+        attachmentStateFingerprint: expect.any(Object),
       });
     },
   );
@@ -277,15 +284,69 @@ describe("ChatGptAdapter prompt operations", () => {
       document.querySelector("#composer-b"),
     );
     expect(adapter.inspectSubmissionCapabilities(contextB)).toEqual({
-      hasUnsupportedAttachment: false,
+      attachmentPresent: false,
+      attachmentStateFingerprint: expect.any(Object),
     });
     contextB.submissionRegion.insertAdjacentHTML(
       "afterbegin",
       '<div data-testid="file-preview"></div>',
     );
     expect(adapter.inspectSubmissionCapabilities(contextB)).toEqual({
-      hasUnsupportedAttachment: true,
+      attachmentPresent: true,
+      attachmentStateFingerprint: expect.any(Object),
     });
+  });
+
+  it("replaces an opaque privacy-safe attachment fingerprint for structural changes and evidence mutation", async () => {
+    renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor(() => "intercept");
+    const context = adapter.resolveCurrentSubmissionContext();
+    if (context === null) throw new Error("Expected context.");
+
+    const absent = adapter.inspectSubmissionCapabilities(context);
+    const unchanged = adapter.inspectSubmissionCapabilities(context);
+    expect(unchanged.attachmentStateFingerprint).toBe(
+      absent.attachmentStateFingerprint,
+    );
+
+    const evidence = document.createElement("div");
+    evidence.dataset.testid = "composer-attachment";
+    context.submissionRegion.prepend(evidence);
+    const added = adapter.inspectSubmissionCapabilities(context);
+    expect(added.attachmentPresent).toBe(true);
+    expect(added.attachmentStateFingerprint).not.toBe(
+      absent.attachmentStateFingerprint,
+    );
+
+    evidence.append(document.createElement("span"));
+    await Promise.resolve();
+    await Promise.resolve();
+    const mutated = adapter.inspectSubmissionCapabilities(context);
+    expect(mutated.attachmentStateFingerprint).not.toBe(
+      added.attachmentStateFingerprint,
+    );
+
+    const replacement = evidence.cloneNode(true);
+    evidence.replaceWith(replacement);
+    const replaced = adapter.inspectSubmissionCapabilities(context);
+    expect(replaced.attachmentStateFingerprint).not.toBe(
+      mutated.attachmentStateFingerprint,
+    );
+
+    if (!(replacement instanceof Element)) {
+      throw new Error("Expected replacement attachment element.");
+    }
+    replacement.remove();
+    const removed = adapter.inspectSubmissionCapabilities(context);
+    expect(removed.attachmentPresent).toBe(false);
+    expect(removed.attachmentStateFingerprint).not.toBe(
+      replaced.attachmentStateFingerprint,
+    );
+    expect(Reflect.ownKeys(removed.attachmentStateFingerprint)).toEqual([]);
+    expect(JSON.stringify(removed.attachmentStateFingerprint)).not.toContain(
+      "composer",
+    );
   });
 
   it("fails closed when attachment ownership cannot be bounded to one region", () => {
@@ -403,6 +464,139 @@ describe("ChatGptAdapter prompt operations", () => {
 });
 
 describe("ChatGptAdapter interception", () => {
+  it("fails closed for click and Enter when one Send control has multiple usable composers", () => {
+    renderFixture(AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE);
+    const transitions: AdapterHealthTransition[] = [];
+    const attempts: unknown[] = [];
+    const adapter = createAdapter({
+      onHealthTransition: (transition) => transitions.push(transition),
+    });
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const send = document.querySelector("#shared-send");
+    const composer = document.querySelector("#prompt-textarea");
+    if (send === null || composer === null) {
+      throw new Error("Missing ambiguous shared-Send fixture.");
+    }
+
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    send.dispatchEvent(click);
+    const enter = dispatchEnter(composer);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(attempts).toEqual([
+      expect.objectContaining({ source: "click", contextIdentity: 0 }),
+      expect.objectContaining({ source: "enter", contextIdentity: 0 }),
+    ]);
+    expect(adapter.resolveCurrentSubmissionContext()).toBeNull();
+    expect(transitions).toContainEqual({
+      status: "degraded",
+      healthCode: "ambiguous_submission_context",
+    });
+    expect(transitions).not.toContainEqual({
+      status: "waiting_for_composer",
+    });
+  });
+
+  it.each([
+    ["original order", AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE],
+    [
+      "reversed DOM order",
+      AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE.replace(
+        /(<div[\s\S]*?id="prompt-a"[\s\S]*?<\/div>)([\s\S]*?)(<div[\s\S]*?id="prompt-textarea"[\s\S]*?<\/div>)/u,
+        "$3$2$1",
+      ),
+    ],
+  ])("does not select an ambiguous owner from %s", (_scenario, fixture) => {
+    renderFixture(fixture);
+    const adapter = createAdapter();
+
+    expect(adapter.resolveCurrentSubmissionContext()).toBeNull();
+  });
+
+  it.each([
+    ["hidden", "hidden"],
+    ["inert", "inert"],
+    ["aria-hidden", 'aria-hidden="true"'],
+    ["display none", 'style="display: none"'],
+  ])(
+    "ignores a %s secondary composer when checking Send ownership",
+    (_scenario, attribute) => {
+      renderFixture(
+        AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE.replace(
+          'id="prompt-a"',
+          `id="prompt-a" ${attribute}`,
+        ),
+      );
+      const attempts: unknown[] = [];
+      const adapter = createAdapter();
+      adapter.registerSubmitInterceptor((attempt) => {
+        attempts.push(attempt);
+        return "intercept";
+      });
+      const send = document.querySelector("#shared-send");
+      if (send === null) throw new Error("Missing shared Send control.");
+
+      const click = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+      });
+      send.dispatchEvent(click);
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(attempts).toEqual([
+        expect.objectContaining({ source: "click", contextIdentity: 1 }),
+      ]);
+      expect(adapter.resolveCurrentSubmissionContext()?.composer).toBe(
+        document.querySelector("#prompt-textarea"),
+      );
+    },
+  );
+
+  it("invalidates a stored context when its Send control gains another usable owner", () => {
+    renderFixture(NATIVE_TEXTAREA_COMPOSER_FIXTURE);
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    if (context === null) throw new Error("Expected initial context.");
+    const second = document.createElement("div");
+    second.id = "second-composer";
+    second.setAttribute("contenteditable", "true");
+    second.setAttribute("role", "textbox");
+    context.submissionRegion.insertBefore(second, context.sendControl);
+
+    expect(
+      adapter.resolveSubmissionContext(context.contextIdentity),
+    ).toBeNull();
+    expect(() =>
+      adapter.resumeSubmission(context, authorization()),
+    ).toThrowError(expect.objectContaining({ code: "resume_context_invalid" }));
+  });
+
+  it("globally degrades on ambiguity even when another context is valid", () => {
+    renderFixture(
+      `${MULTI_COMPOSER_FIXTURE}${AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE}`,
+    );
+    const transitions: AdapterHealthTransition[] = [];
+    const adapter = createAdapter({
+      onHealthTransition: (transition) => transitions.push(transition),
+    });
+
+    adapter.registerSubmitInterceptor(() => "intercept");
+
+    expect(transitions).toEqual([
+      {
+        status: "degraded",
+        healthCode: "ambiguous_submission_context",
+      },
+    ]);
+  });
+
   it("anchors Enter and Send interception to the second same-priority composer", () => {
     renderFixture(MULTI_COMPOSER_FIXTURE);
     const attempts: unknown[] = [];

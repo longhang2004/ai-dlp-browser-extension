@@ -99,7 +99,7 @@ function snapshot(enabled = true, generation = 0) {
   return {
     type: "settings.snapshot" as const,
     generation,
-    envelope: { schemaVersion: 1 as const, settings },
+    envelope: { schemaVersion: 2 as const, settings },
   };
 }
 

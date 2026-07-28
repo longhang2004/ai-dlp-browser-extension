@@ -228,6 +228,7 @@ describe("message router", () => {
         fieldErrors: [
           { field: "emailAction", code: "required" },
           { field: "phoneAction", code: "required" },
+          { field: "attachmentAction", code: "required" },
           { field: "protectedKeywords", code: "required" },
           { field: "auditRetentionLimit", code: "required" },
         ],
@@ -437,6 +438,7 @@ describe("message router", () => {
           protectionEnabled: true,
           emailAction: "warn",
           phoneAction: "warn",
+          attachmentAction: "warn",
           protectedKeywords: [],
           auditRetentionLimit: 100,
         },
@@ -454,6 +456,7 @@ describe("message router", () => {
           protectionEnabled: true,
           emailAction: "block",
           phoneAction: "warn",
+          attachmentAction: "warn",
           protectedKeywords: [],
           auditRetentionLimit: 100,
         },

@@ -6,6 +6,7 @@ import type {
   PolicyFinding,
 } from "@ai-dlp/shared-types";
 import {
+  ATTACHMENT_POLICY_RULE_ID,
   POLICY_ACTION_PRECEDENCE,
   POLICY_NO_FINDINGS_RULE,
   POLICY_REASON_CODE,
@@ -88,11 +89,12 @@ function selectHigherPrecedence(
 export function evaluatePolicy(value: unknown): PolicyDecision {
   const input = validatePolicyInput(value);
 
-  if (input.findings.length === 0) {
+  if (input.findings.length === 0 && !input.attachmentPresent) {
     return validatePolicyDecision({
       action: "allow",
       matchedRuleIds: [POLICY_NO_FINDINGS_RULE.id],
       reasonCode: POLICY_REASON_CODE.NO_FINDINGS,
+      attachmentPresent: false,
     });
   }
 
@@ -112,9 +114,26 @@ export function evaluatePolicy(value: unknown): PolicyDecision {
     }
   }
 
+  let reasonCode:
+    | typeof POLICY_REASON_CODE.POLICY_MATCH
+    | typeof POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT =
+    POLICY_REASON_CODE.POLICY_MATCH;
+  if (input.attachmentPresent) {
+    matchedRuleIds.push(ATTACHMENT_POLICY_RULE_ID);
+    const textPriority = POLICY_ACTION_PRECEDENCE.indexOf(action);
+    const attachmentPriority = POLICY_ACTION_PRECEDENCE.indexOf(
+      input.policy.attachmentAction,
+    );
+    if (attachmentPriority >= textPriority) {
+      action = input.policy.attachmentAction;
+      reasonCode = POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT;
+    }
+  }
+
   return validatePolicyDecision({
     action,
     matchedRuleIds,
-    reasonCode: POLICY_REASON_CODE.POLICY_MATCH,
+    reasonCode,
+    attachmentPresent: input.attachmentPresent,
   });
 }

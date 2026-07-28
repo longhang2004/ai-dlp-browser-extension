@@ -16,6 +16,7 @@ function createWarning(): ProtectionDialogModel {
     kind: "warn",
     findings: [createDisplayFinding("email", "high")],
     reasonCode: "policy_match",
+    attachmentPresent: false,
     canRedact: true,
   });
 }

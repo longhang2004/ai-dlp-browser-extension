@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { derivePolicy } from "./derive-policy.js";
 
 const expectedDefaults: PolicyConfiguration = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   categoryActions: {
     email: "warn",
     phone: "warn",
@@ -20,6 +20,7 @@ const expectedDefaults: PolicyConfiguration = {
     high: "block",
     medium: "warn",
   },
+  attachmentAction: "warn",
 };
 
 describe("derivePolicy", () => {
@@ -34,6 +35,7 @@ describe("derivePolicy", () => {
     settings.protectionEnabled = false;
     settings.emailAction = "allow";
     settings.phoneAction = "block";
+    settings.attachmentAction = "allow";
     settings.protectedKeywords = ["internal"];
     settings.auditRetentionLimit = 999;
 
@@ -44,6 +46,7 @@ describe("derivePolicy", () => {
         email: "allow",
         phone: "block",
       },
+      attachmentAction: "allow",
     });
   });
 

@@ -76,6 +76,9 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
       <p className="muted">
         {status.recentEventCount} recent protection events
       </p>
+      <p className="muted">
+        Attached file contents are not inspected in this version.
+      </p>
       <nav className="page-actions" aria-label="Extension pages">
         <a className="button primary" href="/options.html" target="_blank">
           Settings

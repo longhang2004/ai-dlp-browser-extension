@@ -19,7 +19,7 @@ Locked choices:
 - `chrome.storage.local` restricted to `TRUSTED_CONTEXTS`; manifest minimum
   Chrome version `102`.
 - Content scripts receive settings through a validated
-  `runtime.connect({name: "settings-v1"})` port. A
+  `runtime.connect({name: "settings-v2"})` port. A
   disconnected/uninitialized port means truthful `initializing`/`unavailable`
   status and no interception.
 - Production content script: static `https://chatgpt.com/*`, top frame,
@@ -342,8 +342,8 @@ Behavior:
 - Register `onMessage` and `onConnect` synchronously at module top level.
 - One-time listener uses `sendResponse` and returns literal `true`; it is not
   `async`.
-- Content settings port is named `settings-v1`; worker validates sender ID, top
-  frame, origin, and URL, then immediately sends the current v1 settings
+- Content settings port is named `settings-v2`; worker validates sender ID, top
+  frame, origin, and URL, then immediately sends the current v2 settings
   snapshot.
 - Settings saves broadcast validated snapshots to connected content ports.
 - Content scripts never call storage directly.
@@ -491,7 +491,7 @@ Files:
 
 Behavior:
 
-- Connect to `settings-v1`.
+- Connect to `settings-v2`.
 - Stay `initializing` until the first validated snapshot.
 - Register interception only after initialization.
 - Disabled settings return `pass_through` without `preventDefault` or
@@ -701,9 +701,9 @@ Implemented on 2026-07-26 as focused regression-tested commits:
   adapter-owned identity uses weak composer/region references so analysis and
   resume cannot substitute a different valid composer.
 - `inspectSubmissionCapabilities` scans the exact complete submission region,
-  including attachment chips outside a nested form. The controller checks that
-  region before analysis and immediately before resume;
-  `unsupported_attachment` has no bypass and no file metadata.
+  including attachment chips outside a nested form, and returns only presence
+  plus an opaque structural fingerprint. Attachment policy is configurable as
+  block, warn with one-shot bypass, or allow, with no file metadata.
 - Persisted V1 email/phone actions exclude redact. Exact legacy V1 redact
   envelopes migrate atomically to warn, persist once, and broadcast only the
   normalized settings; new redact saves are rejected.

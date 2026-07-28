@@ -25,6 +25,7 @@ import {
 import type {
   CapturedSubmitAttempt,
   ChatApplicationAdapter,
+  AttachmentStateFingerprint,
   LiveSubmissionContext,
   PromptReplacementCapability,
   SubmitInterceptionDisposition,
@@ -86,6 +87,8 @@ type ActiveAttempt = {
   findings: SensitiveDataFinding[];
   eventEmitted: boolean;
   replacementCapability: PromptReplacementCapability;
+  attachmentPresent: boolean;
+  attachmentStateFingerprint: AttachmentStateFingerprint | null;
 };
 
 type SanitizedDecisionMetadata = {
@@ -93,6 +96,8 @@ type SanitizedDecisionMetadata = {
   detectorCategories: PromptFreeArray<SensitiveDataCategory>;
   matchedRuleIds: PromptFreeArray<string>;
   findingCount: number;
+  reasonCode: PolicyDecision["reasonCode"];
+  attachmentPresent: boolean;
   maskedExcerpt?: MaskedPreview;
 };
 
@@ -147,6 +152,8 @@ function capturePromptSynchronously(
       kind: "ready";
       prompt: string;
       replacementCapability: PromptReplacementCapability;
+      attachmentPresent: boolean;
+      attachmentStateFingerprint: AttachmentStateFingerprint;
     }
   | { kind: "error"; errorCode: EnforcementErrorCode } {
   try {
@@ -164,15 +171,13 @@ function capturePromptSynchronously(
         errorCode: "extension_context_invalidated",
       };
     }
-    if (
-      adapter.inspectSubmissionCapabilities(context).hasUnsupportedAttachment
-    ) {
-      return { kind: "error", errorCode: "unsupported_attachment" };
-    }
+    const capabilities = adapter.inspectSubmissionCapabilities(context);
     return {
       kind: "ready",
       prompt: adapter.readPrompt(context),
       replacementCapability: adapter.getPromptReplacementCapability(context),
+      attachmentPresent: capabilities.attachmentPresent,
+      attachmentStateFingerprint: capabilities.attachmentStateFingerprint,
     };
   } catch {
     return { kind: "error", errorCode: "extension_context_invalidated" };
@@ -209,6 +214,7 @@ export function createSubmissionController(
   function releaseSensitiveState(attempt: ActiveAttempt): void {
     attempt.promptSnapshot = null;
     attempt.findings = [];
+    attempt.attachmentStateFingerprint = null;
     invalidateSubmissionAuthorization(attempt.authorization);
     attempt.authorization = null;
   }
@@ -246,6 +252,8 @@ export function createSubmissionController(
       detectorCategories: toDetectorCategories(attempt.findings),
       matchedRuleIds: [...decision.matchedRuleIds],
       findingCount: attempt.findings.length,
+      reasonCode: decision.reasonCode,
+      attachmentPresent: decision.attachmentPresent,
       ...(maskedExcerpt === undefined ? {} : { maskedExcerpt }),
     };
   }
@@ -282,6 +290,8 @@ export function createSubmissionController(
       detectorCategories: [...metadata.detectorCategories],
       matchedRuleIds: [...metadata.matchedRuleIds],
       findingCount: metadata.findingCount,
+      reasonCode: metadata.reasonCode,
+      attachmentPresent: metadata.attachmentPresent,
       ...(metadata.maskedExcerpt === undefined
         ? {}
         : { maskedExcerpt: metadata.maskedExcerpt }),
@@ -365,11 +375,17 @@ export function createSubmissionController(
           errorCode: "extension_context_invalidated",
         };
       }
+      const capabilities =
+        options.adapter.inspectSubmissionCapabilities(context);
       if (
-        options.adapter.inspectSubmissionCapabilities(context)
-          .hasUnsupportedAttachment
+        capabilities.attachmentPresent !== attempt.attachmentPresent ||
+        capabilities.attachmentStateFingerprint !==
+          attempt.attachmentStateFingerprint
       ) {
-        return { kind: "error", errorCode: "unsupported_attachment" };
+        return {
+          kind: "error",
+          errorCode: "extension_context_invalidated",
+        };
       }
     } catch {
       return { kind: "error", errorCode: "extension_context_invalidated" };
@@ -484,6 +500,8 @@ export function createSubmissionController(
     }
     attempt.promptSnapshot = capture.prompt;
     attempt.replacementCapability = capture.replacementCapability;
+    attempt.attachmentPresent = capture.attachmentPresent;
+    attempt.attachmentStateFingerprint = capture.attachmentStateFingerprint;
 
     if (!isCurrent(attempt) || attempt.promptSnapshot === null) {
       finish(attempt, "cancelled");
@@ -510,6 +528,7 @@ export function createSubmissionController(
     try {
       attempt.decision = evaluate({
         application: "chatgpt",
+        attachmentPresent: attempt.attachmentPresent,
         findings: toPolicyFindings(attempt.findings),
         policy: derivePolicy(options.settings()),
       });
@@ -546,6 +565,8 @@ export function createSubmissionController(
           "block",
           decision,
           attempt.findings,
+          false,
+          attempt.attachmentPresent,
         );
         prepareDecisionMetadata(attempt, model.maskedPreview);
         state = "dialog";
@@ -568,6 +589,7 @@ export function createSubmissionController(
           decision,
           attempt.findings,
           attempt.replacementCapability === "supported",
+          attempt.attachmentPresent,
         );
         prepareDecisionMetadata(attempt, model.maskedPreview);
         state = "dialog";
@@ -594,7 +616,11 @@ export function createSubmissionController(
           await finalizeDecision(attempt, "cancelled");
           return;
         }
-        await resumeApproved(attempt, "unchanged", "bypassed");
+        await resumeApproved(
+          attempt,
+          "unchanged",
+          attempt.attachmentPresent ? "attachment_bypassed" : "bypassed",
+        );
       }
     }
   }
@@ -626,6 +652,8 @@ export function createSubmissionController(
       findings: [],
       eventEmitted: false,
       replacementCapability: "unsupported",
+      attachmentPresent: false,
+      attachmentStateFingerprint: null,
     };
     active = attempt;
     state = "evaluating";

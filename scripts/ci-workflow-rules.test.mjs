@@ -26,9 +26,19 @@ test("pins a least-privilege clean CI gate with all security checks", () => {
     assert.ok(workflow.includes(command), `missing CI command: ${command}`);
   }
   assert.ok(workflow.includes("rm -rf apps/extension/dist"));
+  assert.ok(
+    workflow.includes(
+      "REVIEWED_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}",
+    ),
+  );
+  assert.ok(workflow.includes("ref: ${{ env.REVIEWED_COMMIT }}"));
   assert.match(
     workflow,
-    /name: ai-dlp-extension-\$\{\{ github\.sha \}\}\.sha256/u,
+    /name: ai-dlp-extension-\$\{\{ env\.REVIEWED_COMMIT \}\}\.sha256/u,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /name: ai-dlp-extension-\$\{\{ github\.sha \}\}/u,
   );
   assert.ok(workflow.includes("artifacts/playwright/**/trace.zip"));
   assert.doesNotMatch(workflow, /ai-dlp-playwright|sensitive-values\.json/u);

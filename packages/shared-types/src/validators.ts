@@ -1,6 +1,7 @@
 import {
   ADAPTER_HEALTH_CODES,
   CHATGPT_ADAPTER_VERSION,
+  CHATGPT_ADAPTER_VERSIONS,
   DECISION_RESOLUTIONS,
   ENFORCEMENT_ERROR_CODES,
   isAuditEventId,
@@ -38,7 +39,7 @@ import type {
   SettingsPortMessage,
 } from "./messages.js";
 import {
-  POLICY_ACTION_PRECEDENCE,
+  ATTACHMENT_POLICY_RULE_ID,
   POLICY_NO_FINDINGS_RULE,
   POLICY_REASON_CODE,
   POLICY_REASON_CODES,
@@ -50,8 +51,9 @@ import type {
   PolicyReasonCode,
   PolicyRuleId,
 } from "./policy-catalog.js";
-import { POLICY_ACTIONS } from "./policy.js";
+import { ATTACHMENT_ACTIONS, POLICY_ACTIONS } from "./policy.js";
 import type {
+  AttachmentAction,
   PolicyAction,
   PolicyConfiguration,
   PolicyDecision,
@@ -101,6 +103,10 @@ function isFindingConfidence(value: unknown): value is FindingConfidence {
 
 function isPolicyAction(value: unknown): value is PolicyAction {
   return isOneOf(value, POLICY_ACTIONS);
+}
+
+function isAttachmentAction(value: unknown): value is AttachmentAction {
+  return isOneOf(value, ATTACHMENT_ACTIONS);
 }
 
 function isPolicyRuleId(value: unknown): value is PolicyRuleId {
@@ -191,39 +197,37 @@ function hasCompatibleRuleSet(ruleIds: readonly PolicyRuleId[]): boolean {
   return true;
 }
 
-function hasConfigurableContactRule(ruleIds: readonly PolicyRuleId[]): boolean {
-  return ruleIds.some((ruleId) => CONFIGURABLE_CONTACT_RULE_IDS.has(ruleId));
-}
-
 function hasOnlyConfigurableContactRules(
   ruleIds: readonly PolicyRuleId[],
 ): boolean {
   return ruleIds.every((ruleId) => CONFIGURABLE_CONTACT_RULE_IDS.has(ruleId));
 }
 
-function hasKnowableActionForRules(
-  action: Exclude<PolicyAction, "allow">,
+function hasContributorActionForRules(
+  action: PolicyAction,
   ruleIds: readonly PolicyRuleId[],
 ): boolean {
-  let fixedAction: PolicyAction = "allow";
-  for (const ruleId of ruleIds) {
+  return ruleIds.every((ruleId) => {
     const rule = FINDING_RULE_BY_ID.get(ruleId);
-    if (
+    return (
       rule !== undefined &&
-      rule.actionSource.mode === "fixed" &&
-      POLICY_ACTION_PRECEDENCE.indexOf(rule.actionSource.requiredAction) >
-        POLICY_ACTION_PRECEDENCE.indexOf(fixedAction)
-    ) {
-      fixedAction = rule.actionSource.requiredAction;
-    }
-  }
+      (rule.actionSource.mode === "configured" ||
+        rule.actionSource.requiredAction === action)
+    );
+  });
+}
 
-  const requestedPriority = POLICY_ACTION_PRECEDENCE.indexOf(action);
-  const fixedPriority = POLICY_ACTION_PRECEDENCE.indexOf(fixedAction);
-  return (
-    requestedPriority >= fixedPriority &&
-    (requestedPriority === fixedPriority || hasConfigurableContactRule(ruleIds))
-  );
+function getContributingCategories(
+  ruleIds: readonly PolicyRuleId[],
+): SensitiveDataCategory[] {
+  return [
+    ...new Set(
+      ruleIds.flatMap((ruleId) => {
+        const rule = FINDING_RULE_BY_ID.get(ruleId);
+        return rule === undefined ? [] : [rule.category];
+      }),
+    ),
+  ];
 }
 
 function isPolicyFindingSnapshot(value: unknown): value is PolicyFinding {
@@ -263,8 +267,10 @@ function isPolicyConfigurationSnapshot(
         "schemaVersion",
         "categoryActions",
         "apiSecretActions",
+        "attachmentAction",
       ]) ||
-      value.schemaVersion !== 1 ||
+      value.schemaVersion !== 2 ||
+      !isAttachmentAction(value.attachmentAction) ||
       !isPlainRecord(value.categoryActions) ||
       !hasExactOwnKeys(value.categoryActions, POLICY_CATEGORY_ACTION_KEYS) ||
       !isPlainRecord(value.apiSecretActions) ||
@@ -313,8 +319,14 @@ function isPolicyInputSnapshot(value: unknown): value is PolicyInput {
   return safelyValidate(
     () =>
       isPlainRecord(value) &&
-      hasExactOwnKeys(value, ["application", "findings", "policy"]) &&
+      hasExactOwnKeys(value, [
+        "application",
+        "attachmentPresent",
+        "findings",
+        "policy",
+      ]) &&
       value.application === "chatgpt" &&
+      typeof value.attachmentPresent === "boolean" &&
       isDenseExactArray(value.findings, 0, 700_000, isPolicyFindingSnapshot) &&
       isPolicyConfigurationSnapshot(value.policy),
   );
@@ -332,6 +344,7 @@ export function createPolicyInput(value: PolicyInput): PolicyInput {
 
   return {
     application: "chatgpt",
+    attachmentPresent: snapshot.attachmentPresent,
     findings: snapshot.findings,
     policy: snapshot.policy,
   };
@@ -341,39 +354,76 @@ function isPolicyDecisionSnapshot(value: unknown): value is PolicyDecision {
   return safelyValidate(() => {
     if (
       !isPlainRecord(value) ||
-      !hasExactOwnKeys(value, ["action", "matchedRuleIds", "reasonCode"]) ||
+      !hasExactOwnKeys(value, [
+        "action",
+        "matchedRuleIds",
+        "contributingCategories",
+        "reasonCode",
+        "attachmentPresent",
+      ]) ||
       !isPolicyAction(value.action) ||
-      !isPolicyReasonCode(value.reasonCode)
+      !isPolicyReasonCode(value.reasonCode) ||
+      typeof value.attachmentPresent !== "boolean" ||
+      !isDenseExactArray(
+        value.contributingCategories,
+        0,
+        SENSITIVE_DATA_CATEGORIES.length,
+        isSensitiveDataCategory,
+      ) ||
+      !hasUniqueItems(value.contributingCategories)
     ) {
       return false;
     }
 
-    if (value.action === "allow") {
+    if (value.reasonCode === POLICY_REASON_CODE.NO_FINDINGS) {
       return (
-        (value.reasonCode === POLICY_REASON_CODE.NO_FINDINGS &&
-          isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
-          value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id) ||
-        (value.reasonCode === POLICY_REASON_CODE.POLICY_MATCH &&
-          isDenseExactArray(value.matchedRuleIds, 1, 2, isPolicyRuleId) &&
-          hasUniqueItems(value.matchedRuleIds) &&
-          hasPolicyRuleOrder(value.matchedRuleIds) &&
-          hasOnlyConfigurableContactRules(value.matchedRuleIds))
+        value.action === "allow" &&
+        value.attachmentPresent === false &&
+        isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
+        value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id &&
+        value.contributingCategories.length === 0
       );
     }
 
-    return (
-      value.reasonCode === POLICY_REASON_CODE.POLICY_MATCH &&
-      isDenseExactArray(
+    if (
+      !isDenseExactArray(
         value.matchedRuleIds,
         1,
         POLICY_RULE_IDS.length - 1,
         isPolicyRuleId,
-      ) &&
-      !value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) &&
-      hasUniqueItems(value.matchedRuleIds) &&
-      hasPolicyRuleOrder(value.matchedRuleIds) &&
-      hasCompatibleRuleSet(value.matchedRuleIds) &&
-      hasKnowableActionForRules(value.action, value.matchedRuleIds)
+      ) ||
+      value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) ||
+      !hasUniqueItems(value.matchedRuleIds) ||
+      !hasPolicyRuleOrder(value.matchedRuleIds)
+    ) {
+      return false;
+    }
+
+    const attachmentContributed = value.matchedRuleIds.includes(
+      ATTACHMENT_POLICY_RULE_ID,
+    );
+    if (
+      attachmentContributed !==
+        (value.reasonCode === POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT) ||
+      (attachmentContributed &&
+        (!value.attachmentPresent || value.action === "redact"))
+    ) {
+      return false;
+    }
+
+    const findingRuleIds = value.matchedRuleIds.filter(
+      (ruleId) => ruleId !== ATTACHMENT_POLICY_RULE_ID,
+    );
+    const expectedCategories = getContributingCategories(findingRuleIds);
+    const contributingCategories =
+      value.contributingCategories as SensitiveDataCategory[];
+    return (
+      hasCompatibleRuleSet(findingRuleIds) &&
+      hasContributorActionForRules(value.action, findingRuleIds) &&
+      expectedCategories.length === contributingCategories.length &&
+      expectedCategories.every(
+        (category, index) => contributingCategories[index] === category,
+      )
     );
   });
 }
@@ -391,7 +441,9 @@ export function createPolicyDecision(value: PolicyDecision): PolicyDecision {
   return {
     action: snapshot.action,
     matchedRuleIds: [...snapshot.matchedRuleIds],
+    contributingCategories: [...snapshot.contributingCategories],
     reasonCode: snapshot.reasonCode,
+    attachmentPresent: snapshot.attachmentPresent,
   };
 }
 
@@ -408,7 +460,7 @@ function isStoredSettingsEnvelopeSnapshot(
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, ["schemaVersion", "settings"]) &&
-      value.schemaVersion === 1 &&
+      value.schemaVersion === 2 &&
       isProtectionSettingsSnapshot(value.settings),
   );
 }
@@ -422,6 +474,7 @@ export function isStoredSettingsEnvelope(
 function isDecisionResolutionForAction(
   action: PolicyAction,
   resolution: unknown,
+  attachmentContributed: boolean,
 ): boolean {
   if (!isOneOf(resolution, DECISION_RESOLUTIONS)) {
     return false;
@@ -433,7 +486,9 @@ function isDecisionResolutionForAction(
     case "warn":
       return (
         resolution === "cancelled" ||
-        resolution === "bypassed" ||
+        (attachmentContributed
+          ? resolution === "attachment_bypassed"
+          : resolution === "bypassed") ||
         resolution === "redacted"
       );
     case "redact":
@@ -448,7 +503,7 @@ function hasCommonAuditFields(value: Record<PropertyKey, unknown>): boolean {
     isAuditEventId(value.id) &&
     isAuditTimestamp(value.timestamp) &&
     value.application === "chatgpt" &&
-    value.adapterVersion === CHATGPT_ADAPTER_VERSION
+    isOneOf(value.adapterVersion, CHATGPT_ADAPTER_VERSIONS)
   );
 }
 
@@ -506,6 +561,8 @@ function isDecisionAuditEventSnapshot(
           "detectorCategories",
           "matchedRuleIds",
           "findingCount",
+          "reasonCode",
+          "attachmentPresent",
           "adapterVersion",
         ],
         ["maskedExcerpt"],
@@ -513,10 +570,26 @@ function isDecisionAuditEventSnapshot(
       value.kind !== "decision" ||
       !hasCommonAuditFields(value) ||
       !isPolicyAction(value.policyAction) ||
-      !isDecisionResolutionForAction(value.policyAction, value.resolution)
+      typeof value.attachmentPresent !== "boolean" ||
+      !isDecisionResolutionForAction(
+        value.policyAction,
+        value.resolution,
+        value.reasonCode === POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT,
+      ) ||
+      !isPolicyDecisionSnapshot({
+        action: value.policyAction,
+        matchedRuleIds: value.matchedRuleIds,
+        contributingCategories: value.detectorCategories,
+        reasonCode: value.reasonCode,
+        attachmentPresent: value.attachmentPresent,
+      })
     ) {
       return false;
     }
+
+    const findingRuleIds = (
+      value.matchedRuleIds as readonly PolicyRuleId[]
+    ).filter((ruleId) => ruleId !== ATTACHMENT_POLICY_RULE_ID);
 
     if (value.policyAction === "allow") {
       const isCleanAllow =
@@ -530,6 +603,18 @@ function isDecisionAuditEventSnapshot(
         ) &&
         isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
         value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id &&
+        !Object.hasOwn(value, "maskedExcerpt");
+
+      const isAttachmentOnlyAllow =
+        value.resolution === "submitted" &&
+        value.findingCount === 0 &&
+        findingRuleIds.length === 0 &&
+        isDenseExactArray(
+          value.detectorCategories,
+          0,
+          0,
+          isSensitiveDataCategory,
+        ) &&
         !Object.hasOwn(value, "maskedExcerpt");
 
       const isConfiguredAllow =
@@ -548,21 +633,28 @@ function isDecisionAuditEventSnapshot(
         ) &&
         hasUniqueItems(value.detectorCategories) &&
         value.findingCount >= value.detectorCategories.length &&
-        isDenseExactArray(value.matchedRuleIds, 1, 2, isPolicyRuleId) &&
-        hasUniqueItems(value.matchedRuleIds) &&
-        hasPolicyRuleOrder(value.matchedRuleIds) &&
-        hasOnlyConfigurableContactRules(value.matchedRuleIds) &&
-        hasCorrelatedRuleCategories(
-          value.matchedRuleIds,
-          value.detectorCategories,
-        ) &&
+        hasOnlyConfigurableContactRules(findingRuleIds) &&
+        hasCorrelatedRuleCategories(findingRuleIds, value.detectorCategories) &&
         (!Object.hasOwn(value, "maskedExcerpt") ||
           hasCorrelatedMaskedExcerpt(
             value.maskedExcerpt,
             value.detectorCategories,
           ));
 
-      return isCleanAllow || isConfiguredAllow;
+      return isCleanAllow || isAttachmentOnlyAllow || isConfiguredAllow;
+    }
+
+    if (findingRuleIds.length === 0) {
+      return (
+        value.findingCount === 0 &&
+        isDenseExactArray(
+          value.detectorCategories,
+          0,
+          0,
+          isSensitiveDataCategory,
+        ) &&
+        !Object.hasOwn(value, "maskedExcerpt")
+      );
     }
 
     if (
@@ -576,21 +668,8 @@ function isDecisionAuditEventSnapshot(
         isSensitiveDataCategory,
       ) ||
       !hasUniqueItems(value.detectorCategories) ||
-      !isDenseExactArray(
-        value.matchedRuleIds,
-        1,
-        POLICY_RULE_IDS.length - 1,
-        isPolicyRuleId,
-      ) ||
-      value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) ||
-      !hasUniqueItems(value.matchedRuleIds) ||
-      !hasPolicyRuleOrder(value.matchedRuleIds) ||
-      !hasCompatibleRuleSet(value.matchedRuleIds) ||
-      !hasKnowableActionForRules(value.policyAction, value.matchedRuleIds) ||
-      !hasCorrelatedRuleCategories(
-        value.matchedRuleIds,
-        value.detectorCategories,
-      )
+      !hasCompatibleRuleSet(findingRuleIds) ||
+      !hasCorrelatedRuleCategories(findingRuleIds, value.detectorCategories)
     ) {
       return false;
     }
@@ -699,7 +778,7 @@ function isStoredAuditEnvelopeSnapshot(
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, ["schemaVersion", "events"]) &&
-      value.schemaVersion === 1 &&
+      value.schemaVersion === 3 &&
       isDenseExactArray(value.events, 0, 1_000, isAuditEventSnapshot),
   );
 }
@@ -800,6 +879,7 @@ function isSettingsValidationErrorSnapshot(
         return value.code === "required" || value.code === "invalid_type";
       case "emailAction":
       case "phoneAction":
+      case "attachmentAction":
         return value.code === "required" || value.code === "invalid_action";
       case "protectedKeywords":
         return (
@@ -845,7 +925,8 @@ function isRuntimeRequestSnapshot(value: unknown): value is RuntimeRequest {
       case "audit.append":
         return (
           hasExactOwnKeys(value, ["type", "event"]) &&
-          isAuditEventSnapshot(value.event)
+          isAuditEventSnapshot(value.event) &&
+          value.event.adapterVersion === CHATGPT_ADAPTER_VERSION
         );
       default:
         return false;

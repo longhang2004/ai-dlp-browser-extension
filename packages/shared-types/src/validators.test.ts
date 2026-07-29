@@ -70,7 +70,7 @@ import {
 } from "./index.js";
 
 const validSettingsEnvelope: StoredSettingsEnvelope = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   settings: createDefaultProtectionSettings(),
 };
 
@@ -84,12 +84,14 @@ const validDecisionEvent: AuditEvent = {
   detectorCategories: ["email"],
   matchedRuleIds: ["warn.email"],
   findingCount: 1,
+  reasonCode: "policy_match",
+  attachmentPresent: false,
   maskedExcerpt: createMaskedPreview(["[EMAIL]"]),
   adapterVersion: CHATGPT_ADAPTER_VERSION,
 };
 
 const validPolicy: PolicyConfiguration = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   categoryActions: {
     email: "warn",
     phone: "warn",
@@ -102,6 +104,7 @@ const validPolicy: PolicyConfiguration = {
     high: "block",
     medium: "warn",
   },
+  attachmentAction: "warn",
 };
 
 const validPolicyFinding: PolicyFinding = {
@@ -114,7 +117,9 @@ const validPolicyFinding: PolicyFinding = {
 const validPolicyDecision: PolicyDecision = {
   action: "warn",
   matchedRuleIds: ["warn.email"],
+  contributingCategories: ["email"],
   reasonCode: "policy_match",
+  attachmentPresent: false,
 };
 
 const validDisplayFinding: DisplayFinding = createDisplayFinding(
@@ -126,6 +131,7 @@ const validDialogInput: ProtectionDialogModelInput = {
   kind: "warn",
   findings: [validDisplayFinding],
   reasonCode: "policy_match",
+  attachmentPresent: false,
   canRedact: true,
 };
 
@@ -133,7 +139,7 @@ const validDialog: ProtectionDialogModel =
   createProtectionDialogModel(validDialogInput);
 
 const validAuditEnvelope: StoredAuditEnvelope = {
-  schemaVersion: 1,
+  schemaVersion: 3,
   events: [validDecisionEvent],
 };
 
@@ -210,6 +216,7 @@ describe("policy runtime boundaries", () => {
     expect(
       isPolicyInput({
         application: "chatgpt",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
       }),
@@ -219,11 +226,13 @@ describe("policy runtime boundaries", () => {
     expect(
       createPolicyInput({
         application: "chatgpt",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
       }),
     ).toEqual({
       application: "chatgpt",
+      attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
     });
@@ -506,6 +515,7 @@ describe("policy runtime boundaries", () => {
       "schemaVersion",
       "categoryActions",
       "apiSecretActions",
+      "attachmentAction",
     ] as const) {
       expect(
         isPolicyConfiguration(
@@ -516,7 +526,7 @@ describe("policy runtime boundaries", () => {
       ).toBe(false);
     }
 
-    expect(isPolicyConfiguration({ ...validPolicy, schemaVersion: 2 })).toBe(
+    expect(isPolicyConfiguration({ ...validPolicy, schemaVersion: 1 })).toBe(
       false,
     );
     expect(isPolicyConfiguration({ ...validPolicy, unknownRoot: true })).toBe(
@@ -677,112 +687,168 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["allow.no-findings"],
+        contributingCategories: [],
         reasonCode: "no_findings",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: [],
+        contributingCategories: [],
         reasonCode: "no_findings",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "no_findings",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["allow.no-findings"],
+        contributingCategories: [],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "warn",
         matchedRuleIds: [],
+        contributingCategories: [],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "warn",
         matchedRuleIds: ["block.private-key"],
+        contributingCategories: ["private_key"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["block.private-key", "warn.email"],
+        contributingCategories: ["private_key", "email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["warn.email", "block.private-key"],
+        contributingCategories: ["email", "private_key"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "redact",
         matchedRuleIds: ["block.private-key"],
+        contributingCategories: ["private_key"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "redact",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email", "warn.phone"],
+        contributingCategories: ["email", "phone"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email", "warn.protected-keyword"],
+        contributingCategories: ["email", "protected_keyword"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(false);
     expect(
       isPolicyDecision({
         action: "warn",
         matchedRuleIds: ["warn.email", "warn.phone"],
+        contributingCategories: ["email", "phone"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     ).toBe(true);
     expect(
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["warn.api-secret.medium"],
+        contributingCategories: ["api_secret"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("requires contributor-only rules and correlated contributing categories", () => {
+    const contributorDecision = {
+      action: "warn",
+      matchedRuleIds: ["warn.phone"],
+      contributingCategories: ["phone"],
+      reasonCode: "policy_match",
+      attachmentPresent: false,
+    };
+
+    expect(isPolicyDecision(contributorDecision)).toBe(true);
+    expect(
+      isPolicyDecision({
+        ...contributorDecision,
+        matchedRuleIds: ["warn.email", "warn.phone"],
+      }),
+    ).toBe(false);
+    expect(
+      isPolicyDecision({
+        ...contributorDecision,
+        contributingCategories: ["email"],
       }),
     ).toBe(false);
   });
@@ -826,9 +892,10 @@ describe("sanitized display runtime boundaries", () => {
     expect(Object.keys(validDialog)).toEqual([
       "kind",
       "findings",
-      "maskedPreview",
       "reasonCode",
+      "attachmentPresent",
       "canRedact",
+      "maskedPreview",
     ]);
     expect(validDialog.maskedPreview).toBe("… [EMAIL] …");
     expect(isProtectionDialogModel(validDialog)).toBe(true);
@@ -900,6 +967,7 @@ describe("sanitized display runtime boundaries", () => {
         createDisplayFinding("protected_keyword", "medium"),
       ],
       reasonCode: "policy_match",
+      attachmentPresent: false,
       canRedact: true,
     });
 
@@ -918,7 +986,7 @@ describe("settings validation", () => {
     undefined,
     null,
     {},
-    { schemaVersion: 2, settings: DEFAULT_PROTECTION_SETTINGS },
+    { schemaVersion: 3, settings: DEFAULT_PROTECTION_SETTINGS },
     { schemaVersion: 1 },
     { ...validSettingsEnvelope, prompt: "secret" },
     {
@@ -1036,6 +1104,7 @@ describe("settings validation", () => {
       protectionEnabled: true,
       emailAction: "warn",
       phoneAction: "warn",
+      attachmentAction: "warn",
       protectedKeywords: [],
       auditRetentionLimit: 100,
     });
@@ -1089,11 +1158,48 @@ describe("sanitized preview construction", () => {
 });
 
 describe("audit validation", () => {
+  it("derives warning bypass resolution from attachment contribution", () => {
+    const promptWarningWithAllowedAttachment = {
+      ...validDecisionEvent,
+      resolution: "bypassed",
+      attachmentPresent: true,
+    };
+    const attachmentWarning = {
+      kind: "decision",
+      id: createAuditEventId("00000000-0000-4000-8000-000000000006"),
+      timestamp: createAuditTimestamp("2026-07-26T12:00:05.000Z"),
+      application: "chatgpt",
+      policyAction: "warn",
+      resolution: "attachment_bypassed",
+      detectorCategories: [],
+      matchedRuleIds: ["attachment.unsupported"],
+      findingCount: 0,
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      adapterVersion: CHATGPT_ADAPTER_VERSION,
+    };
+
+    expect(isDecisionAuditEvent(promptWarningWithAllowedAttachment)).toBe(true);
+    expect(
+      isDecisionAuditEvent({
+        ...promptWarningWithAllowedAttachment,
+        resolution: "attachment_bypassed",
+      }),
+    ).toBe(false);
+    expect(isDecisionAuditEvent(attachmentWarning)).toBe(true);
+    expect(
+      isDecisionAuditEvent({
+        ...attachmentWarning,
+        resolution: "bypassed",
+      }),
+    ).toBe(false);
+  });
+
   it("accepts all supported event variants", () => {
     expect(isStoredAuditEnvelope(validAuditEnvelope)).toBe(true);
     expect(
       isStoredAuditEnvelope({
-        schemaVersion: 1,
+        schemaVersion: 3,
         events: [
           validDecisionEvent,
           {
@@ -1129,6 +1235,8 @@ describe("audit validation", () => {
       detectorCategories: [],
       matchedRuleIds: ["allow.no-findings"],
       findingCount: 0,
+      reasonCode: "no_findings",
+      attachmentPresent: false,
       adapterVersion: CHATGPT_ADAPTER_VERSION,
     };
 
@@ -1139,6 +1247,7 @@ describe("audit validation", () => {
         findingCount: 1,
         detectorCategories: ["email"],
         matchedRuleIds: ["warn.email"],
+        reasonCode: "policy_match",
       }),
     ).toBe(true);
     expect(
@@ -1148,6 +1257,7 @@ describe("audit validation", () => {
         detectorCategories: ["email", "phone"],
         matchedRuleIds: ["warn.email", "warn.phone"],
         maskedExcerpt: createMaskedPreview(["[EMAIL]", "[PHONE]"]),
+        reasonCode: "policy_match",
       }),
     ).toBe(true);
     expect(
@@ -1345,7 +1455,7 @@ describe("audit validation", () => {
     )) {
       expect(
         isStoredAuditEnvelope({
-          schemaVersion: 1,
+          schemaVersion: 3,
           events,
         }),
       ).toBe(false);
@@ -1379,6 +1489,10 @@ describe("runtime message validation", () => {
       settings: { ...DEFAULT_PROTECTION_SETTINGS, matchedText: "secret" },
     },
     { type: "audit.append", event: { ...validDecisionEvent, text: "secret" } },
+    {
+      type: "audit.append",
+      event: { ...validDecisionEvent, adapterVersion: "1" },
+    },
   ])(
     "rejects unknown, missing, or prompt-bearing request data %#",
     (candidate) => {
@@ -1579,6 +1693,7 @@ describe("factory snapshot and TOCTOU safety", () => {
 
     const policyInputSource: PolicyInput = {
       application: "chatgpt",
+      attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
     };
@@ -1643,6 +1758,7 @@ describe("factory snapshot and TOCTOU safety", () => {
 
     const input = poisonAfterFirstRead({
       application: "chatgpt" as const,
+      attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
     });

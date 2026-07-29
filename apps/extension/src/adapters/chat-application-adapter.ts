@@ -18,8 +18,15 @@ export type LiveSubmissionContext = {
   contextVersion: number;
 };
 
+declare const attachmentStateFingerprintBrand: unique symbol;
+
+export type AttachmentStateFingerprint = {
+  readonly [attachmentStateFingerprintBrand]: true;
+};
+
 export type SubmissionContentCapabilities = {
-  hasUnsupportedAttachment: boolean;
+  attachmentPresent: boolean;
+  attachmentStateFingerprint: AttachmentStateFingerprint;
 };
 
 export type PromptReplacementCapability = "supported" | "unsupported";

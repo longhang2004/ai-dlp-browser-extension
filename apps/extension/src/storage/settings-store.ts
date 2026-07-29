@@ -21,6 +21,7 @@ const SETTING_KEYS = Object.freeze([
   "protectionEnabled",
   "emailAction",
   "phoneAction",
+  "attachmentAction",
   "protectedKeywords",
   "auditRetentionLimit",
 ] as const);
@@ -35,7 +36,7 @@ export interface SettingsStore {
 }
 
 function defaultEnvelope(): StoredSettingsEnvelope {
-  return { schemaVersion: 1, settings: createDefaultProtectionSettings() };
+  return { schemaVersion: 2, settings: createDefaultProtectionSettings() };
 }
 
 function cloneEnvelope(
@@ -48,16 +49,26 @@ function cloneEnvelope(
   return clone;
 }
 
-function migrateLegacyRedactEnvelope(
-  value: unknown,
-): StoredSettingsEnvelope | null {
+const V1_SETTING_KEYS = Object.freeze([
+  "protectionEnabled",
+  "emailAction",
+  "phoneAction",
+  "protectedKeywords",
+  "auditRetentionLimit",
+] as const);
+
+function migrateV1Envelope(value: unknown): StoredSettingsEnvelope | null {
   if (
     !hasPlainDataFields(value) ||
     Reflect.ownKeys(value).length !== 2 ||
     !Object.hasOwn(value, "schemaVersion") ||
     !Object.hasOwn(value, "settings") ||
     value.schemaVersion !== 1 ||
-    !hasPlainDataFields(value.settings)
+    !hasPlainDataFields(value.settings) ||
+    Reflect.ownKeys(value.settings).length !== V1_SETTING_KEYS.length ||
+    V1_SETTING_KEYS.some(
+      (key) => !Object.hasOwn(value.settings as Record<string, unknown>, key),
+    )
   ) {
     return null;
   }
@@ -69,7 +80,10 @@ function migrateLegacyRedactEnvelope(
     !POLICY_ACTIONS.includes(emailAction as PolicyAction) ||
     typeof phoneAction !== "string" ||
     !POLICY_ACTIONS.includes(phoneAction as PolicyAction) ||
-    (emailAction !== "redact" && phoneAction !== "redact")
+    !Reflect.ownKeys(settings).every(
+      (key) =>
+        typeof key === "string" && V1_SETTING_KEYS.includes(key as never),
+    )
   ) {
     return null;
   }
@@ -77,8 +91,9 @@ function migrateLegacyRedactEnvelope(
     ...settings,
     emailAction: emailAction === "redact" ? "warn" : emailAction,
     phoneAction: phoneAction === "redact" ? "warn" : phoneAction,
+    attachmentAction: "warn",
   });
-  return migrated.ok ? { schemaVersion: 1, settings: migrated.settings } : null;
+  return migrated.ok ? { schemaVersion: 2, settings: migrated.settings } : null;
 }
 
 function hasPlainDataFields(value: unknown): value is Record<string, unknown> {
@@ -191,6 +206,12 @@ export function validateAndNormalizeSettings(
   ) {
     errors.push({ field: "phoneAction", code: "invalid_action" });
   }
+  if (
+    typeof value.attachmentAction !== "string" ||
+    !CONFIGURABLE_PROTECTION_ACTIONS.includes(value.attachmentAction as never)
+  ) {
+    errors.push({ field: "attachmentAction", code: "invalid_action" });
+  }
   const normalizedKeywords = normalizeKeywords(value.protectedKeywords);
   if (normalizedKeywords.error !== undefined) {
     errors.push(normalizedKeywords.error);
@@ -211,6 +232,8 @@ export function validateAndNormalizeSettings(
     protectionEnabled: value.protectionEnabled as boolean,
     emailAction: value.emailAction as ProtectionSettings["emailAction"],
     phoneAction: value.phoneAction as ProtectionSettings["phoneAction"],
+    attachmentAction:
+      value.attachmentAction as ProtectionSettings["attachmentAction"],
     protectedKeywords: normalizedKeywords.keywords,
     auditRetentionLimit: value.auditRetentionLimit as number,
   };
@@ -248,7 +271,7 @@ export function createSettingsStore(
         if (isStoredSettingsEnvelope(stored)) {
           return cloneEnvelope(stored);
         }
-        const migrated = migrateLegacyRedactEnvelope(stored);
+        const migrated = migrateV1Envelope(stored);
         if (migrated === null) {
           return defaultEnvelope();
         }
@@ -264,7 +287,7 @@ export function createSettingsStore(
           return result;
         }
         const envelope: StoredSettingsEnvelope = {
-          schemaVersion: 1,
+          schemaVersion: 2,
           settings: result.settings,
         };
         await storage.write(SETTINGS_STORAGE_KEY, cloneEnvelope(envelope));

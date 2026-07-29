@@ -1,4 +1,4 @@
-# Add an application adapter
+# Add a PromptGuard application adapter
 
 Milestone 1 ships only the ChatGPT adapter. A new adapter requires an explicit
 design review because it expands host scope, DOM assumptions, manifest matches,
@@ -13,8 +13,9 @@ Browser-specific adapters implement `ChatApplicationAdapter` in
 - resolve the live composer and associated enabled send control;
 - synchronously read the active prompt and explicitly report whether safe
   replacement is supported;
-- inspect prompt-free submission capabilities such as unsupported attachment
-  presence without reading attachment metadata or contents;
+- inspect prompt-free submission capabilities by returning attachment presence
+  and an opaque adapter-owned structural fingerprint without reading attachment
+  metadata or contents;
 - synchronously capture click/Enter attempts;
 - expose the browser-specific resume operation;
 - dispose every listener, observer, reference, and callback.
@@ -50,20 +51,27 @@ composer and send-control selectors must be constrained to the same local form
 or region.
 
 Maintain fixture-based tests for at least two plausible DOM variants and add a
-fixture for every selector regression.
+fixture for every selector regression. Resolve an exact Send control through one
+shared collector that deduplicates selector matches and classifies its usable
+composers as none, unique, or ambiguous. Ambiguity must never be resolved by DOM
+order, selector priority, or element ID.
 
 ## Submission safety
 
 The controller, not the adapter, owns the one-shot authorization. Before resume,
 the controller re-resolves and validates URL, context version, composer, send
-control, and prompt text. The adapter performs one guarded synchronous resume
-and clears its guard in `finally`.
+ownership, prompt text, attachment presence, and the exact opaque attachment
+fingerprint. Authorization is consumed only after those checks. The adapter
+performs one guarded synchronous resume and clears its guard in `finally`.
 
 Send resolution must prefer composer-associated stable Send data attributes,
 Send accessible labels, `button[type=submit]`, and `input[type=submit]`. Generic
 no-type buttons are not submit candidates. Attachment selectors remain
 centralized and scoped to the resolved composer region; dormant file inputs and
-page-external attachment-like elements are not attachment evidence.
+page-external attachment-like elements are not attachment evidence. Fingerprints
+must be based exclusively on structural element identity and mutation
+versioning. They must never read or encode filenames, paths, extensions, MIME
+types, sizes, preview text, contents, labels, accessible text, or HTML.
 
 `replacePrompt` returns an explicit verified result. The ChatGPT Milestone 1
 adapter reports every editor as unsupported, including native textarea, because
@@ -74,7 +82,8 @@ DOM assignment plus synthetic events is never sufficient evidence.
 
 Tests must cover click/Enter capture, Shift+Enter/modifiers/IME pass-through,
 recursive interception, double events, dynamic element replacement, stale
-contexts, resume failure, duplicate initialization, and disposal.
+contexts, shared-Send ambiguity, attachment add/remove/replace/mutation, resume
+failure, duplicate initialization, and disposal.
 
 ## Integration changes
 
@@ -90,3 +99,18 @@ A new application also requires:
 Do not add `tabs`, `activeTab`, `scripting`, broad host permissions,
 `web_accessible_resources`, page-world injection, or remote assets unless a new
 approved specification demonstrates necessity.
+
+## Future trust classification
+
+The documented future `AiSurface`, `AdapterCapabilities`, and `AdapterTrust`
+contracts do not authorize a new adapter. Each surface still requires the review
+above. A `verified` adapter may claim only capabilities proven against the
+application's real submission path. A `discovered` surface provides coarse
+application visibility only, and `unsupported` provides no enforcement claim.
+
+IDE and CLI integrations are official-hook-first. Process scraping, terminal
+history, keylogging, clipboard polling, network interception, and arbitrary
+filesystem watching are not fallback adapters. Managed policy may configure a
+packaged adapter but must never deliver executable adapter code or remotely
+interpreted selectors. See the
+[multi-surface architecture](../architecture/multi-surface-architecture.md).

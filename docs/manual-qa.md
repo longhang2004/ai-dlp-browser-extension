@@ -1,127 +1,264 @@
-# Manual QA
+# PromptGuard manual QA
 
-This checklist uses identifiers from `tests/fixtures/sensitive-values.json`. Do
-not copy fixture values into documentation, screenshots, tickets, or logs.
+This checklist uses identifiers from `tests/fixtures/sensitive-values.json`.
+Never copy fixture values into documentation, screenshots, tickets, logs, or
+browser storage exports.
 
 ## Preconditions
 
 1. Use Node `>=22.13.0 <23` and pnpm `10.13.1`.
-2. Run:
+2. Start from a clean tree and run:
 
    ```bash
+   rm -rf node_modules
+   rm -rf apps/extension/dist
+   rm -rf artifacts/playwright
+   rm -rf test-results
+   rm -rf playwright-report
+
    pnpm install --frozen-lockfile
+   pnpm format:check
+   pnpm lint
+   pnpm typecheck
+   pnpm test
+   pnpm test:performance
    pnpm build
    pnpm verify:artifact
+   pnpm artifact:digest
+   pnpm test:e2e
    ```
 
-3. Load `apps/extension/dist` unpacked in a Chromium-based browser (Chrome/Edge
-   102+).
-4. Open the popup. Do not rely on enforcement unless it says **Protection is
-   active**. `initializing`, `waiting_for_composer`, `degraded`, and
+3. Record the reviewed production commit, wait for its CI run, download that
+   commit's reachability-verified extension artifact, published digest, and
+   `git archive` source tarball. Recompute the canonical digest locally; the
+   digest command must first accept the downloaded artifact's reachability
+   graph. Keep all three artifacts bound to the same reviewed commit. Do not use
+   a later local build for authenticated QA.
+4. Load the downloaded artifact unpacked in Microsoft Edge 102+.
+5. Open the popup on `https://chatgpt.com`. Do not rely on enforcement unless it
+   says **Protection is active** for the composer and semantic Send control
+   being tested. `initializing`, `waiting_for_composer`, `degraded`, and
    `unavailable` are not active.
-5. Use a test ChatGPT conversation with no production or customer data.
+6. Use a dedicated test conversation with no production or customer data.
+7. Record no prompt content, uploaded-file names, preview text, page HTML,
+   storage dumps, or sensitive screenshots.
 
-## Automated production-build checks — successful on 2026-07-26
+## Automated production-build checks — reviewed on 2026-07-29
 
-The following checks were run against the built extension, with ChatGPT routed
-to local fixture HTML and every other HTTP(S) request blocked:
+The hardening verification completed against reviewed commit
+`806cdf0d7d95d07592e0b51415d7cf96fc800f07`.
 
-| Scenario                | Fixture ID or input                                                     | Result                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Initialization interval | `paymentCard.validVisa`                                                 | Pass-through while settings read was deliberately delayed; popup remained `initializing`, then became `active` |
-| Clean submission        | Ordinary non-sensitive sentence                                         | Submitted exactly once; no allow audit record                                                                  |
-| Warning and bypass      | `email.valid` + `phone.vietnameseDomestic`                              | Placeholder-only warning; Shift+Enter passed through; one-shot send-anyway submitted once                      |
-| No automatic redaction  | `email.valid`                                                           | Warning exposed no Redact action; composer remained unchanged and unsubmitted                                  |
-| Strict blocks           | `paymentCard.validVisa`, `awsAccessKey.longLived`, `privateKey.generic` | Blocked with no bypass                                                                                         |
-| Disabled protection     | `paymentCard.validVisa`                                                 | Runtime status reported disabled through the options page and submission passed through                        |
-| Audit retention         | `email.valid`, then `phone.vietnameseDomestic` with limit 1             | Only final prompt-free phone decision remained                                                                 |
+- 745 Vitest unit, DOM, type-boundary, storage-migration, policy, controller,
+  adapter, and UI tests passed, along with 7 Node artifact-script tests.
+- The production build contained 12 reachable files, no source maps, and no
+  local-asset allowlist entries.
+- The manifest-rooted verifier rejected orphan assets before canonical digest
+  generation; the digest was
+  `e72b6385d20f1afe626c60084d93902f4c6ff1af873dd2483cfe5144231368a7`.
+- Artifact verification classified 43 reviewed URL literals with no fetching or
+  unreviewed URL.
 
-Automated result: 7/7 Playwright tests passed. The production build contained 12
-files, no source maps, and 43 reviewed URL literals with zero fetching or
-unreviewed classifications.
+The Playwright suite routes ChatGPT to local fixture HTML and blocks every other
+HTTP(S) request.
+
+| Scenario                      | Result                                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Initialization interval       | Pass-through while settings were deliberately delayed; popup moved from `initializing` to `active`           |
+| Clean submission              | Submitted exactly once with no allow audit record                                                            |
+| Text warning                  | Click and Enter interception, Shift+Enter pass-through, cancellation, and one-shot bypass passed             |
+| No automatic redaction        | Current ChatGPT editor variants exposed no Redact action and retained the prompt                             |
+| Strict detectors              | Payment-card, AWS-key, and private-key fixtures blocked without bypass                                       |
+| Attachment warning            | Attachment-only warning, accessible bypass, one-shot authorization, and prompt/file-name privacy passed      |
+| Attachment block and allow    | Block was fail-closed; allow was dialog-free and not persisted to audit                                      |
+| Combined warning              | Text category plus a contributing attachment limitation used one generic bypass and `attachment_bypassed`    |
+| Disabled protection           | Runtime status reported disabled and submission passed through without protection observers                  |
+| Audit rendering and retention | Final retained decisions were prompt-free; attachment decisions exposed no filename, count, or page metadata |
+
+Automated ambiguity coverage includes shared-Send click and Enter fail-closed
+behavior, DOM order and selector-priority reversal, stale and hidden candidates,
+separate composer roots, immediate `ambiguous_submission_context` health, and
+prompt-free transitions, messages, errors, audit, and logs.
+
+## Current Part A authenticated Edge attempt — 2026-07-29
+
+This attempt used the exact reviewed Part A artifact and privacy-safe synthetic
+fixtures. It recorded no screenshots, prompt excerpts, matched values,
+filenames, page HTML, storage dumps, or page-derived metadata.
+
+| Field                                      | Recorded value                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Reviewed Part A commit                     | `4c0581ce480afca3a3e267770092db4b00f23b4b`                                                                                           |
+| CI run                                     | [30429601994](https://github.com/longhang2004/ai-dlp-browser-extension/actions/runs/30429601994), successful at the exact Part A SHA |
+| Published and recomputed canonical SHA-256 | `e72b6385d20f1afe626c60084d93902f4c6ff1af873dd2483cfe5144231368a7`                                                                   |
+| Verified extension artifact                | 12 manifest-reachable files; 43 reviewed URL literals; no source maps                                                                |
+| Microsoft Edge                             | `150.0.4078.105`                                                                                                                     |
+| PromptGuard extension                      | `0.1.0`, unpacked ID `pijpmkiflojfgamgjjkahaggifgpbnha`                                                                              |
+| Execution context                          | Authenticated `https://chatgpt.com`, 2026-07-29, Asia/Ho_Chi_Minh                                                                    |
+
+The exact artifact was the only enabled unpacked PromptGuard copy. Two older
+unpacked copies were disabled before testing.
+
+| Scenario                                      | Authenticated result                                                                                                                                                                                                                                 |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Click and keyboard interception               | Click and unmodified Enter were intercepted; Shift+Enter inserted a structural newline without submission                                                                                                                                            |
+| Text warning privacy and accessibility        | Contributor category, confidence, and placeholder-only preview appeared; raw fixture content was absent; open Shadow DOM and focus containment passed                                                                                                |
+| Cancel and focus restoration                  | Cancel did not submit and returned focus to the semantic Send control                                                                                                                                                                                |
+| Text one-shot bypass                          | One approval submitted once; a repeated attempt required a new decision                                                                                                                                                                              |
+| New policy after enforcement change           | A fresh submission used the updated block policy after the email setting changed from warn to block: **Submission blocked**, Close only, and no bypass                                                                                               |
+| Stale warning during settings UI navigation   | `unavailable`: direct observation of clicking a stale dialog after settings-page navigation was unavailable because the dialog was removed during navigation; automated controller and bootstrap integration tests cover stale-callback invalidation |
+| Retention-only and identical-save persistence | `unavailable` for the same tab-switch control reason; direct bootstrap tests prove revision and active-attempt preservation                                                                                                                          |
+| Automatic redaction                           | No current editor variant exposed Redact                                                                                                                                                                                                             |
+| Attachment warning and one-shot bypass        | Fixed uninspected-attachment copy and accessible bypass appeared; a later attempt required a new decision                                                                                                                                            |
+| Attachment policy block/allow                 | `unavailable` through the authenticated settings path; production Playwright exercised both settings end to end                                                                                                                                      |
+| Combined text and attachment warning          | One generic bypass displayed both final-action contributors without raw prompt or filename                                                                                                                                                           |
+| Contributor-only setting permutations         | `unavailable` through the authenticated settings path; controller, validator, audit, and production-extension tests cover both permutations                                                                                                          |
+| Strict block with attachment                  | Strict text policy remained blocked, included the inspection limitation, and exposed no bypass                                                                                                                                                       |
+| Attachment mutation while approval is pending | `unavailable` in the authenticated control surface; adapter/controller DOM tests cover add, remove, replace, and mutation invalidation                                                                                                               |
+| Navigation and stale authorization            | SPA navigation invalidated a pending authorization and did not submit                                                                                                                                                                                |
+| Shared Send ambiguity                         | `unavailable` on the current single-composer page; production DOM tests are authoritative                                                                                                                                                            |
+| Non-Send controls                             | Add-files did not trigger protection; voice/dictation was not visible in the tested variant                                                                                                                                                          |
+| Popup and audit extension pages               | `unavailable` to the browser-control surface; production Playwright verified active/disabled truthfulness, retention, and prompt-free audit rendering                                                                                                |
+
+All unavailable authenticated items passed their corresponding automated
+production-build, unit, or DOM tests. They remain limitations rather than being
+reported as live passes.
 
 ## Interactive current-ChatGPT checklist
 
-Record each item as `pass`, `fail`, or `unavailable`, with browser version and
-date. Never record the submitted fixture value.
+Record each item as `pass`, `fail`, or `unavailable`, with the exact Edge and
+extension versions and the execution date/timezone.
 
-- Popup reaches `active` on the current authenticated `chatgpt.com` composer.
+- Popup reaches `active` for the current composer once its semantic Send control
+  is rendered.
 - Click submission and unmodified Enter are intercepted once.
 - Shift+Enter inserts a newline and does not open a dialog.
-- Warning shows category/confidence/placeholder information only.
-- Cancel restores focus and does not submit.
-- Send anyway works once and a second attempt requires a new decision.
-- No ChatGPT editor variant, including native textarea and
-  ProseMirror/contenteditable, shows Redact and continue. An injected
-  legacy/internal redact decision must leave the composer unchanged, never
-  resume submission, and show fixed fail-closed guidance.
-- An attachment-only prompt and text plus attachment are blocked without bypass;
-  removing the attachment permits a new attempt. Do not record the filename.
-- A large paste converted by ChatGPT into an attachment is blocked as an
-  unsupported attachment.
-- Card, AWS key, and private-key fixtures block without bypass.
-- A prompt of exactly 100,000 UTF-16 code units is inspected.
-- A prompt of 100,001 code units is stopped with split-prompt guidance and no
+- Text warnings show category, confidence, and placeholder information only.
+- Cancel restores focus to the originating composer or Send control and does not
+  submit.
+- Text-only **Send anyway** works once; a second attempt requires a new
+  decision.
+- While a warning is open, change one enforcement setting (enabled state,
+  email/phone/attachment action, or protected keywords). The original action
+  must become inert, record `cancelled` when applicable, and never resume; a new
+  submission must use the replacement settings. Changing only retention or
+  applying an identical normalized snapshot must not cancel an active attempt.
+- No current ChatGPT editor variant shows Redact.
+- Attachment `warn` shows **Unscanned attachment**, fixed inspection-limit copy,
+  Cancel, and the accessible action **Send attachment without inspection**.
+- Attachment warning bypass works once; a later attachment attempt requires a
+  new decision.
+- Attachment `block` shows fixed unsupported-inspection guidance and Close only.
+- Attachment `allow` submits without a protection dialog and creates no allow
+  audit event.
+- A combined text-and-attachment warning shows categories, the inspection
+  limitation, and one generic **Send anyway** action.
+- With email or phone set to `allow` and attachment set to `warn`, a combined
+  input shows and audits only the attachment limitation; the allowed text
+  category is absent. With attachment set to `allow` and text set to `warn`, the
+  text-only warning and audit omit the attachment and a bypass is `bypassed`,
+  not `attachment_bypassed`.
+- A strict text block combined with an attachment remains blocked and exposes no
   bypass.
-- Changing the prompt while a dialog is open prevents stale approval.
-- Replacing the composer or send control while a dialog is open prevents stale
+- Adding, removing, replacing, or mutating attachment evidence while approval is
+  pending invalidates that approval.
+- Replacing the composer, region, or Send control; SPA navigation; dialog
+  replacement; expiry; duplicate consumption; or resume failure cannot reuse
   approval.
-- SPA navigation and a newly rendered composer restart `waiting_for_composer`,
-  recover within the 10-second default grace, or report degraded truthfully
-  after expiry.
-- Disabling protection cancels an active attempt and later submissions pass
-  through.
-- Re-enabling protection returns to active only after a fresh validated
-  snapshot.
-- Disabled mode creates no protection observer or health event. Delayed
-  rendering reports `waiting_for_composer` before active or grace-expired
-  degraded.
-- With visible tool/voice controls, only the semantic Send control is captured
-  and resumed.
-- The audit page shows no prompt text or matched value and clears only after
-  confirmation.
-- The open Shadow root is inspectable and focus remains contained in the dialog.
+- A shared Send control with multiple usable composers is synchronously blocked
+  and reports `ambiguous_submission_context`; separate roots and Send controls
+  remain usable.
+- Visible tool and voice controls are not treated as Send.
+- The audit page contains no prompt, matched value, uploaded-file name, local
+  path, preview text, or page-derived metadata.
+- The dialog's open Shadow root is inspectable and keyboard focus remains
+  contained.
 
-## Authenticated live-check result — successful on 2026-07-26
+## Historical reviewed-build authenticated Edge result — 2026-07-29
 
-The production build was loaded unpacked in Microsoft Edge and exercised on the
-current authenticated `chatgpt.com` composer. The exact Edge version was not
-captured. The browser-control extension reported version `1.2.2721.15725`, and
-the unpacked AI DLP extension reported version `0.1.0`.
+This record predates the enforcement-revision, contributor-only audit V3, and
+artifact-source-archive hardening. It is retained as historical live-DOM
+evidence only; use the preconditions and current interactive checklist for
+authenticated QA of the current build.
 
-The popup reported **Protection is active** and **ChatGPT · local inspection
-only**, with 18 recent protection events after the test session.
+### Build and environment identity
 
-| Scenario               | Input                                                                                     | Result                                                                                                        |
-| ---------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Warning and cancel     | `email.valid`                                                                             | Placeholder-only warning opened; Cancel prevented submission                                                  |
-| Warning bypass         | `email.valid`                                                                             | Send anyway submitted exactly once without recursive or duplicate submission                                  |
-| Keyboard interception  | Ordinary text and the warning fixture                                                     | Unmodified Enter was intercepted once the semantic Send control was resolved; Shift+Enter was not intercepted |
-| Tool-button ambiguity  | Visible **Add files and more** control                                                    | The tool control was not treated as Send                                                                      |
-| Strict detector blocks | `paymentCard.validVisa`, `awsAccessKey.longLived`, and a valid minimum-length PEM fixture | Each was blocked without a bypass and without creating a user message                                         |
-| Large-paste attachment | Benign synthetic text converted by ChatGPT into an attachment                             | Failed closed with a content-free unsupported-attachment dialog, no Send anyway action, and no user message   |
-| Uploaded attachment    | Harmless local text file                                                                  | Failed closed with a content-free unsupported-attachment dialog, no Send anyway action, and no user message   |
-| Dialog isolation       | Warning and attachment dialogs                                                            | Rendered sanitized content in an inspectable open Shadow root                                                 |
-| Cleanup                | Large-paste and uploaded test attachments                                                 | Both test attachments were removed; existing composer content was preserved                                   |
+| Field                                      | Recorded value                                                                                                                                              |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reviewed production commit C               | `df89f06374cb3e9d77412e33012b01ed6e7028d3`                                                                                                                  |
+| CI run                                     | [30384957497](https://github.com/longhang2004/ai-dlp-browser-extension/actions/runs/30384957497), completed successfully with the exact commit as `headSha` |
+| Downloaded artifact                        | `ai-dlp-extension-df89f06374cb3e9d77412e33012b01ed6e7028d3`                                                                                                 |
+| Published and recomputed canonical SHA-256 | `c576d7f5c3dd9c306640dc9fdfa77c4cb57e805beccae193c7013ebed9a36368`                                                                                          |
+| Microsoft Edge                             | `150.0.4078.105`                                                                                                                                            |
+| AI DLP extension                           | `0.1.0`, unpacked ID `lopemlcfmpmkjbcndeippfapigidlhme`                                                                                                     |
+| Manifest                                   | Manifest V3; `storage` permission; content script limited to `https://chatgpt.com/*`                                                                        |
+| QA origin                                  | `https://chatgpt.com`                                                                                                                                       |
+| Execution window                           | 2026-07-29, 09:33–10:43 `+07` (`+0700`, Asia/Ho_Chi_Minh)                                                                                                   |
 
-A too-short PEM-shaped sample was submitted during exploratory QA because it did
-not satisfy the detector's minimum valid fixture length. It is not counted as a
-detector bypass or as strict-block evidence.
+The downloaded CI artifact's digest matched the separately published digest
+byte-for-byte before loading. The manifest remained version `0.1.0`.
+
+The popup displayed **Protection is active**, **ChatGPT · local inspection
+only**, and **Attached file contents are not inspected in this version** while
+the tested semantic Send control was present. On this ChatGPT variant, an empty
+composer exposes voice controls instead of Send; that empty state can truthfully
+report `send_control_not_found` until entered text or an attachment renders the
+real Send control.
+
+### Live validated submission relationship
+
+Prompt-free DevTools inspection recorded only structural attributes:
+
+| Element                     | Live relationship                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| Composer                    | `DIV#prompt-textarea[role="textbox"][contenteditable="true"]`                                       |
+| Send control                | `BUTTON[data-testid="send-button"][aria-label="Send prompt"]`                                       |
+| Validated submission region | One `FORM` containing the composer and Send control                                                 |
+| Attachment evidence         | Present inside that same validated `FORM`; no label, name, preview, or content was read or recorded |
+
+The live page exposed one usable composer for that Send control. Shared-Send
+ambiguity was therefore not manufactured in the authenticated page; the
+production-build DOM tests listed above are the authoritative ambiguity
+evidence.
+
+### Live scenarios performed
+
+| Scenario                        | Result                                                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Popup and target relationship   | Active once the semantic Send control rendered; Add-files, dictation, and voice controls were not selected as Send                                                       |
+| Click and keyboard interception | Click and focus-verified unmodified Enter opened the warning; Shift+Enter did not                                                                                        |
+| Text warning cancellation       | Placeholder-only email warning opened; Cancel retained the composer and restored focus without submission                                                                |
+| Text one-shot bypass            | **Send anyway** resumed exactly once; entering the same fixture again required a fresh warning                                                                           |
+| Attachment warning cancellation | Attachment-only warning showed fixed copy and the accessible bypass; Cancel retained the attachment and did not submit                                                   |
+| Attachment warning bypass       | **Send attachment without inspection** submitted once; a later attachment attempt produced a new warning                                                                 |
+| Attachment block                | Fixed unsupported-inspection block appeared with Close only; no message was created                                                                                      |
+| Attachment allow                | Submitted without any protection dialog; no allow decision appeared in audit                                                                                             |
+| Combined warning                | Email category, masked placeholder, and attachment limitation appeared with one generic **Send anyway** action; the resulting audit resolution was `attachment_bypassed` |
+| Strict text plus attachment     | Payment-card block remained stricter, showed the attachment limitation, and exposed Close only                                                                           |
+| Settings copy                   | All three attachment labels, permanent inspection-limit copy, and the additional allow caution were visible; the caution disappeared after restoring `warn`              |
+| Audit privacy                   | Raw fixtures, uploaded-file name, local path, prompt text, and page metadata were absent; attachment events showed no finding count or masked excerpt                    |
+| Cleanup                         | Unsent attachments used by completed probes were removed from the active composer; submitted tests remained in dedicated test conversations                              |
+
+The audit page rendered attachment-only cancellation, bypass, and block events
+with the fixed inspection-limit description. It also rendered combined
+attachment decisions without exposing detector counts or masked data. No `allow`
+decision was persisted.
 
 The table above records only checks actually performed in the authenticated
-session. Interactive checklist items not represented in the table were not run,
-and this document makes no live-pass claim for them.
+session. Other interactive checklist items remain covered by the automated
+production-build tests unless separately recorded as live evidence.
 
 ## Failure reporting
 
 Capture only:
 
 - browser and extension version;
+- reviewed commit, CI run, and canonical digest;
 - popup state;
-- fixed error/health code;
+- fixed error or health code;
 - fixture identifier;
-- DOM variant description without composer contents;
-- reproduction steps that contain no user-authored prompt excerpt.
+- structural DOM variant without composer or attachment contents;
+- reproduction steps containing no user-authored prompt excerpt.
 
-Do not attach storage dumps, page HTML containing prompt text, console logs with
-composer values, screenshots exposing fixture values, or copied prompt content.
+Do not attach storage dumps, page HTML, console logs with composer values,
+screenshots exposing fixture values or uploaded-file names, or copied prompt
+content.

@@ -20,7 +20,7 @@ export function derivePolicy(value: unknown): PolicyConfiguration {
 
   const settings = cloneProtectionSettings(value);
   return validatePolicyConfiguration({
-    schemaVersion: 1,
+    schemaVersion: 2,
     categoryActions: {
       email: settings.emailAction,
       phone: settings.phoneAction,
@@ -33,5 +33,6 @@ export function derivePolicy(value: unknown): PolicyConfiguration {
       high: "block",
       medium: "warn",
     },
+    attachmentAction: settings.attachmentAction,
   });
 }

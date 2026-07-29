@@ -1,8 +1,8 @@
-# AI DLP for ChatGPT
+# PromptGuard — AI DLP for ChatGPT
 
-AI DLP is a privacy-first Chromium Manifest V3 extension that inspects ChatGPT
-prompts locally before submission. Milestone 1 supports `https://chatgpt.com/*`
-only and never sends prompt content to a backend.
+PromptGuard is a privacy-first Chromium Manifest V3 extension that inspects
+ChatGPT prompts locally before submission. Milestone 1 supports
+`https://chatgpt.com/*` only and never sends prompt content to a backend.
 
 It detects email addresses, phone numbers, payment cards, AWS access key IDs,
 PEM private keys, contextual API secrets, and locally configured protected
@@ -16,13 +16,17 @@ never replaces a ChatGPT composer automatically.
 - The ChatGPT adapter reads the active composer only for the synchronous
   operation being performed; it does not cache prompt content.
 - React receives category, confidence, and placeholder metadata only.
+- Dialogs and audit records retain only the categories and rules that
+  contributed to the enforced action; lower-precedence or allowed matches are
+  omitted.
 - Runtime messages, the service worker, storage, audit records, and logs are
   prompt-free.
 - Ordinary clean `allow` decisions are not stored.
 - Prompts over 100,000 UTF-16 code units are stopped with content-free guidance
   and no bypass.
-- Composer-scoped attachments are detected but never inspected; while protection
-  is enabled, their submission is stopped with no bypass.
+- Composer-scoped attachments are detected but never inspected. Their policy is
+  configurable as block, warn with a one-shot bypass, or allow; the safe default
+  is warn.
 - Automatic ChatGPT replacement is unsupported for every current editor,
   including native textareas and ProseMirror/contenteditable. A legacy or
   internal redact decision fails closed without changing or submitting content.
@@ -53,16 +57,21 @@ pnpm test:e2e
 pnpm test:performance
 pnpm build
 pnpm verify:artifact
+pnpm artifact:digest
 ```
 
 `pnpm test:browser` uses Playwright's bundled Chromium, loads the production
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
+`pnpm build` clears the prior extension output first, creates a clean artifact,
+and verifies that output. `pnpm verify:artifact` does not build: it verifies the
+existing `apps/extension/dist` as-is and rejects missing, non-local,
+source-mapped, or unallowlisted unreachable output. `pnpm artifact:digest`
+repeats that reachability check before it hashes the canonical artifact.
 
-The latest remediation run on 2026-07-26 passed 680 unit/DOM tests, 7 Chromium
-integration tests, and 4 performance scenarios. The production build contained
-12 files; 43 URL literals were classified with zero fetching and zero unreviewed
-URLs.
+The reviewed remediation verification on 2026-07-29 produced a 12-file,
+manifest-reachable build with no source maps or required local-asset allowlist
+entries.
 
 ## Load the unpacked extension
 
@@ -80,25 +89,52 @@ interval active.
 
 ## Settings and audit
 
-The options page exposes protection enablement, email and phone actions,
-protected keywords, and a local audit-retention limit from 1 to 1,000 events.
-The settings UI does not offer automatic `redact`. Persisted V1 settings accept
-only `allow`, `warn`, or `block`; legacy V1 email/phone `redact` values migrate
-to `warn` at the storage boundary before broadcast. Payment cards, AWS access
-keys, and private keys always block; protected keywords warn; high-confidence
-API secrets block and medium-confidence API secrets warn.
+The options page exposes protection enablement, email, phone, and attachment
+actions, protected keywords, and a local audit-retention limit from 1 to 1,000
+events. The settings UI does not offer automatic `redact`. Persisted settings
+use a V2 envelope. Strictly valid V1 settings migrate once, preserving choices,
+normalizing legacy email/phone `redact` to `warn`, and adding the default
+attachment action `warn`. Invalid attachment actions fall back to `warn`, never
+`allow`. Payment cards, AWS access keys, and private keys always block;
+protected keywords warn; high-confidence API secrets block and medium-confidence
+API secrets warn.
 
-The audit page stores only privacy-safe decision metadata and enforcement or
-adapter-health errors. Clearing the audit log requires explicit confirmation.
+The audit page stores only privacy-safe contributor metadata and enforcement or
+adapter-health errors in a V3 envelope; newly emitted events use ChatGPT adapter
+event version 3. A warning gets `attachment_bypassed` only when the attachment
+rule contributed to the final action; an allowed attachment alongside a text
+warning remains the ordinary `bypassed` case. Valid legacy V1/V2 audit records
+are migrated conservatively to V3 once, while ambiguous legacy decisions are
+discarded rather than relabeled. Clearing the audit log requires explicit
+confirmation.
+
+CI publishes a reachability-verified extension, its canonical digest, and a
+`git archive` source tarball for the same reviewed commit. Authenticated QA uses
+that three-artifact set, not a later local build.
 
 ## Scope
 
-Milestone 1 detects and blocks composer attachments but does not inspect their
-contents. It does not inspect other websites, ChatGPT desktop or mobile
-applications, network traffic, or content submitted before settings
+Milestone 1 detects composer attachments but does not inspect their contents.
+The configured attachment action controls whether submission blocks, warns, or
+proceeds without a dialog. It does not inspect other websites, ChatGPT desktop
+or mobile applications, network traffic, or content submitted before settings
 initialization. Enterprise policy, forced installation, central audit export,
 and tamper resistance are future work; see
 [managed deployment](docs/managed-deployment.md).
+
+PromptGuard's documented future direction is **Universal AI Interaction DLP and
+Governance**. Future application visibility means coarse awareness of an
+approved AI surface; it is not content monitoring. Future audit metadata remains
+an allowlisted, prompt-free record of decisions and system state. Quarantine
+would be a separate, explicitly approved mode and is not part of Milestone 1 or
+the current roadmap commitments.
+
+See the [roadmap](docs/roadmap.md),
+[product vision](docs/architecture/product-vision.md), and
+[multi-surface architecture](docs/architecture/multi-surface-architecture.md).
+These documents define approval gates and proposed contracts; they do not
+implement additional adapters, endpoint components, management services, or
+dashboards.
 
 ## Development guides
 

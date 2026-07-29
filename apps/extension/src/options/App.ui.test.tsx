@@ -11,6 +11,7 @@ const settings = {
   protectionEnabled: true,
   emailAction: "warn" as const,
   phoneAction: "warn" as const,
+  attachmentAction: "warn" as const,
   protectedKeywords: ["internal"],
   auditRetentionLimit: 100,
 };
@@ -42,13 +43,13 @@ describe("options App", () => {
       .fn()
       .mockResolvedValueOnce({
         type: "settings.result",
-        envelope: { schemaVersion: 1, settings },
+        envelope: { schemaVersion: 2, settings },
       })
       .mockImplementation(async (request: unknown) => {
         const candidate = request as { settings: typeof settings };
         return {
           type: "settings.saved",
-          envelope: { schemaVersion: 1, settings: candidate.settings },
+          envelope: { schemaVersion: 2, settings: candidate.settings },
         };
       });
     const runtime: ExtensionPageRuntime = { sendMessage };
@@ -64,6 +65,15 @@ describe("options App", () => {
     ).toBe(false);
     await user.selectOptions(screen.getByLabelText("Email action"), "allow");
     await user.selectOptions(screen.getByLabelText("Phone action"), "block");
+    await user.selectOptions(
+      screen.getByLabelText("Attachment handling"),
+      "allow",
+    );
+    expect(
+      screen.getByText(
+        "Files may contain sensitive information that the extension cannot detect.",
+      ),
+    ).not.toBeNull();
     await user.clear(screen.getByLabelText("Protected keywords"));
     await user.type(
       screen.getByLabelText("Protected keywords"),
@@ -79,6 +89,7 @@ describe("options App", () => {
         protectionEnabled: true,
         emailAction: "allow",
         phoneAction: "block",
+        attachmentAction: "allow",
         protectedKeywords: ["Internal only", "customer data"],
         auditRetentionLimit: 25,
       },
@@ -92,7 +103,7 @@ describe("options App", () => {
       .fn()
       .mockResolvedValueOnce({
         type: "settings.result",
-        envelope: { schemaVersion: 1, settings },
+        envelope: { schemaVersion: 2, settings },
       })
       .mockResolvedValueOnce({
         type: "error",

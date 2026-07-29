@@ -32,6 +32,7 @@ export function validatePolicyConfiguration(
 ): PolicyConfiguration {
   const candidate = {
     application: "chatgpt",
+    attachmentPresent: false,
     findings: [],
     policy: value,
   };

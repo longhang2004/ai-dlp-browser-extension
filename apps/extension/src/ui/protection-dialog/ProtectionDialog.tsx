@@ -130,12 +130,22 @@ export function ProtectionDialog({
   }
 
   const isWarning = request.kind === "warn";
-  const title = isWarning
-    ? "Review protected information"
-    : "Submission blocked";
-  const description = isWarning
-    ? "Protected information was detected. Review the categories before continuing."
-    : "Your protection policy does not allow this information to be submitted.";
+  const attachmentOnly =
+    request.attachmentPresent && request.findings.length === 0;
+  const title = attachmentOnly
+    ? isWarning
+      ? "Unscanned attachment"
+      : "Submission blocked"
+    : isWarning
+      ? "Review protected information"
+      : "Submission blocked";
+  const description = attachmentOnly
+    ? isWarning
+      ? "Attached file contents are not inspected in this version."
+      : "Attached file contents cannot be inspected. Remove the attachment or change your attachment setting before sending."
+    : isWarning
+      ? "Protected information was detected. Review the categories before continuing."
+      : "Your protection policy does not allow this information to be submitted.";
 
   return (
     <div className="ai-dlp-dialog-backdrop">
@@ -150,19 +160,26 @@ export function ProtectionDialog({
       >
         <h2 id={titleId}>{title}</h2>
         <p id={descriptionId}>{description}</p>
-        <ul aria-label="Detected categories">
-          {request.findings.map((finding) => (
-            <li key={finding.category}>
-              <span>{CATEGORY_LABELS[finding.category]}</span>
-              <span className="ai-dlp-dialog-confidence">
-                {finding.confidence} confidence
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="ai-dlp-dialog-preview" aria-label="Masked preview">
-          {request.maskedPreview}
-        </p>
+        {request.findings.length > 0 ? (
+          <ul aria-label="Detected categories">
+            {request.findings.map((finding) => (
+              <li key={finding.category}>
+                <span>{CATEGORY_LABELS[finding.category]}</span>
+                <span className="ai-dlp-dialog-confidence">
+                  {finding.confidence} confidence
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {request.maskedPreview === undefined ? null : (
+          <p className="ai-dlp-dialog-preview" aria-label="Masked preview">
+            {request.maskedPreview}
+          </p>
+        )}
+        {request.attachmentPresent && !attachmentOnly ? (
+          <p>Attached file contents are not inspected in this version.</p>
+        ) : null}
         <div className="ai-dlp-dialog-actions">
           <button
             type="button"
@@ -177,8 +194,16 @@ export function ProtectionDialog({
             </button>
           ) : null}
           {isWarning ? (
-            <button type="button" onClick={() => onIntent("bypass")}>
-              Send anyway
+            <button
+              type="button"
+              aria-label={
+                attachmentOnly
+                  ? "Send attachment without inspection"
+                  : undefined
+              }
+              onClick={() => onIntent("bypass")}
+            >
+              {attachmentOnly ? "Send unscanned attachment" : "Send anyway"}
             </button>
           ) : null}
         </div>

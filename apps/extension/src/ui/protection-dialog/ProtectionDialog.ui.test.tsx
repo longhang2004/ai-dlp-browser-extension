@@ -22,6 +22,7 @@ function createWarning(canRedact = true): ProtectionDialogModel {
       createDisplayFinding("protected_keyword", "medium"),
     ],
     reasonCode: "policy_match",
+    attachmentPresent: false,
     canRedact,
   });
 }
@@ -69,6 +70,7 @@ describe("ProtectionDialog", () => {
       kind: "block",
       findings: [createDisplayFinding("payment_card", "high")],
       reasonCode: "policy_match",
+      attachmentPresent: false,
       canRedact: false,
     });
     const { rerender } = render(
@@ -115,6 +117,78 @@ describe("ProtectionDialog", () => {
     expect(screen.queryByRole("button", { name: "Send anyway" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Redact and continue" }),
+    ).toBeNull();
+  });
+
+  it("renders attachment-only warn and block actions with fixed accessible copy", async () => {
+    const user = userEvent.setup();
+    const onIntent = vi.fn();
+    const warning = createProtectionDialogModel({
+      kind: "warn",
+      findings: [],
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      canRedact: false,
+    });
+    const { rerender } = render(
+      <ProtectionDialog request={warning} onIntent={onIntent} />,
+    );
+
+    expect(
+      screen.getByRole("dialog", { name: "Unscanned attachment" }),
+    ).not.toBeNull();
+    expect(
+      screen.getByText(
+        "Attached file contents are not inspected in this version.",
+      ),
+    ).not.toBeNull();
+    const send = screen.getByRole("button", {
+      name: "Send attachment without inspection",
+    });
+    expect(send.textContent).toBe("Send unscanned attachment");
+    expect(
+      screen.queryByRole("button", { name: "Redact and continue" }),
+    ).toBeNull();
+    await user.click(send);
+    expect(onIntent).toHaveBeenCalledWith("bypass");
+
+    const blocked = createProtectionDialogModel({
+      kind: "block",
+      findings: [],
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      canRedact: false,
+    });
+    rerender(<ProtectionDialog request={blocked} onIntent={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Close" })).not.toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "Send attachment without inspection",
+      }),
+    ).toBeNull();
+  });
+
+  it("renders combined warnings with categories, attachment limitation, and one generic bypass", () => {
+    const combined = createProtectionDialogModel({
+      kind: "warn",
+      findings: [createDisplayFinding("email", "high")],
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      canRedact: false,
+    });
+    render(<ProtectionDialog request={combined} onIntent={vi.fn()} />);
+
+    expect(screen.getByText("Email address")).not.toBeNull();
+    expect(
+      screen.getByText(
+        "Attached file contents are not inspected in this version.",
+      ),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Send anyway" })).not.toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "Send attachment without inspection",
+      }),
     ).toBeNull();
   });
 });

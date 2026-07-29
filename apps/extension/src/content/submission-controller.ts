@@ -6,6 +6,7 @@ import {
 import { evaluatePolicy } from "@ai-dlp/policy-engine";
 import {
   CHATGPT_ADAPTER_VERSION,
+  cloneProtectionSettings,
   createAuditEventId,
   createAuditTimestamp,
   type AuditEvent,
@@ -25,6 +26,7 @@ import {
 import type {
   CapturedSubmitAttempt,
   ChatApplicationAdapter,
+  AttachmentStateFingerprint,
   LiveSubmissionContext,
   PromptReplacementCapability,
   SubmitInterceptionDisposition,
@@ -39,9 +41,9 @@ import {
 } from "./authorization.js";
 import {
   createSubmissionDialogModel,
-  toDetectorCategories,
   toPolicyFindings,
 } from "./display-model.js";
+import type { EnforcementRevision } from "./enforcement-settings.js";
 
 export { MAX_PROMPT_CODE_UNITS };
 
@@ -72,11 +74,14 @@ export type SubmissionControllerOptions = {
   wallClockNow?: () => Date;
   eventId?: () => string;
   isProtectionEnabled?: () => boolean;
+  currentRevision: () => EnforcementRevision;
 };
 
 type ActiveAttempt = {
   attempt: CapturedSubmitAttempt;
   generation: number;
+  revision: EnforcementRevision;
+  settings: ReadonlyProtectionSettings;
   promptSnapshot: string | null;
   authorization: SubmissionAuthorization | null;
   cancelled: boolean;
@@ -86,6 +91,8 @@ type ActiveAttempt = {
   findings: SensitiveDataFinding[];
   eventEmitted: boolean;
   replacementCapability: PromptReplacementCapability;
+  attachmentPresent: boolean;
+  attachmentStateFingerprint: AttachmentStateFingerprint | null;
 };
 
 type SanitizedDecisionMetadata = {
@@ -93,6 +100,8 @@ type SanitizedDecisionMetadata = {
   detectorCategories: PromptFreeArray<SensitiveDataCategory>;
   matchedRuleIds: PromptFreeArray<string>;
   findingCount: number;
+  reasonCode: PolicyDecision["reasonCode"];
+  attachmentPresent: boolean;
   maskedExcerpt?: MaskedPreview;
 };
 
@@ -147,6 +156,8 @@ function capturePromptSynchronously(
       kind: "ready";
       prompt: string;
       replacementCapability: PromptReplacementCapability;
+      attachmentPresent: boolean;
+      attachmentStateFingerprint: AttachmentStateFingerprint;
     }
   | { kind: "error"; errorCode: EnforcementErrorCode } {
   try {
@@ -164,15 +175,13 @@ function capturePromptSynchronously(
         errorCode: "extension_context_invalidated",
       };
     }
-    if (
-      adapter.inspectSubmissionCapabilities(context).hasUnsupportedAttachment
-    ) {
-      return { kind: "error", errorCode: "unsupported_attachment" };
-    }
+    const capabilities = adapter.inspectSubmissionCapabilities(context);
     return {
       kind: "ready",
       prompt: adapter.readPrompt(context),
       replacementCapability: adapter.getPromptReplacementCapability(context),
+      attachmentPresent: capabilities.attachmentPresent,
+      attachmentStateFingerprint: capabilities.attachmentStateFingerprint,
     };
   } catch {
     return { kind: "error", errorCode: "extension_context_invalidated" };
@@ -190,6 +199,7 @@ export function createSubmissionController(
   const eventId = options.eventId ?? defaultEventId;
   const isProtectionEnabled =
     options.isProtectionEnabled ?? (() => options.settings().protectionEnabled);
+  const currentRevision = options.currentRevision;
   let state: SubmissionControllerState = "idle";
   let active: ActiveAttempt | null = null;
   let generation = 0;
@@ -198,17 +208,37 @@ export function createSubmissionController(
   let pending: Promise<void> = Promise.resolve();
 
   function isCurrent(attempt: ActiveAttempt): boolean {
+    let revisionIsCurrent: boolean;
+    try {
+      revisionIsCurrent = currentRevision() === attempt.revision;
+    } catch {
+      revisionIsCurrent = false;
+    }
     return (
       active === attempt &&
       attempt.generation === generation &&
+      revisionIsCurrent &&
       !attempt.cancelled &&
       !disposed
     );
   }
 
+  function snapshotSettings(
+    settings: ReadonlyProtectionSettings,
+  ): ReadonlyProtectionSettings {
+    const snapshot = cloneProtectionSettings(settings);
+    return Object.freeze({
+      ...snapshot,
+      protectedKeywords: Object.freeze([
+        ...snapshot.protectedKeywords,
+      ]) as ReadonlyProtectionSettings["protectedKeywords"],
+    }) as ReadonlyProtectionSettings;
+  }
+
   function releaseSensitiveState(attempt: ActiveAttempt): void {
     attempt.promptSnapshot = null;
     attempt.findings = [];
+    attempt.attachmentStateFingerprint = null;
     invalidateSubmissionAuthorization(attempt.authorization);
     attempt.authorization = null;
   }
@@ -243,9 +273,11 @@ export function createSubmissionController(
     }
     attempt.decisionMetadata = {
       policyAction: decision.action,
-      detectorCategories: toDetectorCategories(attempt.findings),
+      detectorCategories: [...decision.contributingCategories],
       matchedRuleIds: [...decision.matchedRuleIds],
       findingCount: attempt.findings.length,
+      reasonCode: decision.reasonCode,
+      attachmentPresent: decision.attachmentPresent,
       ...(maskedExcerpt === undefined ? {} : { maskedExcerpt }),
     };
   }
@@ -282,6 +314,8 @@ export function createSubmissionController(
       detectorCategories: [...metadata.detectorCategories],
       matchedRuleIds: [...metadata.matchedRuleIds],
       findingCount: metadata.findingCount,
+      reasonCode: metadata.reasonCode,
+      attachmentPresent: metadata.attachmentPresent,
       ...(metadata.maskedExcerpt === undefined
         ? {}
         : { maskedExcerpt: metadata.maskedExcerpt }),
@@ -365,11 +399,17 @@ export function createSubmissionController(
           errorCode: "extension_context_invalidated",
         };
       }
+      const capabilities =
+        options.adapter.inspectSubmissionCapabilities(context);
       if (
-        options.adapter.inspectSubmissionCapabilities(context)
-          .hasUnsupportedAttachment
+        capabilities.attachmentPresent !== attempt.attachmentPresent ||
+        capabilities.attachmentStateFingerprint !==
+          attempt.attachmentStateFingerprint
       ) {
-        return { kind: "error", errorCode: "unsupported_attachment" };
+        return {
+          kind: "error",
+          errorCode: "extension_context_invalidated",
+        };
       }
     } catch {
       return { kind: "error", errorCode: "extension_context_invalidated" };
@@ -437,6 +477,9 @@ export function createSubmissionController(
     }
 
     try {
+      if (!isCurrent(attempt)) {
+        return { kind: "authorization_invalid" };
+      }
       options.adapter.resumeSubmission(resumeContext, consumed);
     } catch {
       return { kind: "error", errorCode: "resume_failure" };
@@ -474,6 +517,10 @@ export function createSubmissionController(
   }
 
   async function processAttempt(attempt: ActiveAttempt): Promise<void> {
+    if (!isCurrent(attempt)) {
+      finish(attempt, "cancelled");
+      return;
+    }
     const capture = capturePromptSynchronously(
       options.adapter,
       attempt.attempt,
@@ -484,6 +531,8 @@ export function createSubmissionController(
     }
     attempt.promptSnapshot = capture.prompt;
     attempt.replacementCapability = capture.replacementCapability;
+    attempt.attachmentPresent = capture.attachmentPresent;
+    attempt.attachmentStateFingerprint = capture.attachmentStateFingerprint;
 
     if (!isCurrent(attempt) || attempt.promptSnapshot === null) {
       finish(attempt, "cancelled");
@@ -496,7 +545,7 @@ export function createSubmissionController(
 
     try {
       attempt.findings = analyze(attempt.promptSnapshot, {
-        protectedKeywords: options.settings().protectedKeywords,
+        protectedKeywords: attempt.settings.protectedKeywords,
       });
     } catch {
       await showError(attempt, "detector_failure");
@@ -510,8 +559,9 @@ export function createSubmissionController(
     try {
       attempt.decision = evaluate({
         application: "chatgpt",
+        attachmentPresent: attempt.attachmentPresent,
         findings: toPolicyFindings(attempt.findings),
-        policy: derivePolicy(options.settings()),
+        policy: derivePolicy(attempt.settings),
       });
     } catch {
       await showError(attempt, "policy_failure");
@@ -519,6 +569,9 @@ export function createSubmissionController(
     }
 
     const decision = attempt.decision;
+    attempt.findings = attempt.findings.filter((finding) =>
+      decision.contributingCategories.includes(finding.category),
+    );
     prepareDecisionMetadata(attempt);
     if (
       decision.action === "redact" &&
@@ -542,10 +595,16 @@ export function createSubmissionController(
         await resumeApproved(attempt, "redacted", "redacted");
         return;
       case "block": {
+        if (!isCurrent(attempt)) {
+          finish(attempt, "cancelled");
+          return;
+        }
         const model = createSubmissionDialogModel(
           "block",
           decision,
           attempt.findings,
+          false,
+          attempt.attachmentPresent,
         );
         prepareDecisionMetadata(attempt, model.maskedPreview);
         state = "dialog";
@@ -563,11 +622,16 @@ export function createSubmissionController(
         return;
       }
       case "warn": {
+        if (!isCurrent(attempt)) {
+          finish(attempt, "cancelled");
+          return;
+        }
         const model = createSubmissionDialogModel(
           "warn",
           decision,
           attempt.findings,
           attempt.replacementCapability === "supported",
+          attempt.attachmentPresent,
         );
         prepareDecisionMetadata(attempt, model.maskedPreview);
         state = "dialog";
@@ -594,7 +658,13 @@ export function createSubmissionController(
           await finalizeDecision(attempt, "cancelled");
           return;
         }
-        await resumeApproved(attempt, "unchanged", "bypassed");
+        await resumeApproved(
+          attempt,
+          "unchanged",
+          decision.reasonCode === "unsupported_attachment"
+            ? "attachment_bypassed"
+            : "bypassed",
+        );
       }
     }
   }
@@ -608,6 +678,14 @@ export function createSubmissionController(
     if (active !== null) {
       return "intercept";
     }
+    let revision: EnforcementRevision;
+    let settings: ReadonlyProtectionSettings;
+    try {
+      revision = currentRevision();
+      settings = snapshotSettings(options.settings());
+    } catch {
+      return "intercept";
+    }
     generation += 1;
     const attempt: ActiveAttempt = {
       attempt: {
@@ -617,6 +695,8 @@ export function createSubmissionController(
         initialContextVersion: captured.initialContextVersion,
       },
       generation,
+      revision,
+      settings,
       promptSnapshot: null,
       authorization: null,
       cancelled: false,
@@ -626,6 +706,8 @@ export function createSubmissionController(
       findings: [],
       eventEmitted: false,
       replacementCapability: "unsupported",
+      attachmentPresent: false,
+      attachmentStateFingerprint: null,
     };
     active = attempt;
     state = "evaluating";

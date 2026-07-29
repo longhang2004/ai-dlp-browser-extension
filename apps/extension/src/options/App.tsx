@@ -17,6 +17,7 @@ type FormState = {
   protectionEnabled: boolean;
   emailAction: ConfigurableProtectionAction;
   phoneAction: ConfigurableProtectionAction;
+  attachmentAction: ConfigurableProtectionAction;
   protectedKeywords: string;
   auditRetentionLimit: string;
 };
@@ -26,6 +27,7 @@ const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
   protectionEnabled: "Protection state is invalid.",
   emailAction: "Email action is invalid.",
   phoneAction: "Phone action is invalid.",
+  attachmentAction: "Attachment action is invalid.",
   protectedKeywords: "Protected keywords are invalid.",
   auditRetentionLimit: "Audit retention limit is invalid.",
 };
@@ -35,6 +37,7 @@ function toFormState(settings: ProtectionSettings): FormState {
     protectionEnabled: settings.protectionEnabled,
     emailAction: settings.emailAction,
     phoneAction: settings.phoneAction,
+    attachmentAction: settings.attachmentAction,
     protectedKeywords: settings.protectedKeywords.join("\n"),
     auditRetentionLimit: String(settings.auditRetentionLimit),
   };
@@ -54,6 +57,7 @@ function createSettings(form: FormState): ProtectionSettings | undefined {
     protectionEnabled: form.protectionEnabled,
     emailAction: form.emailAction,
     phoneAction: form.phoneAction,
+    attachmentAction: form.attachmentAction,
     protectedKeywords,
     auditRetentionLimit,
   };
@@ -191,6 +195,35 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
                 ))}
               </select>
             </label>
+            <div className="field">
+              <label htmlFor="attachment-action">Attachment handling</label>
+              <select
+                id="attachment-action"
+                value={form.attachmentAction}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    attachmentAction: event.target
+                      .value as ConfigurableProtectionAction,
+                  })
+                }
+              >
+                <option value="warn">
+                  Warn and allow one-time bypass — Recommended
+                </option>
+                <option value="block">Block all attachments</option>
+                <option value="allow">Allow attachments without warning</option>
+              </select>
+              <small>
+                Attached file contents are not inspected in this version.
+              </small>
+              {form.attachmentAction === "allow" ? (
+                <small role="note">
+                  Files may contain sensitive information that the extension
+                  cannot detect.
+                </small>
+              ) : null}
+            </div>
             <div className="full-span field">
               <label htmlFor="protected-keywords">Protected keywords</label>
               <textarea

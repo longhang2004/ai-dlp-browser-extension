@@ -22,7 +22,7 @@ function port(overrides: Partial<RuntimePortLike> = {}): RuntimePortLike & {
   const capturedDisconnectListeners: Array<() => void> = [];
   const capturedMessageListeners: Array<(message: unknown) => void> = [];
   return {
-    name: "settings-v1",
+    name: "settings-v2",
     sender: {
       id: runtimeId,
       url: "https://chatgpt.com/c/abc",
@@ -118,7 +118,7 @@ describe("settings ports", () => {
       expect(connected.postMessage).toHaveBeenCalledWith({
         type: "settings.snapshot",
         generation: 0,
-        envelope: expect.objectContaining({ schemaVersion: 1 }),
+        envelope: expect.objectContaining({ schemaVersion: 2 }),
       });
     });
   });
@@ -152,11 +152,12 @@ describe("settings ports", () => {
       type: "settings.snapshot",
       generation: 0,
       envelope: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         settings: {
           protectionEnabled: true,
           emailAction: "warn",
           phoneAction: "warn",
+          attachmentAction: "warn",
           protectedKeywords: [],
           auditRetentionLimit: 100,
         },

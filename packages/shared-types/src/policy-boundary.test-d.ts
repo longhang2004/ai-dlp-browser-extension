@@ -110,7 +110,7 @@ export type PromptFreeVocabularyIsComplete = Assert<
 >;
 
 const policy: PolicyConfiguration = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   categoryActions: {
     email: "warn",
     phone: "warn",
@@ -123,6 +123,7 @@ const policy: PolicyConfiguration = {
     high: "block",
     medium: "warn",
   },
+  attachmentAction: "warn",
 };
 
 const finding = {
@@ -145,6 +146,7 @@ void rejectedMismatchedDetectorCategoryFinding;
 
 const input = {
   application: "chatgpt",
+  attachmentPresent: false,
   findings: [finding],
   policy,
 } satisfies PolicyInput;
@@ -163,7 +165,9 @@ const rejectedInputWithAugmentedFindings: PolicyInput =
 const decision = {
   action: "warn",
   matchedRuleIds: ["warn.email"],
+  contributingCategories: ["email"],
   reasonCode: "policy_match",
+  attachmentPresent: false,
 } satisfies PolicyDecision;
 
 const augmentedPolicyRules = Object.assign(["warn.email"], {
@@ -179,8 +183,10 @@ const rejectedDecisionWithAugmentedRules: PolicyDecision =
 
 const openStringDecisionContract = {
   action: "warn",
-  matchedRuleIds: ["phase3.owns-rule-vocabulary"],
-  reasonCode: "phase3_owns_reason_vocabulary",
+  matchedRuleIds: ["attachment.unsupported"],
+  contributingCategories: [],
+  reasonCode: "unsupported_attachment",
+  attachmentPresent: true,
 } satisfies PolicyDecision;
 
 type PolicyThreatField = RequiredPromptFreeVocabulary;
@@ -255,6 +261,7 @@ const dialog = createProtectionDialogModel({
   kind: "warn",
   findings: [displayEmailFinding],
   reasonCode: "policy_match",
+  attachmentPresent: false,
   canRedact: true,
 });
 
@@ -693,6 +700,8 @@ const boundaryDecisionAudit = {
   detectorCategories: ["email" as const],
   matchedRuleIds: ["warn.email"],
   findingCount: 1,
+  reasonCode: "policy_match",
+  attachmentPresent: false,
 } satisfies DecisionAuditEvent;
 
 const auditWithAugmentedCategories = {

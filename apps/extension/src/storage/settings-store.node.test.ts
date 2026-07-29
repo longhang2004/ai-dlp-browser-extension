@@ -6,13 +6,52 @@ import { createMemoryStoragePort } from "./storage-port.js";
 import { SETTINGS_STORAGE_KEY, createSettingsStore } from "./settings-store.js";
 
 describe("settings store", () => {
+  const validV1Settings = {
+    protectionEnabled: false,
+    emailAction: "allow",
+    phoneAction: "block",
+    protectedKeywords: ["Project Atlas"],
+    auditRetentionLimit: 250,
+  } as const;
+
+  it("strictly migrates valid v1 settings to v2, preserves choices, defaults attachments to warn, and persists once", async () => {
+    const durable = createMemoryStoragePort({
+      [SETTINGS_STORAGE_KEY]: {
+        schemaVersion: 1,
+        settings: validV1Settings,
+      },
+    });
+    const write = vi.fn((key: string, value: unknown) =>
+      durable.write(key, value),
+    );
+    const store = createSettingsStore({
+      read: (key) => durable.read(key),
+      write,
+    });
+
+    await expect(store.read()).resolves.toEqual({
+      schemaVersion: 2,
+      settings: {
+        ...validV1Settings,
+        protectedKeywords: ["Project Atlas"],
+        attachmentAction: "warn",
+      },
+    });
+    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 2 });
+    expect(write).toHaveBeenCalledOnce();
+  });
+
   it.each(["email", "phone", "both"] as const)(
     "migrates legacy %s redact settings to warn and persists once",
     async (field) => {
       const legacy = {
         schemaVersion: 1,
         settings: {
-          ...createDefaultProtectionSettings(),
+          protectionEnabled: true,
+          emailAction: "warn",
+          phoneAction: "warn",
+          protectedKeywords: [],
+          auditRetentionLimit: 100,
           ...(field === "email" || field === "both"
             ? { emailAction: "redact" }
             : {}),
@@ -40,7 +79,7 @@ describe("settings store", () => {
       expect(second).toEqual(first);
       expect(write).toHaveBeenCalledOnce();
       expect(write).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, {
-        schemaVersion: 1,
+        schemaVersion: 2,
         settings: {
           ...createDefaultProtectionSettings(),
           emailAction: "warn",
@@ -91,11 +130,18 @@ describe("settings store", () => {
     expect(reads).toBe(1);
   });
 
-  it("falls back to independent safe defaults for missing, corrupt, and unsupported envelopes", async () => {
+  it("falls back to independent safe defaults for missing, corrupt, unsupported, and invalid-v2 envelopes", async () => {
     for (const stored of [
       undefined,
       "corrupt",
-      { schemaVersion: 2, settings: createDefaultProtectionSettings() },
+      { schemaVersion: 3, settings: createDefaultProtectionSettings() },
+      {
+        schemaVersion: 2,
+        settings: {
+          ...createDefaultProtectionSettings(),
+          attachmentAction: "unsafe",
+        },
+      },
       {
         schemaVersion: 1,
         settings: {
@@ -115,10 +161,26 @@ describe("settings store", () => {
       first.settings.protectedKeywords.push("mutated");
 
       expect(await store.read()).toEqual({
-        schemaVersion: 1,
+        schemaVersion: 2,
         settings: createDefaultProtectionSettings(),
       });
     }
+  });
+
+  it("rejects invalid attachment actions instead of ever persisting allow as a fallback", async () => {
+    const storage = createMemoryStoragePort();
+    const store = createSettingsStore(storage);
+
+    await expect(
+      store.save({
+        ...createDefaultProtectionSettings(),
+        attachmentAction: "unsafe",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      fieldErrors: [{ field: "attachmentAction", code: "invalid_action" }],
+    });
+    await expect(storage.read(SETTINGS_STORAGE_KEY)).resolves.toBeUndefined();
   });
 
   it("normalizes, validates, persists, and clones complete settings", async () => {
@@ -128,6 +190,7 @@ describe("settings store", () => {
       protectionEnabled: true,
       emailAction: "warn",
       phoneAction: "block",
+      attachmentAction: "allow",
       protectedKeywords: ["  Nội bộ  ", "Project Atlas"],
       auditRetentionLimit: 1_000,
     });
@@ -135,11 +198,12 @@ describe("settings store", () => {
     expect(result).toEqual({
       ok: true,
       envelope: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         settings: {
           protectionEnabled: true,
           emailAction: "warn",
           phoneAction: "block",
+          attachmentAction: "allow",
           protectedKeywords: ["Nội bộ", "Project Atlas"],
           auditRetentionLimit: 1_000,
         },
@@ -261,7 +325,7 @@ describe("settings store", () => {
     });
 
     await expect(store.read()).rejects.toThrow("fixed read failure");
-    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 1 });
+    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 2 });
     await expect(store.save(createDefaultProtectionSettings())).rejects.toThrow(
       "fixed write failure",
     );

@@ -90,6 +90,7 @@ describe("background bootstrap", () => {
             protectionEnabled: false,
             emailAction: "warn",
             phoneAction: "warn",
+            attachmentAction: "warn",
             protectedKeywords: [],
             auditRetentionLimit: 100,
           },
@@ -190,7 +191,7 @@ describe("background bootstrap", () => {
 
     expect(response).toMatchObject({
       type: "audit.result",
-      envelope: { schemaVersion: 1, events: [event] },
+      envelope: { schemaVersion: 3, events: [event] },
     });
   });
 
@@ -222,7 +223,7 @@ describe("background bootstrap", () => {
     const portMessages = new Set<(message: unknown) => void>();
     const disconnects = new Set<() => void>();
     const port: RuntimePortLike = {
-      name: "settings-v1",
+      name: "settings-v2",
       sender: {
         id: runtimeId,
         url: "https://chatgpt.com/c/abc",

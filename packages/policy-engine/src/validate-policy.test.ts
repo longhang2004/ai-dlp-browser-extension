@@ -12,7 +12,7 @@ import {
 } from "./validate-policy.js";
 
 const validPolicy: PolicyConfiguration = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   categoryActions: {
     email: "warn",
     phone: "warn",
@@ -25,6 +25,7 @@ const validPolicy: PolicyConfiguration = {
     high: "block",
     medium: "warn",
   },
+  attachmentAction: "warn",
 };
 
 const validFinding = {
@@ -40,19 +41,23 @@ describe("policy validation", () => {
     const configuration = validatePolicyConfiguration(validPolicy);
     const input = validatePolicyInput({
       application: "chatgpt",
+      attachmentPresent: false,
       findings,
       policy: validPolicy,
     });
     const decision = validatePolicyDecision({
       action: "warn",
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
+      attachmentPresent: false,
     });
 
     expect(configuration).toEqual(validPolicy);
     expect(configuration).not.toBe(validPolicy);
     expect(input).toEqual({
       application: "chatgpt",
+      attachmentPresent: false,
       findings: [validFinding],
       policy: validPolicy,
     });
@@ -60,12 +65,16 @@ describe("policy validation", () => {
     expect(decision).toEqual({
       action: "warn",
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
+      attachmentPresent: false,
     });
     expect(Reflect.ownKeys(decision)).toEqual([
       "action",
       "matchedRuleIds",
+      "contributingCategories",
       "reasonCode",
+      "attachmentPresent",
     ]);
   });
 
@@ -152,6 +161,7 @@ describe("policy validation", () => {
       schemaVersion: validPolicy.schemaVersion,
       categoryActions: { ...validPolicy.categoryActions },
       apiSecretActions: { ...validPolicy.apiSecretActions },
+      attachmentAction: validPolicy.attachmentAction,
     };
     mutate(candidate);
 
@@ -183,6 +193,7 @@ describe("policy validation", () => {
     expect(() =>
       validatePolicyInput({
         application: "chatgpt",
+        attachmentPresent: false,
         findings: [{ ...validFinding, ...extra }],
         policy: validPolicy,
       }),
@@ -254,7 +265,9 @@ describe("policy validation", () => {
         validatePolicyDecision({
           action: "warn",
           matchedRuleIds: ["warn.email"],
+          contributingCategories: ["email"],
           reasonCode: "policy_match",
+          attachmentPresent: false,
           ...extra,
         }),
       ).toThrow(

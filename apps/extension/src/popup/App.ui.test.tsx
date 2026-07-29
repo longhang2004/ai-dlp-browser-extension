@@ -42,6 +42,11 @@ describe("popup App", () => {
 
     expect(await screen.findByText(label)).not.toBeNull();
     expect(screen.getByText("3 recent protection events")).not.toBeNull();
+    expect(
+      screen.getByText(
+        "Attached file contents are not inspected in this version.",
+      ),
+    ).not.toBeNull();
   });
 
   it("never claims active while status is loading or invalid", async () => {

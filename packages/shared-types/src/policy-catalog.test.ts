@@ -110,7 +110,10 @@ describe("canonical policy catalog", () => {
         reasonCode: "no_findings",
       },
     ]);
-    expect(POLICY_RULE_IDS).toEqual(POLICY_RULE_CATALOG.map((rule) => rule.id));
+    expect(POLICY_RULE_IDS).toEqual([
+      ...POLICY_RULE_CATALOG.map((rule) => rule.id),
+      "attachment.unsupported",
+    ]);
     expect(POLICY_RULE_CATALOG.at(-1)).toBe(POLICY_NO_FINDINGS_RULE);
     expect(POLICY_ACTION_PRECEDENCE).toEqual([
       "allow",
@@ -121,6 +124,7 @@ describe("canonical policy catalog", () => {
     expect(POLICY_REASON_CODES).toEqual([
       POLICY_REASON_CODE.NO_FINDINGS,
       POLICY_REASON_CODE.POLICY_MATCH,
+      POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT,
     ]);
   });
 

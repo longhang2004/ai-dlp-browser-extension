@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatGptAdapter } from "../adapters/chatgpt/chatgpt-adapter.js";
 import {
+  AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE,
   MULTI_COMPOSER_FIXTURE,
   NATIVE_TEXTAREA_COMPOSER_FIXTURE,
 } from "../adapters/chatgpt/fixtures.js";
@@ -58,6 +59,18 @@ function sendControl(): HTMLButtonElement {
   return value;
 }
 
+async function updateTextNode(node: Text, value: string): Promise<void> {
+  const delivered = new Promise<void>((resolve) => {
+    const checkpoint = new MutationObserver(() => {
+      checkpoint.disconnect();
+      resolve();
+    });
+    checkpoint.observe(node, { characterData: true });
+  });
+  node.nodeValue = value;
+  await delivered;
+}
+
 function createHarness(prompt: string, action: "warn" | "redact" = "warn") {
   renderComposer(prompt);
   const adapter = new ChatGptAdapter({
@@ -77,13 +90,16 @@ function createHarness(prompt: string, action: "warn" | "redact" = "warn") {
   const controller = createSubmissionController({
     adapter,
     settings: () => createDefaultProtectionSettings(),
+    currentRevision: () => 1,
     dialog,
     audit: { append: async (event) => void events.push(event) },
     analyze: () => [finding],
     evaluate: () => ({
       action,
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
+      attachmentPresent: false,
     }),
     eventId: () => "00000000-0000-4000-8000-000000000001",
     wallClockNow: () => new Date("2026-07-26T00:00:00.000Z"),
@@ -109,6 +125,163 @@ afterEach(() => {
 });
 
 describe("submission controller with the semantic ChatGPT adapter", () => {
+  it("requires a fresh attachment decision after attachment evidence text changes", async () => {
+    const attachmentText = "attachment-evidence-private-before";
+    const parsed = new DOMParser().parseFromString(
+      `
+        <section data-testid="composer-root">
+          <div id="prompt-textarea" contenteditable="true" role="textbox">person@example.com</div>
+          <div data-testid="composer-attachment"><span id="attachment-evidence">${attachmentText}</span></div>
+          <button data-testid="send-button" aria-label="Send prompt">Send</button>
+        </section>
+      `,
+      "text/html",
+    );
+    document.body.replaceChildren(...parsed.body.childNodes);
+    const attachmentEvidence = document.querySelector(
+      "#attachment-evidence",
+    )?.firstChild;
+    const send = document.querySelector('[data-testid="send-button"]');
+    if (
+      !(attachmentEvidence instanceof Text) ||
+      !(send instanceof HTMLButtonElement)
+    ) {
+      throw new Error("Expected attachment warning fixture.");
+    }
+    const settings = createDefaultProtectionSettings();
+    const attachmentAction = settings.attachmentAction;
+    const adapter = new ChatGptAdapter({
+      document,
+      getCurrentUrl: () => new URL("https://chatgpt.com/"),
+    });
+    const events: AuditEvent[] = [];
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const dialog = {
+      show: vi.fn(
+        () =>
+          new Promise<ProtectionDialogIntent>((resolve) => (settle = resolve)),
+      ),
+      cancel: vi.fn(),
+    };
+    const controller = createSubmissionController({
+      adapter,
+      settings: () => settings,
+      currentRevision: () => 1,
+      dialog,
+      audit: { append: (event) => void events.push(event) },
+      analyze: (prompt) => [findingFor(prompt)],
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["attachment.unsupported"],
+        contributingCategories: [],
+        reasonCode: "unsupported_attachment",
+        attachmentPresent: true,
+      }),
+    });
+    controller.register();
+    try {
+      const resumed = vi.fn();
+      send.addEventListener("click", resumed);
+
+      send.click();
+      await vi.waitFor(() =>
+        expect(dialog.show).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "warn",
+            attachmentPresent: true,
+            reasonCode: "unsupported_attachment",
+          }),
+        ),
+      );
+
+      await updateTextNode(
+        attachmentEvidence,
+        "attachment-evidence-private-after",
+      );
+      settle("bypass");
+      await controller.whenSettledForTesting();
+
+      expect(resumed).not.toHaveBeenCalled();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ resolution: "cancelled" });
+      expect(settings.attachmentAction).toBe(attachmentAction);
+
+      send.click();
+      await vi.waitFor(() => expect(dialog.show).toHaveBeenCalledTimes(2));
+      settle("cancel");
+      await controller.whenSettledForTesting();
+    } finally {
+      controller.dispose();
+      adapter.dispose();
+    }
+  });
+
+  it("does not analyze, authorize, show findings, allow, or resume an ambiguous shared-Send attempt", async () => {
+    const parsed = new DOMParser().parseFromString(
+      AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE,
+      "text/html",
+    );
+    document.body.replaceChildren(...parsed.body.childNodes);
+    const adapter = new ChatGptAdapter({
+      document,
+      getCurrentUrl: () => new URL("https://chatgpt.com/"),
+    });
+    const analyze = vi.fn(() => [findingFor("private prompt sentinel")]);
+    const evaluate = vi.fn(() => ({
+      action: "allow" as const,
+      matchedRuleIds: ["allow.no-findings"],
+      contributingCategories: [],
+      reasonCode: "no_findings" as const,
+      attachmentPresent: false,
+    }));
+    const events: AuditEvent[] = [];
+    const dialog = {
+      show: vi.fn(async () => "cancel" as const),
+      cancel: vi.fn(),
+    };
+    const controller = createSubmissionController({
+      adapter,
+      settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
+      dialog,
+      audit: { append: async (event) => void events.push(event) },
+      analyze,
+      evaluate,
+    });
+    controller.register();
+    const resumed = vi.fn();
+    document.querySelector("#shared-send")?.addEventListener("click", resumed);
+
+    try {
+      const click = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+      });
+      document.querySelector("#shared-send")?.dispatchEvent(click);
+      await controller.whenSettledForTesting();
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(analyze).not.toHaveBeenCalled();
+      expect(evaluate).not.toHaveBeenCalled();
+      expect(resumed).not.toHaveBeenCalled();
+      expect(dialog.show).toHaveBeenCalledWith({
+        kind: "error",
+        errorCode: "extension_context_invalidated",
+      });
+      expect(JSON.stringify(dialog.show.mock.calls)).not.toContain("findings");
+      expect(controller.getDiagnosticsForTesting()).toMatchObject({
+        hasActiveAttempt: false,
+        hasPromptSnapshot: false,
+        hasSensitiveFindings: false,
+        hasAuthorization: false,
+      });
+      expect(JSON.stringify(events)).not.toContain("private prompt sentinel");
+    } finally {
+      controller.dispose();
+      adapter.dispose();
+    }
+  });
+
   it("analyzes and resumes only the event-targeted second composer", async () => {
     const parsed = new DOMParser().parseFromString(
       MULTI_COMPOSER_FIXTURE,
@@ -145,13 +318,16 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: vi.fn() },
       analyze,
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     });
     controller.register();
@@ -208,13 +384,16 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: (event) => void events.push(event) },
       analyze: (prompt) => [findingFor(prompt)],
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     });
     controller.register();
@@ -270,13 +449,16 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: (event) => void events.push(event) },
       analyze: (prompt) => [findingFor(prompt)],
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
     });
     controller.register();
@@ -423,13 +605,16 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: async (event) => void events.push(event) },
       analyze: () => [findingFor(prompt)],
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       }),
       eventId: () => "00000000-0000-4000-8000-000000000001",
       wallClockNow: () => new Date("2026-07-26T00:00:00.000Z"),

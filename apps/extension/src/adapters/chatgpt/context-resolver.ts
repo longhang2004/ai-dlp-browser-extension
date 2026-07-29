@@ -28,6 +28,14 @@ export type TargetSubmissionResolution =
     }
   | { kind: "not_a_submission_candidate" };
 
+type AssociatedSubmissionContexts =
+  | {
+      kind: "none";
+      sawAssociatedComposerCandidate: boolean;
+    }
+  | { kind: "unique"; context: ResolvedSubmissionElements }
+  | { kind: "ambiguous" };
+
 function isElementVisible(element: HTMLElement): boolean {
   let current: HTMLElement | null = element;
   while (current !== null) {
@@ -247,6 +255,51 @@ function closestStrongComposer(target: Element): HTMLElement | null {
   return candidate instanceof HTMLElement ? candidate : null;
 }
 
+function orderedComposerCandidates(document: Document): HTMLElement[] {
+  const seen = new Set<HTMLElement>();
+  const candidates: HTMLElement[] = [];
+  for (const selector of ORDERED_COMPOSER_SELECTORS) {
+    for (const candidate of document.querySelectorAll(selector)) {
+      if (!(candidate instanceof HTMLElement) || seen.has(candidate)) {
+        continue;
+      }
+      seen.add(candidate);
+      candidates.push(candidate);
+    }
+  }
+  return candidates;
+}
+
+function collectAssociatedSubmissionContexts(
+  document: Document,
+  sendControl: HTMLElement,
+): AssociatedSubmissionContexts {
+  const contexts: ResolvedSubmissionElements[] = [];
+  let sawAssociatedComposerCandidate = false;
+
+  for (const candidate of orderedComposerCandidates(document)) {
+    if (findAssociatedSendControl(document, candidate) !== sendControl) {
+      continue;
+    }
+    sawAssociatedComposerCandidate = true;
+    if (!isUsableComposer(candidate)) {
+      continue;
+    }
+    const context = completeSubmissionElements(candidate, sendControl);
+    if (context === null) {
+      continue;
+    }
+    contexts.push(context);
+    if (contexts.length > 1) {
+      return { kind: "ambiguous" };
+    }
+  }
+
+  return contexts[0] === undefined
+    ? { kind: "none", sawAssociatedComposerCandidate }
+    : { kind: "unique", context: contexts[0] };
+}
+
 export function resolveComposerSubmissionFromTarget(
   document: Document,
   target: Element,
@@ -268,13 +321,19 @@ export function resolveComposerSubmissionFromTarget(
       healthCode: "send_control_not_found",
     };
   }
-  const context = completeSubmissionElements(composer, sendControl);
-  return context === null
+  const ownership = collectAssociatedSubmissionContexts(document, sendControl);
+  if (ownership.kind === "ambiguous") {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "ambiguous_submission_context",
+    };
+  }
+  return ownership.kind !== "unique" || ownership.context.composer !== composer
     ? {
         kind: "strong_candidate_unresolved",
         healthCode: "unsupported_dom_variant",
       }
-    : { kind: "resolved", context };
+    : { kind: "resolved", context: ownership.context };
 }
 
 export function resolveSendSubmissionFromTarget(
@@ -292,25 +351,22 @@ export function resolveSendSubmissionFromTarget(
     };
   }
 
-  let sawAssociatedComposerCandidate = false;
-  for (const selector of ORDERED_COMPOSER_SELECTORS) {
-    for (const candidate of document.querySelectorAll(selector)) {
-      if (!(candidate instanceof HTMLElement)) continue;
-      const associatedSend = findAssociatedSendControl(document, candidate);
-      if (associatedSend !== sendCandidate) continue;
-      sawAssociatedComposerCandidate = true;
-      if (!isUsableComposer(candidate)) continue;
-      const context = completeSubmissionElements(candidate, sendCandidate);
-      if (context === null) continue;
-      return {
-        kind: "resolved",
-        context,
-      };
-    }
+  const ownership = collectAssociatedSubmissionContexts(
+    document,
+    sendCandidate,
+  );
+  if (ownership.kind === "ambiguous") {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "ambiguous_submission_context",
+    };
+  }
+  if (ownership.kind === "unique") {
+    return { kind: "resolved", context: ownership.context };
   }
   return {
     kind: "strong_candidate_unresolved",
-    healthCode: sawAssociatedComposerCandidate
+    healthCode: ownership.sawAssociatedComposerCandidate
       ? "unsupported_dom_variant"
       : "composer_not_found",
   };
@@ -321,31 +377,38 @@ export function diagnoseSubmissionElements(
 ): SubmissionResolutionDiagnosis {
   let sawComposerCandidate = false;
   let sawUsableComposer = false;
+  let firstResolvedContext: ResolvedSubmissionElements | null = null;
+  const checkedSendControls = new Set<HTMLElement>();
 
-  for (const [
-    selectorIndex,
-    selector,
-  ] of ORDERED_COMPOSER_SELECTORS.entries()) {
-    for (const candidate of document.querySelectorAll(selector)) {
-      sawComposerCandidate = true;
-      if (!isUsableComposer(candidate)) {
-        continue;
-      }
-      sawUsableComposer = true;
-      const sendControl = findAssociatedSendControl(document, candidate);
-      if (sendControl !== null) {
-        const context = completeSubmissionElements(candidate, sendControl);
-        if (context === null) {
-          continue;
-        }
-        return {
-          context: { ...context, strategy: strategyFor(selectorIndex) },
-          healthCode: null,
-        };
-      }
+  for (const candidate of orderedComposerCandidates(document)) {
+    sawComposerCandidate = true;
+    if (!isUsableComposer(candidate)) {
+      continue;
+    }
+    sawUsableComposer = true;
+    const sendControl = findAssociatedSendControl(document, candidate);
+    if (sendControl === null || checkedSendControls.has(sendControl)) {
+      continue;
+    }
+    checkedSendControls.add(sendControl);
+    const ownership = collectAssociatedSubmissionContexts(
+      document,
+      sendControl,
+    );
+    if (ownership.kind === "ambiguous") {
+      return {
+        context: null,
+        healthCode: "ambiguous_submission_context",
+      };
+    }
+    if (ownership.kind === "unique" && firstResolvedContext === null) {
+      firstResolvedContext = ownership.context;
     }
   }
 
+  if (firstResolvedContext !== null) {
+    return { context: firstResolvedContext, healthCode: null };
+  }
   if (!sawComposerCandidate) {
     return { context: null, healthCode: "composer_not_found" };
   }

@@ -16,6 +16,7 @@ import type {
   PromptFreeBoundary,
   ReadonlyPromptFreeArray,
 } from "./privacy.js";
+import type { DecisionReason } from "./policy.js";
 import {
   hasExactOwnKeys,
   INVALID_SNAPSHOT,
@@ -161,15 +162,17 @@ export function createMaskedPreview(
 export type ProtectionDialogModel = PromptDerivedBoundary & {
   kind: "warn" | "block";
   findings: PromptFreeArray<DisplayFinding>;
-  maskedPreview: MaskedPreview;
-  reasonCode: string;
+  maskedPreview?: MaskedPreview;
+  reasonCode: Exclude<DecisionReason, "no_findings">;
+  attachmentPresent: boolean;
   canRedact: boolean;
 };
 
 export type ProtectionDialogModelInput = PromptDerivedBoundary & {
   kind: "warn" | "block";
   findings: PromptFreeArray<DisplayFinding>;
-  reasonCode: string;
+  reasonCode: Exclude<DecisionReason, "no_findings">;
+  attachmentPresent: boolean;
   canRedact: boolean;
   maskedPreview?: never;
 };
@@ -190,29 +193,36 @@ export function isProtectionDialogModelSnapshot(
   return safelyValidate(() => {
     if (
       !isPlainRecord(value) ||
-      !hasExactOwnKeys(value, [
-        "kind",
-        "findings",
-        "maskedPreview",
-        "reasonCode",
-        "canRedact",
-      ]) ||
+      !hasExactOwnKeys(
+        value,
+        ["kind", "findings", "reasonCode", "attachmentPresent", "canRedact"],
+        ["maskedPreview"],
+      ) ||
       (value.kind !== "warn" && value.kind !== "block") ||
-      !isDenseExactArray(value.findings, 1, 7, isDisplayFindingSnapshot) ||
+      typeof value.attachmentPresent !== "boolean" ||
+      !isDenseExactArray(
+        value.findings,
+        value.attachmentPresent ? 0 : 1,
+        7,
+        isDisplayFindingSnapshot,
+      ) ||
       new Set(value.findings.map((finding) => finding.category)).size !==
         value.findings.length ||
-      !isMaskedPreviewSnapshot(value.maskedPreview) ||
       typeof value.canRedact !== "boolean" ||
       (value.kind === "block" && value.canRedact !== false) ||
-      value.reasonCode !== "policy_match"
+      (value.attachmentPresent && value.canRedact) ||
+      (value.reasonCode !== "policy_match" &&
+        value.reasonCode !== "unsupported_attachment") ||
+      (!value.attachmentPresent && value.reasonCode !== "policy_match")
     ) {
       return false;
     }
 
-    return (
-      value.maskedPreview ===
-      deriveMaskedPreviewFromFindingsSnapshot(value.findings)
-    );
+    return value.findings.length === 0
+      ? !Object.hasOwn(value, "maskedPreview")
+      : isMaskedPreviewSnapshot(value.maskedPreview) &&
+          value.maskedPreview ===
+            deriveMaskedPreviewFromFindingsSnapshot(value.findings);
   });
 }
 
@@ -228,13 +238,28 @@ function isProtectionDialogModelInputSnapshot(
   return safelyValidate(
     () =>
       isPlainRecord(value) &&
-      hasExactOwnKeys(value, ["kind", "findings", "reasonCode", "canRedact"]) &&
+      hasExactOwnKeys(value, [
+        "kind",
+        "findings",
+        "reasonCode",
+        "attachmentPresent",
+        "canRedact",
+      ]) &&
       (value.kind === "warn" || value.kind === "block") &&
-      isDenseExactArray(value.findings, 1, 7, isDisplayFindingSnapshot) &&
+      typeof value.attachmentPresent === "boolean" &&
+      isDenseExactArray(
+        value.findings,
+        value.attachmentPresent ? 0 : 1,
+        7,
+        isDisplayFindingSnapshot,
+      ) &&
       new Set(value.findings.map((finding) => finding.category)).size ===
         value.findings.length &&
-      value.reasonCode === "policy_match" &&
+      (value.reasonCode === "policy_match" ||
+        (value.attachmentPresent &&
+          value.reasonCode === "unsupported_attachment")) &&
       typeof value.canRedact === "boolean" &&
+      (!value.attachmentPresent || value.canRedact === false) &&
       (value.kind !== "block" || value.canRedact === false),
   );
 }
@@ -267,9 +292,16 @@ export function createProtectionDialogModel(
       confidence: finding.confidence,
       placeholder: finding.placeholder,
     })) as PromptFreeArray<DisplayFinding>,
-    maskedPreview: deriveMaskedPreviewFromFindingsSnapshot(snapshot.findings),
     reasonCode: snapshot.reasonCode,
+    attachmentPresent: snapshot.attachmentPresent,
     canRedact: snapshot.canRedact,
+    ...(snapshot.findings.length === 0
+      ? {}
+      : {
+          maskedPreview: deriveMaskedPreviewFromFindingsSnapshot(
+            snapshot.findings,
+          ),
+        }),
   };
 }
 

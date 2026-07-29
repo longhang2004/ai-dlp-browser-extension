@@ -1,6 +1,7 @@
 export {
   ADAPTER_HEALTH_CODES,
   CHATGPT_ADAPTER_VERSION,
+  CHATGPT_ADAPTER_VERSIONS,
   createAuditEventId,
   createAuditTimestamp,
   DECISION_RESOLUTIONS,
@@ -69,8 +70,9 @@ export type {
   ContentStatusPortMessage,
   SettingsPortMessage,
 } from "./messages.js";
-export { POLICY_ACTIONS } from "./policy.js";
+export { ATTACHMENT_ACTIONS, POLICY_ACTIONS } from "./policy.js";
 export {
+  ATTACHMENT_POLICY_RULE_ID,
   POLICY_ACTION_PRECEDENCE,
   POLICY_NO_FINDINGS_RULE,
   POLICY_REASON_CODE,
@@ -90,6 +92,8 @@ export type {
   PolicyRuleId,
 } from "./policy-catalog.js";
 export type {
+  AttachmentAction,
+  DecisionReason,
   PolicyAction,
   PolicyConfiguration,
   PolicyDecision,

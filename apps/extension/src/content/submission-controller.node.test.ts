@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
+  AttachmentStateFingerprint,
   ChatApplicationAdapter,
   LiveSubmissionContext,
 } from "../adapters/chat-application-adapter.js";
@@ -24,7 +25,9 @@ import {
 import { toPolicyFinding } from "./display-model.js";
 import { createSubmissionController } from "./submission-controller.js";
 
-function emailFinding(prompt = "person@example.com"): SensitiveDataFinding {
+function emailFinding(
+  prompt = "person@example.com",
+): Extract<SensitiveDataFinding, { category: "email" }> {
   return {
     id: createFindingId("email", 0, prompt.length),
     detectorId: "email",
@@ -34,6 +37,21 @@ function emailFinding(prompt = "person@example.com"): SensitiveDataFinding {
     confidence: "high",
     matchedText: prompt,
     redactedText: SENSITIVE_DATA_PLACEHOLDERS.email,
+  };
+}
+
+function phoneFinding(
+  prompt = "+1 415 555 0132",
+): Extract<SensitiveDataFinding, { category: "phone" }> {
+  return {
+    id: createFindingId("phone", 0, prompt.length),
+    detectorId: "phone",
+    category: "phone",
+    start: 0,
+    end: prompt.length,
+    confidence: "high",
+    matchedText: prompt,
+    redactedText: SENSITIVE_DATA_PLACEHOLDERS.phone,
   };
 }
 
@@ -47,7 +65,9 @@ type HarnessOptions = {
   evaluate?: (input: unknown) => PolicyDecision;
   auditDelay?: Promise<void>;
   hasAttachment?: boolean;
+  attachmentAction?: "block" | "warn" | "allow";
   replacementCapability?: "supported" | "unsupported";
+  currentRevision?: () => number;
 };
 
 function createHarness(value: string | HarnessOptions = "clean prompt") {
@@ -57,6 +77,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
   let contextVersion = 1;
   let currentUrl = new URL("https://chatgpt.com/");
   let hasAttachment = harnessOptions.hasAttachment ?? false;
+  let attachmentFingerprint = {} as AttachmentStateFingerprint;
   const composer = { isConnected: true } as HTMLElement;
   const sendControl = { isConnected: true } as HTMLElement;
   const submissionRegion = { isConnected: true } as HTMLElement;
@@ -72,7 +93,8 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     Parameters<ChatApplicationAdapter["registerSubmitInterceptor"]>[0] | null =
     null;
   const inspectSubmissionCapabilities = vi.fn(() => ({
-    hasUnsupportedAttachment: hasAttachment,
+    attachmentPresent: hasAttachment,
+    attachmentStateFingerprint: attachmentFingerprint,
   }));
   const getPromptReplacementCapability = vi.fn(
     () => harnessOptions.replacementCapability ?? "supported",
@@ -107,7 +129,10 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
   };
   const controller = createSubmissionController({
     adapter,
-    settings: () => createDefaultProtectionSettings(),
+    settings: () => ({
+      ...createDefaultProtectionSettings(),
+      attachmentAction: harnessOptions.attachmentAction ?? "warn",
+    }),
     dialog,
     audit: {
       append: vi.fn(async (event: AuditEvent) => {
@@ -122,24 +147,40 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     ...(harnessOptions.monotonicNow === undefined
       ? {}
       : { monotonicNow: harnessOptions.monotonicNow }),
+    currentRevision: harnessOptions.currentRevision ?? (() => 1),
     analyze:
       harnessOptions.analyze ??
       (() => structuredClone(harnessOptions.findings ?? [])),
     evaluate:
       harnessOptions.evaluate ??
       (() => ({
-        action: harnessOptions.action ?? "allow",
-        matchedRuleIds:
-          harnessOptions.action === undefined ||
-          harnessOptions.action === "allow"
+        action:
+          harnessOptions.action ??
+          (hasAttachment
+            ? (harnessOptions.attachmentAction ?? "warn")
+            : "allow"),
+        matchedRuleIds: hasAttachment
+          ? ["attachment.unsupported"]
+          : harnessOptions.action === undefined ||
+              harnessOptions.action === "allow"
             ? ["allow.no-findings"]
             : ["warn.email"],
-        reasonCode:
+        contributingCategories:
+          hasAttachment ||
           harnessOptions.action === undefined ||
           harnessOptions.action === "allow"
+            ? []
+            : ["email"],
+        reasonCode: hasAttachment
+          ? "unsupported_attachment"
+          : harnessOptions.action === undefined ||
+              harnessOptions.action === "allow"
             ? "no_findings"
             : "policy_match",
+        attachmentPresent: hasAttachment,
       })),
+  } as Parameters<typeof createSubmissionController>[0] & {
+    currentRevision: () => number;
   });
   controller.register();
   return {
@@ -160,6 +201,10 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     },
     setAttachment: (value: boolean) => {
       hasAttachment = value;
+      attachmentFingerprint = {} as AttachmentStateFingerprint;
+    },
+    mutateAttachment: () => {
+      attachmentFingerprint = {} as AttachmentStateFingerprint;
     },
     inspectSubmissionCapabilities,
     getPromptReplacementCapability,
@@ -230,71 +275,72 @@ describe("submission privacy boundaries", () => {
 });
 
 describe("submission controller", () => {
-  it("fails closed before analysis when an attachment is present", async () => {
+  it("blocks an attachment through a decision without analyzing attachment data", async () => {
     const analyze = vi.fn(() => []);
     const filename = "confidential-board-plan.pdf";
     const harness = createHarness({
       prompt: "",
       hasAttachment: true,
+      attachmentAction: "block",
       analyze,
     });
 
     expect(harness.fire()).toBe("intercept");
     await harness.controller.whenSettledForTesting();
 
-    expect(analyze).not.toHaveBeenCalled();
+    expect(analyze).toHaveBeenCalledWith("", { protectedKeywords: [] });
     expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
-    expect(harness.dialog.show).toHaveBeenCalledWith({
-      kind: "error",
-      errorCode: "unsupported_attachment",
-    });
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "block",
+        attachmentPresent: true,
+        findings: [],
+      }),
+    );
     expect(harness.events).toHaveLength(1);
     expect(harness.events[0]).toMatchObject({
-      kind: "enforcement_error",
-      errorCode: "unsupported_attachment",
+      kind: "decision",
+      policyAction: "block",
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      findingCount: 0,
+      resolution: "blocked",
     });
     expect(JSON.stringify(harness.events)).not.toContain(filename);
   });
 
-  it.each([
-    {
-      scenario: "text plus attachment",
-      prompt: "Harmless visible text",
-    },
-    {
-      scenario: "large paste converted to an attachment",
-      prompt: "Visible attachment summary",
-    },
-  ])("never allows $scenario", async ({ prompt }) => {
+  it("warns and cancels an attachment-only attempt", async () => {
     const harness = createHarness({
-      prompt,
       hasAttachment: true,
-      action: "allow",
+      attachmentAction: "warn",
     });
 
     harness.fire();
     await harness.controller.whenSettledForTesting();
 
     expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
-    expect(harness.dialog.show).toHaveBeenCalledWith({
-      kind: "error",
-      errorCode: "unsupported_attachment",
-    });
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "warn",
+        attachmentPresent: true,
+        findings: [],
+      }),
+    );
     expect(harness.events).toEqual([
       expect.objectContaining({
-        kind: "enforcement_error",
-        errorCode: "unsupported_attachment",
+        kind: "decision",
+        policyAction: "warn",
+        resolution: "cancelled",
+        attachmentPresent: true,
       }),
     ]);
   });
 
-  it("invalidates warning approval when an attachment appears", async () => {
+  it("uses attachment_bypassed for an attachment warning bypass", async () => {
     let settle!: (intent: ProtectionDialogIntent) => void;
-    const finding = emailFinding();
     const harness = createHarness({
-      prompt: finding.matchedText,
-      findings: [finding],
-      action: "warn",
+      hasAttachment: true,
+      attachmentAction: "warn",
     });
     harness.dialog.show.mockImplementationOnce(
       () => new Promise((resolve) => (settle = resolve)),
@@ -302,46 +348,287 @@ describe("submission controller", () => {
     harness.fire();
     await vi.waitFor(() => expect(harness.dialog.show).toHaveBeenCalled());
 
-    harness.setAttachment(true);
     settle("bypass");
     await harness.controller.whenSettledForTesting();
 
-    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.adapter.resumeSubmission).toHaveBeenCalledOnce();
     expect(harness.events).toContainEqual(
       expect.objectContaining({
-        kind: "enforcement_error",
-        errorCode: "unsupported_attachment",
+        kind: "decision",
+        resolution: "attachment_bypassed",
       }),
     );
   });
 
-  it("rechecks attachment capability immediately before a clean allow resumes", async () => {
-    const harness = createHarness();
-    harness.inspectSubmissionCapabilities
-      .mockReturnValueOnce({ hasUnsupportedAttachment: false })
-      .mockReturnValueOnce({ hasUnsupportedAttachment: true });
+  it("allows an attachment dialog-free and without persistence", async () => {
+    const harness = createHarness({
+      hasAttachment: true,
+      attachmentAction: "allow",
+    });
 
     harness.fire();
     await harness.controller.whenSettledForTesting();
 
-    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
-    expect(harness.events).toContainEqual(
-      expect.objectContaining({
-        kind: "enforcement_error",
-        errorCode: "unsupported_attachment",
-      }),
-    );
+    expect(harness.adapter.resumeSubmission).toHaveBeenCalledOnce();
+    expect(harness.dialog.show).not.toHaveBeenCalled();
+    expect(harness.events).toEqual([]);
   });
 
+  it("uses one combined warning and attachment_bypassed resolution", async () => {
+    const finding = emailFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      hasAttachment: true,
+      dialogIntent: "bypass",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.email", "attachment.unsupported"],
+        contributingCategories: ["email"],
+        reasonCode: "unsupported_attachment",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "warn",
+        attachmentPresent: true,
+        canRedact: false,
+        findings: [expect.objectContaining({ category: "email" })],
+      }),
+    );
+    expect(harness.adapter.resumeSubmission).toHaveBeenCalledOnce();
+    expect(harness.events[0]).toMatchObject({
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      resolution: "attachment_bypassed",
+    });
+  });
+
+  it("uses bypassed when a prompt warning wins over an allowed attachment", async () => {
+    const finding = emailFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      hasAttachment: true,
+      attachmentAction: "allow",
+      dialogIntent: "bypass",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
+        reasonCode: "policy_match",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.events[0]).toMatchObject({
+      resolution: "bypassed",
+      matchedRuleIds: ["warn.email"],
+      detectorCategories: ["email"],
+      findingCount: 1,
+      reasonCode: "policy_match",
+      attachmentPresent: true,
+    });
+  });
+
+  it("uses bypassed when a phone warning wins over an allowed attachment", async () => {
+    const finding = phoneFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      hasAttachment: true,
+      attachmentAction: "allow",
+      dialogIntent: "bypass",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.phone"],
+        contributingCategories: ["phone"],
+        reasonCode: "policy_match",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.events[0]).toMatchObject({
+      resolution: "bypassed",
+      matchedRuleIds: ["warn.phone"],
+      detectorCategories: ["phone"],
+      findingCount: 1,
+      reasonCode: "policy_match",
+      attachmentPresent: true,
+    });
+  });
+
+  it("omits non-contributing allowed findings from the dialog and audit", async () => {
+    const email = emailFinding("person@example.com");
+    const phone = phoneFinding("+1 415 555 0132");
+    const prompt = `${email.matchedText} ${phone.matchedText}`;
+    const shiftedPhone = {
+      ...phone,
+      id: createFindingId("phone", email.matchedText.length + 1, prompt.length),
+      start: email.matchedText.length + 1,
+      end: prompt.length,
+    };
+    const harness = createHarness({
+      prompt,
+      findings: [email, shiftedPhone],
+      dialogIntent: "cancel",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.phone"],
+        contributingCategories: ["phone"],
+        reasonCode: "policy_match",
+        attachmentPresent: false,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        findings: [
+          {
+            category: "phone",
+            confidence: "high",
+            placeholder: "[PHONE]",
+          },
+        ],
+        maskedPreview: "… [PHONE] …",
+      }),
+    );
+    expect(harness.events[0]).toMatchObject({
+      detectorCategories: ["phone"],
+      matchedRuleIds: ["warn.phone"],
+      findingCount: 1,
+      maskedExcerpt: "… [PHONE] …",
+    });
+  });
+
+  it("omits an allowed phone when the attachment drives the warning", async () => {
+    const phone = phoneFinding();
+    const harness = createHarness({
+      prompt: phone.matchedText,
+      findings: [phone],
+      hasAttachment: true,
+      attachmentAction: "warn",
+      dialogIntent: "cancel",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["attachment.unsupported"],
+        contributingCategories: [],
+        reasonCode: "unsupported_attachment",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        findings: [],
+        attachmentPresent: true,
+        reasonCode: "unsupported_attachment",
+      }),
+    );
+    expect(harness.events[0]).toMatchObject({
+      detectorCategories: [],
+      matchedRuleIds: ["attachment.unsupported"],
+      findingCount: 0,
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+    });
+    expect(harness.events[0]).not.toHaveProperty("maskedExcerpt");
+  });
+
+  it("does not let attachment approval bypass a stricter prompt block", async () => {
+    const finding = emailFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      hasAttachment: true,
+      dialogIntent: "bypass",
+      evaluate: () => ({
+        action: "block",
+        matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
+        reasonCode: "policy_match",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "block", attachmentPresent: true }),
+    );
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.events[0]).toMatchObject({
+      policyAction: "block",
+      resolution: "blocked",
+      reasonCode: "policy_match",
+    });
+  });
+
+  it.each(["added", "removed", "mutated"] as const)(
+    "invalidates attachment approval when evidence is %s",
+    async (change) => {
+      let settle!: (intent: ProtectionDialogIntent) => void;
+      const harness = createHarness({
+        hasAttachment: change !== "added",
+        attachmentAction: "warn",
+        ...(change === "added"
+          ? {
+              prompt: "person@example.com",
+              findings: [emailFinding()],
+              action: "warn" as const,
+            }
+          : {}),
+      });
+      harness.dialog.show.mockImplementationOnce(
+        () => new Promise((resolve) => (settle = resolve)),
+      );
+      harness.fire();
+      await vi.waitFor(() => expect(harness.dialog.show).toHaveBeenCalled());
+      if (change === "added") harness.setAttachment(true);
+      else if (change === "removed") harness.setAttachment(false);
+      else harness.mutateAttachment();
+      settle("bypass");
+      await harness.controller.whenSettledForTesting();
+
+      expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+      expect(harness.events).toContainEqual(
+        expect.objectContaining({
+          kind: "decision",
+          resolution: "cancelled",
+        }),
+      );
+    },
+  );
+
   it("evaluates a new submission normally after its attachment is removed", async () => {
-    const harness = createHarness({ hasAttachment: true });
+    const harness = createHarness({
+      hasAttachment: true,
+      attachmentAction: "block",
+    });
     harness.fire("attached");
     await harness.controller.whenSettledForTesting();
     harness.setAttachment(false);
 
     harness.fire("attachment-removed");
     await harness.controller.whenSettledForTesting();
-
     expect(harness.adapter.resumeSubmission).toHaveBeenCalledOnce();
   });
 
@@ -369,6 +656,7 @@ describe("submission controller", () => {
     const controller = createSubmissionController({
       adapter: harness.adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog: harness.dialog,
       analyze,
       audit: { append: async (event) => void events.push(event) },
@@ -474,6 +762,7 @@ describe("submission controller", () => {
         ...createDefaultProtectionSettings(),
         protectionEnabled: false,
       }),
+      currentRevision: () => 1,
       dialog: harness.dialog,
       audit: { append: vi.fn() },
     });
@@ -642,7 +931,9 @@ describe("submission controller", () => {
     const evaluate = vi.fn<(input: unknown) => PolicyDecision>(() => ({
       action: "warn",
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
+      attachmentPresent: false,
     }));
     const harness = createHarness({
       prompt: finding.matchedText,
@@ -655,6 +946,7 @@ describe("submission controller", () => {
     const input = evaluate.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(input).toEqual({
       application: "chatgpt",
+      attachmentPresent: false,
       findings: [
         {
           id: finding.id,
@@ -774,6 +1066,35 @@ describe("submission controller", () => {
 
     expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
     expect(harness.events[0]).toMatchObject({ resolution: "cancelled" });
+  });
+
+  it("cancels a visible warning after an enforcement revision change before its stale bypass can resume", async () => {
+    let revision = 1;
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const harness = createHarness({
+      prompt: "person@example.com",
+      findings: [emailFinding()],
+      action: "warn",
+      currentRevision: () => revision,
+    });
+    harness.dialog.show.mockImplementation(
+      () => new Promise((resolve) => (settle = resolve)),
+    );
+    harness.fire();
+    await vi.waitFor(() => expect(harness.dialog.show).toHaveBeenCalledOnce());
+
+    revision = 2;
+    settle("bypass");
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      kind: "decision",
+      policyAction: "warn",
+      resolution: "cancelled",
+    });
+    expect(JSON.stringify(harness.events)).not.toContain("person@example.com");
   });
 
   it("clears sensitive state immediately when dialog cancellation throws and never settles", async () => {

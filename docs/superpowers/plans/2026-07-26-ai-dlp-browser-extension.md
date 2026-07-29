@@ -19,9 +19,8 @@ Locked choices:
 - `chrome.storage.local` restricted to `TRUSTED_CONTEXTS`; manifest minimum
   Chrome version `102`.
 - Content scripts receive settings through a validated
-  `runtime.connect({name: "settings-v1"})` port. A
-  disconnected/uninitialized port means truthful `initializing`/`unavailable`
-  status and no interception.
+  `runtime.connect({name: "settings-v2"})` port. A disconnected/uninitialized
+  port means truthful `initializing`/`unavailable` status and no interception.
 - Production content script: static `https://chatgpt.com/*`, top frame,
   `document_idle`, `ISOLATED`; no `tabs`, `scripting`, host-permission, or
   web-accessible-resource entries.
@@ -46,10 +45,8 @@ Documentation baselines:
 
 Files:
 
-- Modify
-  `docs/superpowers/specs/2026-07-26-ai-dlp-browser-extension-design.md`.
-- Create
-  `docs/superpowers/plans/2026-07-26-ai-dlp-browser-extension.md`.
+- Modify `docs/superpowers/specs/2026-07-26-ai-dlp-browser-extension-design.md`.
+- Create `docs/superpowers/plans/2026-07-26-ai-dlp-browser-extension.md`.
 
 Specification edits:
 
@@ -90,16 +87,16 @@ Create under `packages/shared-types/src/`:
 
 - `findings.ts`: sensitive categories, confidence, `SensitiveDataFinding`,
   placeholders.
-- `policy.ts`: `PolicyFinding`, exact v1 `PolicyConfiguration`, `PolicyInput`,
-  three-field `PolicyDecision`.
+- `policy.ts`: `PolicyFinding`, exact V2 `PolicyConfiguration`, `PolicyInput`,
+  and contributor-only `PolicyDecision` metadata.
 - `redaction.ts`: `RedactionResult`.
 - `settings.ts`: settings/envelope/defaults.
 - `audit.ts`: decision resolutions, decision/error/health events, audit
   envelope.
 - `display.ts`: `DisplayFinding`, dialog models/intents.
 - `messages.ts`: closed one-time and settings-port message unions.
-- `status.ts`: `initializing | waiting_for_composer | active | disabled |
-  degraded | unavailable`.
+- `status.ts`:
+  `initializing | waiting_for_composer | active | disabled | degraded | unavailable`.
 - `validators.ts`: strict allowlisted validation helpers.
 - `index.ts`: intentional platform-independent exports only.
 
@@ -160,9 +157,9 @@ pnpm lint
 pnpm typecheck
 ```
 
-Expected initial failure: workspace/config files or scripts are missing.
-Passing state: clean install, exact versions in manifests/lockfile, strict
-typecheck and empty-suite lint succeed.
+Expected initial failure: workspace/config files or scripts are missing. Passing
+state: clean install, exact versions in manifests/lockfile, strict typecheck and
+empty-suite lint succeed.
 
 Commit: `chore: scaffold pnpm extension workspace`
 
@@ -212,7 +209,8 @@ Tests:
 - Fixed card/AWS/private-key blocks and protected-keyword warning.
 - API secret high block, medium warn, low rejected.
 - Missing, unknown, invalid, or weakened fixed actions rejected.
-- Exact decision keys: `action`, `matchedRuleIds`, `reasonCode`.
+- Exact decision keys: `action`, contributor-only `matchedRuleIds`,
+  `contributingCategories`, `reasonCode`, and `attachmentPresent`.
 - Forbidden prompt/finding fields rejected before evaluation.
 - Derived policy matches the approved settings mapping exactly.
 
@@ -269,8 +267,8 @@ Tests cover:
 
 - Exact `AKIA`/`ASIA` structures and boundaries.
 - Complete/malformed/mismatched/bounded PEM keys.
-- Contextual secret names, delimiters, value bounds, known prefixes,
-  mixed-class confidence, and conservative negatives.
+- Contextual secret names, delimiters, value bounds, known prefixes, mixed-class
+  confidence, and conservative negatives.
 - Unicode-aware protected-keyword boundaries, casing, Vietnamese diacritics,
   multiword values, and deduplication.
 
@@ -342,8 +340,8 @@ Behavior:
 - Register `onMessage` and `onConnect` synchronously at module top level.
 - One-time listener uses `sendResponse` and returns literal `true`; it is not
   `async`.
-- Content settings port is named `settings-v1`; worker validates sender ID, top
-  frame, origin, and URL, then immediately sends the current v1 settings
+- Content settings port is named `settings-v2`; worker validates sender ID, top
+  frame, origin, and URL, then immediately sends the current v2 settings
   snapshot.
 - Settings saves broadcast validated snapshots to connected content ports.
 - Content scripts never call storage directly.
@@ -378,9 +376,9 @@ Files:
 - `fixtures.ts`
 - Corresponding `.dom.test.ts` files.
 
-Implement selector order from the specification: native form/textarea
-semantics, contenteditable textbox, form relationships, ARIA, then stable data
-attributes. Do not use generated classes.
+Implement selector order from the specification: native form/textarea semantics,
+contenteditable textbox, form relationships, ARIA, then stable data attributes.
+Do not use generated classes.
 
 Tests:
 
@@ -491,11 +489,11 @@ Files:
 
 Behavior:
 
-- Connect to `settings-v1`.
+- Connect to `settings-v2`.
 - Stay `initializing` until the first validated snapshot.
 - Register interception only after initialization.
-- Disabled settings return `pass_through` without `preventDefault` or
-  downstream calls.
+- Disabled settings return `pass_through` without `preventDefault` or downstream
+  calls.
 - On port disconnect, dispose interception and report `unavailable`; reconnect
   and require a fresh snapshot before activation.
 - Runtime disable cancels active attempts; runtime enable reuses idempotent
@@ -515,8 +513,7 @@ Commit: `feat: initialize protection with validated settings`
 Files:
 
 - `apps/extension/popup.html`, `options.html`, `audit.html`
-- Page-specific
-  `src/{popup,options,audit}/{App.tsx,main.tsx,App.ui.test.tsx}`
+- Page-specific `src/{popup,options,audit}/{App.tsx,main.tsx,App.ui.test.tsx}`
 - `src/ui/page.css`
 - `public/manifest.json`
 - `vite.pages.config.ts`
@@ -538,8 +535,7 @@ Build:
 
 - Pages/service-worker pass: Vite multi-page ESM, stable `background.js`, hashed
   local page assets.
-- Content pass: Vite library IIFE, `content-script.js`, code splitting
-  disabled.
+- Content pass: Vite library IIFE, `content-script.js`, code splitting disabled.
 - Pages build empties `apps/extension/dist`; content build appends.
 - Source maps disabled.
 
@@ -593,8 +589,8 @@ Artifact verifier:
 - Reject inline scripts/handlers, source maps, test imports, dynamic imports in
   the worker/content script, code execution strings, network APIs, remote
   assets, and fixture values.
-- Read every dedicated secret value from
-  `tests/fixtures/sensitive-values.json` and prove it is absent from `dist`.
+- Read every dedicated secret value from `tests/fixtures/sensitive-values.json`
+  and prove it is absent from `dist`.
 - Report every URL literal with file, ±160-character context, classification,
   executable/fetching versus inert status, and justification.
 - Automatically classify only standard namespace identifiers as inert.
@@ -652,6 +648,7 @@ pnpm test:browser
 pnpm test:performance
 pnpm build
 pnpm verify:artifact
+pnpm artifact:digest
 pnpm --filter @ai-dlp/extension list --prod --depth Infinity --json
 git diff --check
 git status --short --branch
@@ -677,15 +674,15 @@ Then:
   truthfully reported.
 - A disconnected settings port disables interception until a fresh validated
   snapshot arrives.
-- React receives only sanitized models; adapter prompt access is synchronous
-  and call-scoped.
+- React receives only sanitized models; adapter prompt access is synchronous and
+  call-scoped.
 - No remote API, backend, telemetry, analytics, file inspection, non-ChatGPT
   adapter, enterprise management, or generalized rule language is introduced.
 - Avoid Vite 7 `rollupOptions`; Vite 8 uses `build.rolldownOptions`.
-- Avoid deprecated Vitest workspace files, experimental typechecking as the
-  sole type gate, `ReactDOM.render`, async `runtime.onMessage` listeners,
-  dynamic worker imports, page-world scripts, broad permissions, runtime
-  DOM-class selectors, `innerHTML`, `eval`, `new Function`, and remote assets.
+- Avoid deprecated Vitest workspace files, experimental typechecking as the sole
+  type gate, `ReactDOM.render`, async `runtime.onMessage` listeners, dynamic
+  worker imports, page-world scripts, broad permissions, runtime DOM-class
+  selectors, `innerHTML`, `eval`, `new Function`, and remote assets.
 
 ## 6. PR #1 security-review remediation addendum
 
@@ -701,9 +698,9 @@ Implemented on 2026-07-26 as focused regression-tested commits:
   adapter-owned identity uses weak composer/region references so analysis and
   resume cannot substitute a different valid composer.
 - `inspectSubmissionCapabilities` scans the exact complete submission region,
-  including attachment chips outside a nested form. The controller checks that
-  region before analysis and immediately before resume;
-  `unsupported_attachment` has no bypass and no file metadata.
+  including attachment chips outside a nested form, and returns only presence
+  plus an opaque structural fingerprint. Attachment policy is configurable as
+  block, warn with one-shot bypass, or allow, with no file metadata.
 - Persisted V1 email/phone actions exclude redact. Exact legacy V1 redact
   envelopes migrate atomically to warn, persist once, and broadcast only the
   normalized settings; new redact saves are rejected.
@@ -720,9 +717,40 @@ Implemented on 2026-07-26 as focused regression-tested commits:
   candidates, fresh SPA waiting lifecycles, and coalesced degraded auditing.
 - `.github/workflows/ci.yml` pins actions by commit SHA, uses the locked
   Node/pnpm versions and dependency cache, deletes old build output, runs the
-  complete source/performance/build/artifact/browser gate, uploads the extension
-  only after success, and uploads only failure traces/screenshots/error context.
+  complete source/performance/build/artifact/browser gate, and uploads the
+  reachability-verified extension, digest, and same-commit source archive only
+  after success (plus failure traces/screenshots/error context when needed).
 
 Live authenticated ChatGPT verification remains a manual QA gate. Automated
 fixtures prove the documented DOM variants but are not a claim that the current
 live site was inspected.
+
+## 7. Milestone 1 hardening alignment addendum
+
+Implemented on 2026-07-29; this addendum records the shipped Milestone 1
+invariants and does not expand its scope.
+
+- The content runtime derives an enforcement revision from protection enabled
+  state, email/phone/attachment actions, and protected keywords. The first
+  validated snapshot is revision 1. A changed enforcement snapshot cancels an
+  active attempt; retention-only and identical normalized snapshots do not. Each
+  attempt owns immutable settings and revision snapshots, so stale dialogs and
+  callbacks cannot resume under replacement policy.
+- Policy evaluates all matches but emits only highest-precedence contributors.
+  `matchedRuleIds` and `contributingCategories` drive dialog content, masked
+  preview, counts, and audit metadata. Allowed or lower-precedence matches are
+  deliberately absent. Attachment has no contributor category and contributes
+  only when it ties or wins; `attachment_bypassed` is valid only in that case.
+- Audit storage is V3 and new events use adapter version 3. V1/V2 audit
+  migration is one-time and conservative: normalize only records whose
+  contributors are provable, correct bypass labels only when reason codes prove
+  attachment contribution, discard ambiguous decisions, preserve valid
+  non-decision events, retention-filter, then persist before use.
+- The extension build clears `dist` before both Vite stages. Artifact
+  verification constructs a manifest-rooted graph across workers, scripts,
+  pages, icons, HTML assets, and static local imports. It rejects missing,
+  non-local/dynamic, source-mapped, or unallowlisted unreachable assets;
+  allowlisting defaults empty and cannot permit executable/page/source-map
+  files. Canonical digest creation requires the graph to pass first. CI uploads
+  the verified extension, canonical digest, and same-reviewed-commit
+  `git archive` source tarball.

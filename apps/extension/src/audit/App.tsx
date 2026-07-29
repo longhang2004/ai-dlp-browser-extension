@@ -19,6 +19,7 @@ const ERROR_COPY = {
 } as const;
 
 const HEALTH_COPY = {
+  ambiguous_submission_context: "Ambiguous submission context",
   composer_not_found: "Composer not found",
   send_control_not_found: "Send control not found",
   unsupported_dom_variant: "Unsupported page layout",
@@ -38,6 +39,9 @@ function eventTitle(event: AuditEvent): string {
 function EventDetails({ event }: { event: AuditEvent }) {
   if (event.kind !== "decision") {
     return <p className="muted">ChatGPT adapter v{event.adapterVersion}</p>;
+  }
+  if (event.attachmentPresent) {
+    return <p className="muted">Attached file contents were not inspected.</p>;
   }
   return (
     <div className="event-details">

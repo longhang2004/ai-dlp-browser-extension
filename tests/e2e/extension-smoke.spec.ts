@@ -7,6 +7,7 @@ import {
   protectionDialog,
   sendRuntimeMessage,
   setComposerText,
+  setStructuralAttachment,
   submissionValues,
   test,
   waitForProtectionState,
@@ -46,6 +47,7 @@ async function saveSettings(
     protectionEnabled: boolean;
     emailAction: "allow" | "warn" | "block";
     phoneAction: "allow" | "warn" | "block";
+    attachmentAction: "allow" | "warn" | "block";
     protectedKeywords: string[];
     auditRetentionLimit: number;
   }>,
@@ -257,6 +259,143 @@ test("payment card, AWS key, and PEM prompts are blocked without bypass", async 
     await dialog.getByRole("button", { name: "Close" }).click();
   }
   expect(await submissionValues(chatPage)).toEqual([]);
+  await extensionPage.close();
+});
+
+test("attachment warning supports one-shot bypass without leaking attachment or prompt data", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "options.html",
+  );
+  await saveSettings(extensionPage, { attachmentAction: "warn" });
+  await waitForProtectionState(extensionPage, "active");
+  const promptCanary = "ordinary prompt attachment privacy canary";
+  const attachmentCanary = "private-attachment-name.txt";
+  await setComposerText(chatPage, promptCanary);
+  await setStructuralAttachment(chatPage, true, attachmentCanary);
+
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  const dialog = protectionDialog(chatPage);
+  await expect(dialog).toContainText("Unscanned attachment");
+  await expect(dialog).toContainText(
+    "Attached file contents are not inspected in this version.",
+  );
+  await dialog
+    .getByRole("button", { name: "Send attachment without inspection" })
+    .click();
+  await expect.poll(() => submissionValues(chatPage)).toEqual([promptCanary]);
+
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  await expect(protectionDialog(chatPage)).toBeVisible();
+  expect(await submissionValues(chatPage)).toHaveLength(1);
+  await protectionDialog(chatPage)
+    .getByRole("button", { name: "Cancel" })
+    .click();
+
+  const audit = (await sendRuntimeMessage(extensionPage, {
+    type: "audit.read",
+  })) as {
+    type: string;
+    envelope: {
+      events: Array<Record<string, unknown>>;
+    };
+  };
+  expect(audit.type).toBe("audit.result");
+  expect(audit.envelope.events).toHaveLength(2);
+  expect(audit.envelope.events[0]).toMatchObject({
+    kind: "decision",
+    policyAction: "warn",
+    resolution: "attachment_bypassed",
+    findingCount: 0,
+    detectorCategories: [],
+    matchedRuleIds: ["attachment.unsupported"],
+    reasonCode: "unsupported_attachment",
+    attachmentPresent: true,
+  });
+  const serializedAudit = JSON.stringify(audit);
+  expect(serializedAudit).not.toContain(promptCanary);
+  expect(serializedAudit).not.toContain(attachmentCanary);
+  expect(serializedAudit).not.toContain("maskedExcerpt");
+  await extensionPage.close();
+});
+
+test("attachment block and allow settings map to closed and dialog-free behavior", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const optionsPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "options.html",
+  );
+  await waitForProtectionState(optionsPage, "active");
+  await setStructuralAttachment(chatPage, true);
+  await setComposerText(chatPage, "ordinary attachment policy prompt");
+
+  await saveSettings(optionsPage, { attachmentAction: "block" });
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  const blockedDialog = protectionDialog(chatPage);
+  await expect(blockedDialog).toContainText("Submission blocked");
+  await expect(blockedDialog).toContainText(
+    "Attached file contents cannot be inspected.",
+  );
+  await expect(
+    blockedDialog.getByRole("button", { name: "Send anyway" }),
+  ).toHaveCount(0);
+  await blockedDialog.getByRole("button", { name: "Close" }).click();
+  expect(await submissionValues(chatPage)).toEqual([]);
+
+  await saveSettings(optionsPage, { attachmentAction: "allow" });
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  await expect
+    .poll(() => submissionValues(chatPage))
+    .toEqual(["ordinary attachment policy prompt"]);
+  await expect(protectionDialog(chatPage)).toHaveCount(0);
+  const audit = (await sendRuntimeMessage(optionsPage, {
+    type: "audit.read",
+  })) as { type: string; envelope: { events: unknown[] } };
+  expect(audit.type).toBe("audit.result");
+  expect(audit.envelope.events).toHaveLength(1);
+  await optionsPage.close();
+});
+
+test("combined text and attachment warning exposes one generic bypass", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "options.html",
+  );
+  await saveSettings(extensionPage, {
+    emailAction: "warn",
+    attachmentAction: "warn",
+  });
+  await waitForProtectionState(extensionPage, "active");
+  await setComposerText(chatPage, `Contact ${sensitive.email.valid}`);
+  await setStructuralAttachment(chatPage, true);
+
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  const dialog = protectionDialog(chatPage);
+  await expect(dialog).toContainText("Email address");
+  await expect(dialog).toContainText(
+    "Attached file contents are not inspected in this version.",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Send attachment without inspection" }),
+  ).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Send anyway" }).click();
+  await expect
+    .poll(() => submissionValues(chatPage))
+    .toEqual([`Contact ${sensitive.email.valid}`]);
   await extensionPage.close();
 });
 

@@ -4,6 +4,7 @@ import type { PolicyAction } from "./policy.js";
 export const POLICY_REASON_CODE = Object.freeze({
   NO_FINDINGS: "no_findings",
   POLICY_MATCH: "policy_match",
+  UNSUPPORTED_ATTACHMENT: "unsupported_attachment",
 } as const);
 
 export const POLICY_REASON_CODES = Object.freeze(
@@ -11,6 +12,8 @@ export const POLICY_REASON_CODES = Object.freeze(
 );
 
 export type PolicyReasonCode = (typeof POLICY_REASON_CODES)[number];
+
+export const ATTACHMENT_POLICY_RULE_ID = "attachment.unsupported" as const;
 
 export const POLICY_ACTION_PRECEDENCE = Object.freeze([
   "allow",
@@ -175,8 +178,10 @@ export const POLICY_RULE_CATALOG = Object.freeze([
 )[]);
 
 export type PolicyCatalogRule = (typeof POLICY_RULE_CATALOG)[number];
-export type PolicyRuleId = PolicyCatalogRule["id"];
+export type PolicyRuleId =
+  PolicyCatalogRule["id"] | typeof ATTACHMENT_POLICY_RULE_ID;
 
-export const POLICY_RULE_IDS = Object.freeze(
-  POLICY_RULE_CATALOG.map((rule) => rule.id),
-) as readonly PolicyRuleId[];
+export const POLICY_RULE_IDS = Object.freeze([
+  ...POLICY_RULE_CATALOG.map((rule) => rule.id),
+  ATTACHMENT_POLICY_RULE_ID,
+]) as readonly PolicyRuleId[];

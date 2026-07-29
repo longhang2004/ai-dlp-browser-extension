@@ -21,9 +21,10 @@ import { PolicyValidationError } from "./validate-policy.js";
 function createPolicy(
   email: "allow" | "warn" | "redact" | "block" = "warn",
   phone: "allow" | "warn" | "redact" | "block" = "warn",
+  attachmentAction: "allow" | "warn" | "block" = "warn",
 ): PolicyConfiguration {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     categoryActions: {
       email,
       phone,
@@ -36,6 +37,7 @@ function createPolicy(
       high: "block",
       medium: "warn",
     },
+    attachmentAction,
   };
 }
 
@@ -58,19 +60,23 @@ describe("evaluatePolicy", () => {
     expect(
       evaluatePolicy({
         application: "chatgpt",
+        attachmentPresent: false,
         findings: [],
         policy: createPolicy(),
       }),
     ).toEqual({
       action: "allow",
       matchedRuleIds: ["allow.no-findings"],
+      contributingCategories: [],
       reasonCode: "no_findings",
+      attachmentPresent: false,
     });
   });
 
-  it("evaluates every applicable rule once in fixed table order", () => {
+  it("reports only highest-precedence contributors in fixed table order", () => {
     const decision = evaluatePolicy({
       application: "chatgpt",
+      attachmentPresent: false,
       findings: [
         finding("protected-keyword", "protected_keyword", "medium", 0),
         finding("phone", "phone", "medium", 1),
@@ -92,37 +98,50 @@ describe("evaluatePolicy", () => {
         "block.aws-access-key",
         "block.payment-card",
         "block.api-secret.high",
-        "warn.api-secret.medium",
-        "warn.email",
-        "warn.phone",
-        "warn.protected-keyword",
+      ],
+      contributingCategories: [
+        "private_key",
+        "aws_access_key",
+        "payment_card",
+        "api_secret",
       ],
       reasonCode: "policy_match",
+      attachmentPresent: false,
     });
-    expect(decision.matchedRuleIds).toEqual(
-      POLICY_RULE_CATALOG.filter((rule) => rule.category !== null).map(
-        (rule) => rule.id,
-      ),
-    );
     expect(Reflect.ownKeys(decision)).toEqual([
       "action",
       "matchedRuleIds",
+      "contributingCategories",
       "reasonCode",
+      "attachmentPresent",
     ]);
     expect(decision).not.toHaveProperty("findings");
   });
 
   it.each([
-    ["block", "warn", "block"],
-    ["redact", "warn", "redact"],
-    ["warn", "allow", "warn"],
-    ["allow", "allow", "allow"],
+    ["block", "warn", "block", ["warn.email"], ["email"]],
+    ["redact", "warn", "redact", ["warn.email"], ["email"]],
+    ["warn", "allow", "warn", ["warn.email"], ["email"]],
+    [
+      "allow",
+      "allow",
+      "allow",
+      ["warn.email", "warn.phone"],
+      ["email", "phone"],
+    ],
   ] as const)(
     "uses block > redact > warn > allow precedence for contact actions %s/%s",
-    (emailAction, phoneAction, expectedAction) => {
+    (
+      emailAction,
+      phoneAction,
+      expectedAction,
+      matchedRuleIds,
+      contributingCategories,
+    ) => {
       expect(
         evaluatePolicy({
           application: "chatgpt",
+          attachmentPresent: false,
           findings: [
             finding("phone", "phone", "high", 0),
             finding("email", "email", "high", 1),
@@ -131,8 +150,10 @@ describe("evaluatePolicy", () => {
         }),
       ).toEqual({
         action: expectedAction,
-        matchedRuleIds: ["warn.email", "warn.phone"],
+        matchedRuleIds,
+        contributingCategories,
         reasonCode: "policy_match",
+        attachmentPresent: false,
       });
     },
   );
@@ -142,6 +163,7 @@ describe("evaluatePolicy", () => {
       expect(
         evaluatePolicy({
           application: "chatgpt",
+          attachmentPresent: false,
           findings: [
             finding("email", "email", "high", 0),
             finding("phone", "phone", "high", 1),
@@ -151,6 +173,7 @@ describe("evaluatePolicy", () => {
       ).toMatchObject({
         action,
         matchedRuleIds: ["warn.email", "warn.phone"],
+        contributingCategories: ["email", "phone"],
       });
     }
   });
@@ -180,13 +203,16 @@ describe("evaluatePolicy", () => {
       expect(
         evaluatePolicy({
           application: "chatgpt",
+          attachmentPresent: false,
           findings: [finding(detectorId, category, confidence)],
           policy: createPolicy(),
         }),
       ).toEqual({
         action,
         matchedRuleIds: [ruleId],
+        contributingCategories: [category],
         reasonCode: "policy_match",
+        attachmentPresent: false,
       });
     },
   );
@@ -195,6 +221,7 @@ describe("evaluatePolicy", () => {
     expect(() =>
       evaluatePolicy({
         application: "chatgpt",
+        attachmentPresent: false,
         findings: [{ ...finding("email", "email"), matchedText: "secret" }],
         policy: createPolicy(),
       }),
@@ -205,6 +232,7 @@ describe("evaluatePolicy", () => {
     expect(() =>
       evaluatePolicy({
         application: "chatgpt",
+        attachmentPresent: false,
         findings: [
           {
             id: createFindingId("payment-card", 0, 1),
@@ -222,6 +250,115 @@ describe("evaluatePolicy", () => {
       }),
     );
   });
+
+  it.each([
+    [
+      "allow",
+      "allow",
+      "allow",
+      ["warn.email", "attachment.unsupported"],
+      ["email"],
+      "unsupported_attachment",
+    ],
+    [
+      "allow",
+      "warn",
+      "warn",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    [
+      "allow",
+      "block",
+      "block",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    ["warn", "allow", "warn", ["warn.email"], ["email"], "policy_match"],
+    [
+      "warn",
+      "warn",
+      "warn",
+      ["warn.email", "attachment.unsupported"],
+      ["email"],
+      "unsupported_attachment",
+    ],
+    [
+      "warn",
+      "block",
+      "block",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    ["redact", "allow", "redact", ["warn.email"], ["email"], "policy_match"],
+    ["redact", "warn", "redact", ["warn.email"], ["email"], "policy_match"],
+    [
+      "redact",
+      "block",
+      "block",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    ["block", "allow", "block", ["warn.email"], ["email"], "policy_match"],
+    ["block", "warn", "block", ["warn.email"], ["email"], "policy_match"],
+    [
+      "block",
+      "block",
+      "block",
+      ["warn.email", "attachment.unsupported"],
+      ["email"],
+      "unsupported_attachment",
+    ],
+  ] as const)(
+    "combines text %s with attachment %s as %s from %s",
+    (
+      textAction,
+      attachmentAction,
+      expectedAction,
+      matchedRuleIds,
+      contributingCategories,
+      reasonCode,
+    ) => {
+      expect(
+        evaluatePolicy({
+          application: "chatgpt",
+          attachmentPresent: true,
+          findings: [finding("email", "email")],
+          policy: createPolicy(textAction, "warn", attachmentAction),
+        }),
+      ).toEqual({
+        action: expectedAction,
+        matchedRuleIds,
+        contributingCategories,
+        reasonCode,
+        attachmentPresent: true,
+      });
+    },
+  );
+
+  it.each(["allow", "warn", "block"] as const)(
+    "evaluates attachment-only %s with the fixed rule and winning cause",
+    (attachmentAction) => {
+      expect(
+        evaluatePolicy({
+          application: "chatgpt",
+          attachmentPresent: true,
+          findings: [],
+          policy: createPolicy("warn", "warn", attachmentAction),
+        }),
+      ).toEqual({
+        action: attachmentAction,
+        matchedRuleIds: ["attachment.unsupported"],
+        contributingCategories: [],
+        reasonCode: "unsupported_attachment",
+        attachmentPresent: true,
+      });
+    },
+  );
 });
 
 describe("resolvePolicyRuleAction catalog invariants", () => {

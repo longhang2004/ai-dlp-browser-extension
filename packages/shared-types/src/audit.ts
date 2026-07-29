@@ -1,6 +1,6 @@
 import type { MaskedPreview } from "./display.js";
 import type { SensitiveDataCategory } from "./findings.js";
-import type { PolicyAction } from "./policy.js";
+import type { DecisionReason, PolicyAction } from "./policy.js";
 import type { PromptFreeArray, PromptFreeBoundary } from "./privacy.js";
 import {
   INVALID_SNAPSHOT,
@@ -11,6 +11,7 @@ export const DECISION_RESOLUTIONS = Object.freeze([
   "submitted",
   "cancelled",
   "bypassed",
+  "attachment_bypassed",
   "redacted",
   "blocked",
 ] as const);
@@ -75,6 +76,8 @@ export type DecisionAuditEvent = PromptFreeBoundary & {
   detectorCategories: PromptFreeArray<SensitiveDataCategory>;
   matchedRuleIds: PromptFreeArray<string>;
   findingCount: number;
+  reasonCode: DecisionReason;
+  attachmentPresent: boolean;
   maskedExcerpt?: MaskedPreview;
   adapterVersion: ChatGptAdapterVersion;
 };
@@ -102,14 +105,16 @@ export type EnforcementErrorAuditEvent = PromptFreeBoundary & {
 };
 
 export const ADAPTER_HEALTH_CODES = Object.freeze([
+  "ambiguous_submission_context",
   "composer_not_found",
   "send_control_not_found",
   "unsupported_dom_variant",
 ] as const);
 
-export const CHATGPT_ADAPTER_VERSION = "1" as const;
+export const CHATGPT_ADAPTER_VERSIONS = Object.freeze(["1", "2", "3"] as const);
+export const CHATGPT_ADAPTER_VERSION = "3" as const;
 
-export type ChatGptAdapterVersion = typeof CHATGPT_ADAPTER_VERSION;
+export type ChatGptAdapterVersion = (typeof CHATGPT_ADAPTER_VERSIONS)[number];
 
 export type AdapterHealthCode = (typeof ADAPTER_HEALTH_CODES)[number];
 
@@ -127,6 +132,6 @@ export type AuditEvent =
   DecisionAuditEvent | EnforcementErrorAuditEvent | AdapterHealthAuditEvent;
 
 export type StoredAuditEnvelope = PromptFreeBoundary & {
-  schemaVersion: 1;
+  schemaVersion: 3;
   events: PromptFreeArray<AuditEvent>;
 };

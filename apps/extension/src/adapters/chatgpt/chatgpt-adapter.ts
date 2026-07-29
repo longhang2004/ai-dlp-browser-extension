@@ -7,6 +7,7 @@ import type {
   CapturedSubmitAttempt,
   ChatApplicationAdapter,
   ConsumedSubmissionAuthorization,
+  AttachmentStateFingerprint,
   LiveSubmissionContext,
   PromptReplacementCapability,
   PromptReplacementResult,
@@ -175,6 +176,36 @@ function readStructuredContentEditable(composer: HTMLElement): string {
   return result.replace(/\n+$/u, "");
 }
 
+type AttachmentStateTracker = {
+  submissionRegion: WeakRef<HTMLElement>;
+  evidence: WeakRef<Element>[];
+  mutationVersion: number;
+  observedMutationVersion: number;
+  fingerprint: AttachmentStateFingerprint;
+};
+
+function newAttachmentStateFingerprint(): AttachmentStateFingerprint {
+  return Object.freeze(Object.create(null) as AttachmentStateFingerprint);
+}
+
+function sameElementIdentity(
+  previous: readonly WeakRef<Element>[],
+  current: readonly Element[],
+): boolean {
+  return (
+    previous.length === current.length &&
+    previous.every((reference, index) => reference.deref() === current[index])
+  );
+}
+
+function nodeContainsAttachmentEvidence(node: Node): boolean {
+  return (
+    node instanceof Element &&
+    (node.matches(CHATGPT_SELECTORS.attachmentEvidence) ||
+      node.querySelector(CHATGPT_SELECTORS.attachmentEvidence) !== null)
+  );
+}
+
 export class ChatGptAdapter implements ChatApplicationAdapter {
   readonly id = "chatgpt" as const;
   readonly version = CHATGPT_ADAPTER_VERSION;
@@ -201,6 +232,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
   #interceptor: SubmitInterceptor | null = null;
   #interceptorDisposer: (() => void) | null = null;
   #observer: MutationObserver | null = null;
+  #attachmentStates = new Map<number, AttachmentStateTracker>();
   #healthCheckQueued = false;
   #lastHealth: "waiting_for_composer" | "healthy" | AdapterHealthCode | null =
     null;
@@ -308,11 +340,35 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     context: LiveSubmissionContext,
   ): SubmissionContentCapabilities {
     this.#assertPromptContext(context);
+    const evidence = [
+      ...context.submissionRegion.querySelectorAll(
+        CHATGPT_SELECTORS.attachmentEvidence,
+      ),
+    ];
+    let tracker = this.#attachmentStates.get(context.contextIdentity);
+    if (
+      tracker === undefined ||
+      tracker.submissionRegion.deref() !== context.submissionRegion
+    ) {
+      tracker = {
+        submissionRegion: new WeakRef(context.submissionRegion),
+        evidence: evidence.map((element) => new WeakRef(element)),
+        mutationVersion: 0,
+        observedMutationVersion: 0,
+        fingerprint: newAttachmentStateFingerprint(),
+      };
+      this.#attachmentStates.set(context.contextIdentity, tracker);
+    } else if (
+      !sameElementIdentity(tracker.evidence, evidence) ||
+      tracker.observedMutationVersion !== tracker.mutationVersion
+    ) {
+      tracker.evidence = evidence.map((element) => new WeakRef(element));
+      tracker.observedMutationVersion = tracker.mutationVersion;
+      tracker.fingerprint = newAttachmentStateFingerprint();
+    }
     return {
-      hasUnsupportedAttachment:
-        context.submissionRegion.querySelector(
-          CHATGPT_SELECTORS.attachmentEvidence,
-        ) !== null,
+      attachmentPresent: evidence.length > 0,
+      attachmentStateFingerprint: tracker.fingerprint,
     };
   }
 
@@ -399,6 +455,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#interceptorDisposer = null;
     this.#composerIdentities = null;
     this.#identityContexts.clear();
+    this.#attachmentStates.clear();
     this.#lastApplicationLocation = null;
     this.#lastHealth = null;
     this.#lastHealthApplicationLocation = null;
@@ -637,13 +694,15 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       this.#runHealthCheck();
       return;
     }
-    this.#observer = new MutationObserverConstructor(() => {
+    this.#observer = new MutationObserverConstructor((records) => {
+      this.#markAttachmentMutations(records);
       this.#queueHealthCheck();
     });
     const observationRoot = this.#requireDocument().documentElement;
     this.#observer.observe(observationRoot, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributes: true,
       attributeFilter: [
         "aria-disabled",
@@ -664,6 +723,40 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       ],
     });
     this.#runHealthCheck();
+  }
+
+  #markAttachmentMutations(records: readonly MutationRecord[]): void {
+    for (const tracker of this.#attachmentStates.values()) {
+      const region = tracker.submissionRegion.deref();
+      if (region === undefined || !region.isConnected) {
+        continue;
+      }
+      const priorEvidence = new Set(
+        tracker.evidence
+          .map((reference) => reference.deref())
+          .filter((element): element is Element => element !== undefined),
+      );
+      const changed = records.some((record) => {
+        const target =
+          record.target instanceof Element
+            ? record.target
+            : record.target.parentElement;
+        if (target === null || !region.contains(target)) {
+          return false;
+        }
+        if (
+          priorEvidence.has(target) ||
+          [...priorEvidence].some((element) => element.contains(target)) ||
+          target.matches(CHATGPT_SELECTORS.attachmentEvidence)
+        ) {
+          return true;
+        }
+        return [...record.addedNodes, ...record.removedNodes].some(
+          nodeContainsAttachmentEvidence,
+        );
+      });
+      if (changed) tracker.mutationVersion += 1;
+    }
   }
 
   #queueHealthCheck(): void {
@@ -694,6 +787,17 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
       if (this.#lastHealth !== "healthy") {
         this.#lastHealth = "healthy";
         this.#onHealthTransition?.({ status: "healthy" });
+      }
+      return;
+    }
+    if (diagnosis.healthCode === "ambiguous_submission_context") {
+      this.#clearHealthGrace();
+      if (this.#lastHealth !== diagnosis.healthCode) {
+        this.#lastHealth = diagnosis.healthCode;
+        this.#onHealthTransition?.({
+          status: "degraded",
+          healthCode: diagnosis.healthCode,
+        });
       }
       return;
     }

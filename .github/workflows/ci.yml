@@ -74,6 +74,11 @@ jobs:
           node scripts/canonical-dist-digest.mjs apps/extension/dist >
           ai-dlp-extension-${REVIEWED_COMMIT}.sha256
 
+      - name: Archive reviewed source
+        run:
+          git archive --format=tar.gz --output
+          ai-dlp-source-${REVIEWED_COMMIT}.tar.gz ${REVIEWED_COMMIT}
+
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
@@ -93,6 +98,14 @@ jobs:
         with:
           name: ai-dlp-extension-${{ env.REVIEWED_COMMIT }}.sha256
           path: ai-dlp-extension-${{ env.REVIEWED_COMMIT }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload reviewed source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ai-dlp-source-${{ env.REVIEWED_COMMIT }}.tar.gz
+          path: ai-dlp-source-${{ env.REVIEWED_COMMIT }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 

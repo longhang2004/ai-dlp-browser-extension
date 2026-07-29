@@ -3,9 +3,12 @@ import { extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { inspectJavaScriptImports } from "./build-topology-rules.mjs";
+import { verifyExtensionArtifactReachability } from "./artifact-reachability.mjs";
 
 const extensionRoot = new URL("../", import.meta.url);
 const distRoot = new URL("dist/", extensionRoot);
+
+await verifyExtensionArtifactReachability(fileURLToPath(distRoot));
 
 function fail(message) {
   throw new Error(`Invalid production build topology: ${message}`);

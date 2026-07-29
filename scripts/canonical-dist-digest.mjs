@@ -3,6 +3,8 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { verifyExtensionArtifactReachability } from "../apps/extension/scripts/artifact-reachability.mjs";
+
 function encodeLength(length) {
   const encoded = Buffer.alloc(8);
   encoded.writeBigUInt64BE(BigInt(length));
@@ -66,9 +68,14 @@ export async function canonicalDirectoryDigest(directory) {
   return hash.digest("hex");
 }
 
+export async function canonicalExtensionDigest(directory) {
+  await verifyExtensionArtifactReachability(directory);
+  return canonicalDirectoryDigest(directory);
+}
+
 async function main() {
   const directory = process.argv[2] ?? "apps/extension/dist";
-  process.stdout.write(`${await canonicalDirectoryDigest(directory)}\n`);
+  process.stdout.write(`${await canonicalExtensionDigest(directory)}\n`);
 }
 
 if (

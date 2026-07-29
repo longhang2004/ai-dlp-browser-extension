@@ -41,6 +41,14 @@ test("pins a least-privilege clean CI gate with all security checks", () => {
     workflow,
     /name: ai-dlp-extension-\$\{\{ env\.REVIEWED_COMMIT \}\}\.sha256/u,
   );
+  assert.match(
+    workflow,
+    /git archive --format=tar\.gz --output\s+ai-dlp-source-\$\{REVIEWED_COMMIT\}\.tar\.gz \$\{REVIEWED_COMMIT\}/u,
+  );
+  assert.match(
+    workflow,
+    /name: ai-dlp-source-\$\{\{ env\.REVIEWED_COMMIT \}\}\.tar\.gz/u,
+  );
   assert.doesNotMatch(
     workflow,
     /name: ai-dlp-extension-\$\{\{ github\.sha \}\}/u,

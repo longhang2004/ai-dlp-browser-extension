@@ -24,12 +24,16 @@ browser storage exports.
    pnpm test:performance
    pnpm build
    pnpm verify:artifact
+   pnpm artifact:digest
    pnpm test:e2e
    ```
 
 3. Record the reviewed production commit, wait for its CI run, download that
-   commit's extension artifact and published digest, and recompute the canonical
-   digest locally. Do not use a later local build for authenticated QA.
+   commit's reachability-verified extension artifact, published digest, and
+   `git archive` source tarball. Recompute the canonical digest locally; the
+   digest command must first accept the downloaded artifact's reachability
+   graph. Keep all three artifacts bound to the same reviewed commit. Do not use
+   a later local build for authenticated QA.
 4. Load the downloaded artifact unpacked in Microsoft Edge 102+.
 5. Open the popup on `https://chatgpt.com`. Do not rely on enforcement unless it
    says **Protection is active** for the composer and semantic Send control
@@ -39,18 +43,20 @@ browser storage exports.
 7. Record no prompt content, uploaded-file names, preview text, page HTML,
    storage dumps, or sensitive screenshots.
 
-## Automated production-build checks — successful on 2026-07-29
+## Automated production-build checks — reviewed on 2026-07-29
 
-The clean verification sequence above completed against reviewed commit
-`df89f06374cb3e9d77412e33012b01ed6e7028d3`.
+The hardening verification completed against reviewed commit
+`806cdf0d7d95d07592e0b51415d7cf96fc800f07`.
 
-- 723 unit, DOM, type-boundary, storage-migration, policy, controller, adapter,
-  and UI tests passed.
-- Four detector performance scenarios passed.
-- The production build contained 12 files and no source maps.
+- 745 Vitest unit, DOM, type-boundary, storage-migration, policy, controller,
+  adapter, and UI tests passed, along with 7 Node artifact-script tests.
+- The production build contained 12 reachable files, no source maps, and no
+  local-asset allowlist entries.
+- The manifest-rooted verifier rejected orphan assets before canonical digest
+  generation; the digest was
+  `e72b6385d20f1afe626c60084d93902f4c6ff1af873dd2483cfe5144231368a7`.
 - Artifact verification classified 43 reviewed URL literals with no fetching or
   unreviewed URL.
-- All 10 Playwright production-build scenarios passed.
 
 The Playwright suite routes ChatGPT to local fixture HTML and blocks every other
 HTTP(S) request.
@@ -64,7 +70,7 @@ HTTP(S) request.
 | Strict detectors              | Payment-card, AWS-key, and private-key fixtures blocked without bypass                                       |
 | Attachment warning            | Attachment-only warning, accessible bypass, one-shot authorization, and prompt/file-name privacy passed      |
 | Attachment block and allow    | Block was fail-closed; allow was dialog-free and not persisted to audit                                      |
-| Combined warning              | Text category plus attachment limitation used one generic bypass and `attachment_bypassed`                   |
+| Combined warning              | Text category plus a contributing attachment limitation used one generic bypass and `attachment_bypassed`    |
 | Disabled protection           | Runtime status reported disabled and submission passed through without protection observers                  |
 | Audit rendering and retention | Final retained decisions were prompt-free; attachment decisions exposed no filename, count, or page metadata |
 
@@ -87,6 +93,11 @@ extension versions and the execution date/timezone.
   submit.
 - Text-only **Send anyway** works once; a second attempt requires a new
   decision.
+- While a warning is open, change one enforcement setting (enabled state,
+  email/phone/attachment action, or protected keywords). The original action
+  must become inert, record `cancelled` when applicable, and never resume; a new
+  submission must use the replacement settings. Changing only retention or
+  applying an identical normalized snapshot must not cancel an active attempt.
 - No current ChatGPT editor variant shows Redact.
 - Attachment `warn` shows **Unscanned attachment**, fixed inspection-limit copy,
   Cancel, and the accessible action **Send attachment without inspection**.
@@ -97,6 +108,11 @@ extension versions and the execution date/timezone.
   audit event.
 - A combined text-and-attachment warning shows categories, the inspection
   limitation, and one generic **Send anyway** action.
+- With email or phone set to `allow` and attachment set to `warn`, a combined
+  input shows and audits only the attachment limitation; the allowed text
+  category is absent. With attachment set to `allow` and text set to `warn`, the
+  text-only warning and audit omit the attachment and a bypass is `bypassed`,
+  not `attachment_bypassed`.
 - A strict text block combined with an attachment remains blocked and exposes no
   bypass.
 - Adding, removing, replacing, or mutating attachment evidence while approval is
@@ -113,7 +129,12 @@ extension versions and the execution date/timezone.
 - The dialog's open Shadow root is inspectable and keyboard focus remains
   contained.
 
-## Reviewed-build authenticated Edge result — successful on 2026-07-29
+## Historical reviewed-build authenticated Edge result — 2026-07-29
+
+This record predates the enforcement-revision, contributor-only audit V3, and
+artifact-source-archive hardening. It is retained as historical live-DOM
+evidence only; use the preconditions and current interactive checklist for
+authenticated QA of the current build.
 
 ### Build and environment identity
 

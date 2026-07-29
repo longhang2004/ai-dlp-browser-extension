@@ -28,7 +28,8 @@ flowchart LR
 - `packages/detectors` owns prompt analysis and deterministic redaction. This is
   one of the few areas allowed to hold `matchedText` transiently.
 - `packages/policy-engine` receives only `PolicyFinding` metadata and returns
-  only `action`, `matchedRuleIds`, and `reasonCode`.
+  only `action`, contributor-only `matchedRuleIds`, `contributingCategories`,
+  and `reasonCode`.
 - `apps/extension` owns Chrome APIs, the ChatGPT adapter, settings bootstrap,
   submission state, UI, pages, storage adapters, manifest, and builds.
 
@@ -40,9 +41,13 @@ redacted prompt text, or offsets.
 1. The content script opens the `settings-v2` port and reports `initializing`.
 2. The service worker validates the sender and sends a versioned settings
    snapshot.
-3. Disabled settings create no protection runtime. Enabled settings create and
-   register one runtime, which reports `waiting_for_composer` until a valid
-   composer is confirmed, then `active`, or `degraded` after the grace period.
+3. The first validated enforcement snapshot starts revision 1. A change to
+   protection enabled state, email/phone/attachment actions, or protected
+   keywords advances that revision; an audit-retention-only or identical
+   normalized snapshot does not. Disabled settings create no protection runtime.
+   Enabled settings create and register one runtime, which reports
+   `waiting_for_composer` until a valid composer is confirmed, then `active`, or
+   `degraded` after the grace period.
 4. Click or unmodified Enter is resolved from its exact event target and
    captured synchronously. One shared collector must find exactly one usable
    composer for the exact Send control and region. Multiple usable owners fail
@@ -50,21 +55,27 @@ redacted prompt text, or offsets.
    analysis, dialog findings, authorization, or resume. Separate composer roots
    with separate Send controls remain target-anchored. Shift+Enter, IME, and
    modifier combinations pass through.
-5. The controller reads the current prompt synchronously and retains it only for
-   the active attempt.
+5. The controller captures the current enforcement revision and immutable
+   settings snapshot with the attempt, reads the prompt synchronously, and
+   retains prompt content only for that active attempt. A changed enforcement
+   revision cancels active work; stale dialogs or callbacks cannot resume under
+   replaced policy.
 6. Attachment presence and an opaque structural fingerprint are checked across
    the exact captured submission region, including chips before or after a
    nested form. The fingerprint contains only element identity and mutation
    versioning. Policy maps attachment presence to block, warn, or allow; the
    default is warn. Inputs over 100,000 UTF-16 code units stop before detection.
 7. Findings are converted separately into metadata-only policy findings and
-   placeholder-only display findings.
+   placeholder-only display findings. Policy evaluates every match, selects the
+   highest-precedence action, and returns only rules/categories contributing to
+   that action. The controller filters transient findings to those contributing
+   categories before display, preview, counts, or audit metadata are built.
 8. The controller handles allow, warn, internal redact, or block decisions.
    Every Milestone 1 ChatGPT editor reports replacement unsupported, so warning
    dialogs never offer redaction and an internal redact decision fails closed.
    Before any resumed submission it re-resolves the exact weak identity, URL,
    region, composer, send ownership, context version, current text, attachment
-   presence, and attachment fingerprint.
+   presence, attachment fingerprint, and captured enforcement revision.
 9. A one-shot authorization is consumed only after every revalidation succeeds.
    Modified prompts, attachment changes, navigation, shared-Send ambiguity,
    stale or replaced dialogs, replaced composers/regions, cancellation, expiry,
@@ -82,14 +93,17 @@ Content scripts never access storage directly. Extension pages use closed,
 strictly validated one-time messages; content settings use a validated long-
 lived port with generation numbers.
 
-Settings and audit data use `schemaVersion: 2` envelopes. Persisted email,
-phone, and attachment actions are limited to `allow`, `warn`, and `block`.
-Strictly valid V1 settings migrate atomically, preserving choices, normalizing
-legacy `redact` to `warn`, and adding attachment `warn`. Strictly valid V1 audit
-events gain required decision reason and attachment-presence metadata. Each
-migrated envelope is persisted once before use. Missing, corrupted, unsupported,
-or otherwise invalid data falls back to safe settings or an empty audit log;
-invalid attachment values never fall back to `allow`.
+Settings use `schemaVersion: 2`; audit uses `schemaVersion: 3`, and new ChatGPT
+audit events use adapter version 3. Persisted email, phone, and attachment
+actions are limited to `allow`, `warn`, and `block`. Strictly valid V1 settings
+migrate atomically, preserving choices, normalizing legacy `redact` to `warn`,
+and adding attachment `warn`. V1/V2 audit envelopes migrate once to V3: valid
+events are retained only when their contributor set can be established without
+guessing, while ambiguous decisions are discarded without discarding valid
+non-decision history. Each migrated envelope is retention-filtered and persisted
+before use. Missing, corrupted, unsupported, or otherwise invalid data falls
+back to safe settings or an empty audit log; invalid attachment values never
+fall back to `allow`.
 
 ## UI isolation and status truthfulness
 
@@ -114,6 +128,12 @@ generated manifest has one static top-frame content script for
 `https://chatgpt.com/*`, permission only for `storage`, and an extension-page
 CSP with `connect-src 'none'`.
 
-CI computes a canonical SHA-256 over sorted generated relative paths and file
-bytes and publishes it beside the commit-addressed extension artifact. Reviewed
-live QA must use that downloaded artifact and match the published digest.
+Before the existing topology/security checks, the build verifier traverses an
+artifact graph rooted at `manifest.json`: worker, content scripts/styles,
+extension pages, icons, HTML assets, and recursive static local JavaScript
+imports. It rejects missing, dynamic/bare/non-local, source-mapped, or
+unreachable assets; a local-asset allowlist defaults empty and cannot admit an
+executable, page, or source-map file. CI computes a canonical SHA-256 only after
+that graph passes and publishes the verified extension, digest, and a
+commit-addressed `git archive` source tarball. Reviewed live QA must use that
+matching artifact set.

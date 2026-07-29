@@ -27,7 +27,7 @@ audit data, and production logs are completely prompt-free.
 | Policy finding metadata  | Controller and policy engine               | Policy evaluation only                             | Never as original findings            |
 | Display finding metadata | Controller and dialog                      | Active dialog only                                 | Placeholder/category/confidence only  |
 | Settings                 | `chrome.storage.local`                     | Until changed or extension data is removed         | Local version-2 envelope              |
-| Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-2 envelope  |
+| Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-3 envelope  |
 | Status snapshots         | Settings port and extension pages          | Current connection/page lifetime                   | Not durable                           |
 | Attachment presence flag | Adapter/controller active attempt          | Synchronous checks and active attempt only         | Fixed boolean only; no file metadata  |
 | Attachment fingerprint   | Adapter/controller active attempt          | Replaced on structural identity or mutation change | Opaque identity only; never persisted |
@@ -61,11 +61,21 @@ future explicitly configured allow audit, but Milestone 1 neither exposes nor
 enables it.
 
 Decision records contain action, resolution, reason code, attachment presence,
-categories, rule IDs, finding count, adapter version, timestamp, and optionally
-a preview made only from approved placeholders. Attachment-only records contain
-zero findings, no preview, and only the fixed `attachment.unsupported` rule.
-They never contain raw text, matched values, filenames, attachment counts,
-prompt excerpts, offsets, or sanitized prompt text.
+only the categories and rule IDs that contributed to the final action, finding
+count, adapter version, timestamp, and optionally a preview made only from
+approved placeholders. The controller removes lower-precedence or allowed
+matches before dialog, preview, count, or audit construction. Attachment-only
+records contain zero findings, no preview, and only the fixed
+`attachment.unsupported` rule. A warning uses `attachment_bypassed` only when
+that rule contributed; an allowed attachment beside a text warning uses
+`bypassed`. Records never contain raw text, matched values, filenames,
+attachment counts, prompt excerpts, offsets, or sanitized prompt text.
+
+Audit storage is a V3 envelope, and newly emitted events have adapter version 3.
+On first read, V1/V2 audit envelopes are normalized, retention-filtered, and
+persisted as V3 before use only when the stored contributor set is provable from
+the record. Ambiguous legacy decisions are discarded rather than guessed or
+relabeled; valid non-decision events from the same legacy envelope remain.
 
 ## Oversized prompts
 
@@ -117,3 +127,13 @@ URLs, unexpected direct production dependencies, and production-source logging.
 Framework documentation/error URLs require an exact inert allowlist entry with
 justification. The generated URL report records the literal, generated file,
 surrounding code, classification, fetching/executable state, and justification.
+
+The reachability verifier starts at `manifest.json` and follows the worker,
+content scripts/styles, extension pages, icons, HTML assets, and recursive
+static local JavaScript imports. It rejects missing references, non-local or
+dynamic imports, and source maps; every otherwise-unreachable local asset needs
+an explicit allowlist entry, which cannot allow executable, page, or source-map
+files. The canonical extension digest is computed only after this graph passes.
+CI publishes the verified extension and digest with a `git archive` source
+tarball for the same reviewed commit, preserving review provenance without
+copying prompt-derived data.

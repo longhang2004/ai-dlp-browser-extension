@@ -16,6 +16,9 @@ never replaces a ChatGPT composer automatically.
 - The ChatGPT adapter reads the active composer only for the synchronous
   operation being performed; it does not cache prompt content.
 - React receives category, confidence, and placeholder metadata only.
+- Dialogs and audit records retain only the categories and rules that
+  contributed to the enforced action; lower-precedence or allowed matches are
+  omitted.
 - Runtime messages, the service worker, storage, audit records, and logs are
   prompt-free.
 - Ordinary clean `allow` decisions are not stored.
@@ -60,11 +63,15 @@ pnpm artifact:digest
 `pnpm test:browser` uses Playwright's bundled Chromium, loads the production
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
+`pnpm build` clears the prior extension output first. `pnpm verify:artifact`
+then validates a manifest-rooted reachability graph, rejecting missing,
+non-local, source-mapped, or unallowlisted unreachable output.
+`pnpm artifact:digest` repeats that reachability check before it hashes the
+canonical artifact.
 
-The latest remediation run on 2026-07-28 passed 723 unit/DOM/node tests, 10
-Chromium integration tests, and 4 performance scenarios. The production build
-contained 12 files; 43 URL literals were classified with zero fetching and zero
-unreviewed URLs.
+The reviewed remediation verification on 2026-07-29 passed 745 Vitest tests and
+7 Node artifact-script tests. The production build contained 12 reachable files,
+no source maps, and no required local-asset allowlist entries.
 
 ## Load the unpacked extension
 
@@ -92,8 +99,18 @@ attachment action `warn`. Invalid attachment actions fall back to `warn`, never
 protected keywords warn; high-confidence API secrets block and medium-confidence
 API secrets warn.
 
-The audit page stores only privacy-safe decision metadata and enforcement or
-adapter-health errors. Clearing the audit log requires explicit confirmation.
+The audit page stores only privacy-safe contributor metadata and enforcement or
+adapter-health errors in a V3 envelope; newly emitted events use ChatGPT adapter
+event version 3. A warning gets `attachment_bypassed` only when the attachment
+rule contributed to the final action; an allowed attachment alongside a text
+warning remains the ordinary `bypassed` case. Valid legacy V1/V2 audit records
+are migrated conservatively to V3 once, while ambiguous legacy decisions are
+discarded rather than relabeled. Clearing the audit log requires explicit
+confirmation.
+
+CI publishes a reachability-verified extension, its canonical digest, and a
+`git archive` source tarball for the same reviewed commit. Authenticated QA uses
+that three-artifact set, not a later local build.
 
 ## Scope
 

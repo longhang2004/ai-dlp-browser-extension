@@ -361,32 +361,42 @@ describe("ChatGptAdapter prompt operations", () => {
     );
   });
 
-  it("keeps attachment fingerprints stable for unchanged evidence and non-evidence text mutations", async () => {
-    const attachmentText = "attachment-text-private-before";
+  it("keeps attachment fingerprints stable for unchanged evidence and non-evidence text mutations without exposing changed attachment text", async () => {
+    const attachmentTextBefore = "attachment-text-private-before";
+    const attachmentTextAfter = "attachment-text-private-after";
     renderFixture(`
       <section data-testid="composer-root">
         <div id="prompt-textarea" contenteditable="true" role="textbox">prompt-before</div>
-        <div data-testid="composer-attachment"><span id="attachment-text">${attachmentText}</span></div>
+        <div data-testid="composer-attachment"><span id="attachment-text">${attachmentTextBefore}</span></div>
         <div id="unrelated-text">unrelated-before</div>
         <button data-testid="send-button" aria-label="Send prompt">Send</button>
       </section>
     `);
     const attempts: unknown[] = [];
-    const errors: unknown[] = [];
+    const errors: ChatGptAdapterError[] = [];
+    let throwOnCapturedAttempt = false;
     const adapter = createAdapter({
       onAdapterError: (error) => errors.push(error),
     });
     adapter.registerSubmitInterceptor((attempt) => {
       attempts.push(attempt);
+      if (throwOnCapturedAttempt) {
+        throw new Error(attachmentTextAfter);
+      }
       return "intercept";
     });
     const context = adapter.resolveCurrentSubmissionContext();
+    const attachmentText =
+      document.querySelector("#attachment-text")?.firstChild;
     const promptText = document.querySelector("#prompt-textarea")?.firstChild;
     const unrelatedText = document.querySelector("#unrelated-text")?.firstChild;
+    const send = document.querySelector('[data-testid="send-button"]');
     if (
       context === null ||
+      !(attachmentText instanceof Text) ||
       !(promptText instanceof Text) ||
-      !(unrelatedText instanceof Text)
+      !(unrelatedText instanceof Text) ||
+      !(send instanceof HTMLButtonElement)
     ) {
       throw new Error("Expected text-node mutation fixture.");
     }
@@ -407,19 +417,36 @@ describe("ChatGptAdapter prompt operations", () => {
       initial.attachmentStateFingerprint,
     );
 
+    await updateTextNode(attachmentText, attachmentTextAfter);
+    const afterAttachmentMutation =
+      adapter.inspectSubmissionCapabilities(context);
+    expect(afterAttachmentMutation.attachmentStateFingerprint).not.toBe(
+      initial.attachmentStateFingerprint,
+    );
+
+    throwOnCapturedAttempt = true;
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+    send.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(attempts).toHaveLength(1);
+    expect(errors).toHaveLength(1);
+    const messages = errors.map((error) => error.message);
+    expect(messages).toHaveLength(1);
+
     const serializedBoundary = JSON.stringify({
       diagnostics: adapter.getDiagnosticsForTesting(),
       events: attempts,
       errors,
-      messages: errors.map((error) =>
-        error instanceof Error ? error.message : error,
-      ),
+      messages,
       fingerprints: [
         initial.attachmentStateFingerprint,
         afterUnrelated.attachmentStateFingerprint,
+        afterAttachmentMutation.attachmentStateFingerprint,
       ],
     });
-    expect(serializedBoundary).not.toContain(attachmentText);
+    for (const attachmentText of [attachmentTextBefore, attachmentTextAfter]) {
+      expect(serializedBoundary).not.toContain(attachmentText);
+    }
   });
 
   it("rotates attachment fingerprints when direct and nested evidence text changes", async () => {

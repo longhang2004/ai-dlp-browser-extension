@@ -41,7 +41,6 @@ import {
 } from "./authorization.js";
 import {
   createSubmissionDialogModel,
-  toDetectorCategories,
   toPolicyFindings,
 } from "./display-model.js";
 import type { EnforcementRevision } from "./enforcement-settings.js";
@@ -274,7 +273,7 @@ export function createSubmissionController(
     }
     attempt.decisionMetadata = {
       policyAction: decision.action,
-      detectorCategories: toDetectorCategories(attempt.findings),
+      detectorCategories: [...decision.contributingCategories],
       matchedRuleIds: [...decision.matchedRuleIds],
       findingCount: attempt.findings.length,
       reasonCode: decision.reasonCode,
@@ -570,6 +569,9 @@ export function createSubmissionController(
     }
 
     const decision = attempt.decision;
+    attempt.findings = attempt.findings.filter((finding) =>
+      decision.contributingCategories.includes(finding.category),
+    );
     prepareDecisionMetadata(attempt);
     if (
       decision.action === "redact" &&
@@ -659,7 +661,9 @@ export function createSubmissionController(
         await resumeApproved(
           attempt,
           "unchanged",
-          attempt.attachmentPresent ? "attachment_bypassed" : "bypassed",
+          decision.reasonCode === "unsupported_attachment"
+            ? "attachment_bypassed"
+            : "bypassed",
         );
       }
     }

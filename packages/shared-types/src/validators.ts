@@ -40,7 +40,6 @@ import type {
 } from "./messages.js";
 import {
   ATTACHMENT_POLICY_RULE_ID,
-  POLICY_ACTION_PRECEDENCE,
   POLICY_NO_FINDINGS_RULE,
   POLICY_REASON_CODE,
   POLICY_REASON_CODES,
@@ -198,39 +197,37 @@ function hasCompatibleRuleSet(ruleIds: readonly PolicyRuleId[]): boolean {
   return true;
 }
 
-function hasConfigurableContactRule(ruleIds: readonly PolicyRuleId[]): boolean {
-  return ruleIds.some((ruleId) => CONFIGURABLE_CONTACT_RULE_IDS.has(ruleId));
-}
-
 function hasOnlyConfigurableContactRules(
   ruleIds: readonly PolicyRuleId[],
 ): boolean {
   return ruleIds.every((ruleId) => CONFIGURABLE_CONTACT_RULE_IDS.has(ruleId));
 }
 
-function hasKnowableActionForRules(
-  action: Exclude<PolicyAction, "allow">,
+function hasContributorActionForRules(
+  action: PolicyAction,
   ruleIds: readonly PolicyRuleId[],
 ): boolean {
-  let fixedAction: PolicyAction = "allow";
-  for (const ruleId of ruleIds) {
+  return ruleIds.every((ruleId) => {
     const rule = FINDING_RULE_BY_ID.get(ruleId);
-    if (
+    return (
       rule !== undefined &&
-      rule.actionSource.mode === "fixed" &&
-      POLICY_ACTION_PRECEDENCE.indexOf(rule.actionSource.requiredAction) >
-        POLICY_ACTION_PRECEDENCE.indexOf(fixedAction)
-    ) {
-      fixedAction = rule.actionSource.requiredAction;
-    }
-  }
+      (rule.actionSource.mode === "configured" ||
+        rule.actionSource.requiredAction === action)
+    );
+  });
+}
 
-  const requestedPriority = POLICY_ACTION_PRECEDENCE.indexOf(action);
-  const fixedPriority = POLICY_ACTION_PRECEDENCE.indexOf(fixedAction);
-  return (
-    requestedPriority >= fixedPriority &&
-    (requestedPriority === fixedPriority || hasConfigurableContactRule(ruleIds))
-  );
+function getContributingCategories(
+  ruleIds: readonly PolicyRuleId[],
+): SensitiveDataCategory[] {
+  return [
+    ...new Set(
+      ruleIds.flatMap((ruleId) => {
+        const rule = FINDING_RULE_BY_ID.get(ruleId);
+        return rule === undefined ? [] : [rule.category];
+      }),
+    ),
+  ];
 }
 
 function isPolicyFindingSnapshot(value: unknown): value is PolicyFinding {
@@ -360,81 +357,73 @@ function isPolicyDecisionSnapshot(value: unknown): value is PolicyDecision {
       !hasExactOwnKeys(value, [
         "action",
         "matchedRuleIds",
+        "contributingCategories",
         "reasonCode",
         "attachmentPresent",
       ]) ||
       !isPolicyAction(value.action) ||
       !isPolicyReasonCode(value.reasonCode) ||
-      typeof value.attachmentPresent !== "boolean"
+      typeof value.attachmentPresent !== "boolean" ||
+      !isDenseExactArray(
+        value.contributingCategories,
+        0,
+        SENSITIVE_DATA_CATEGORIES.length,
+        isSensitiveDataCategory,
+      ) ||
+      !hasUniqueItems(value.contributingCategories)
     ) {
       return false;
     }
 
-    if (value.attachmentPresent) {
-      if (
-        !isDenseExactArray(
-          value.matchedRuleIds,
-          1,
-          POLICY_RULE_IDS.length - 1,
-          isPolicyRuleId,
-        ) ||
-        value.matchedRuleIds.at(-1) !== ATTACHMENT_POLICY_RULE_ID ||
-        value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) ||
-        !hasUniqueItems(value.matchedRuleIds) ||
-        !hasPolicyRuleOrder(value.matchedRuleIds) ||
-        (value.reasonCode !== POLICY_REASON_CODE.POLICY_MATCH &&
-          value.reasonCode !== POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT)
-      ) {
-        return false;
-      }
-      const findingRuleIds = value.matchedRuleIds.filter(
-        (ruleId) => ruleId !== ATTACHMENT_POLICY_RULE_ID,
+    if (value.reasonCode === POLICY_REASON_CODE.NO_FINDINGS) {
+      return (
+        value.action === "allow" &&
+        value.attachmentPresent === false &&
+        isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
+        value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id &&
+        value.contributingCategories.length === 0
       );
-      if (
-        !hasCompatibleRuleSet(findingRuleIds) ||
-        (findingRuleIds.length === 0 &&
-          (value.action === "redact" ||
-            value.reasonCode !== POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT)) ||
-        (value.action === "redact" &&
-          value.reasonCode !== POLICY_REASON_CODE.POLICY_MATCH)
-      ) {
-        return false;
-      }
-      return true;
     }
 
     if (
-      Array.isArray(value.matchedRuleIds) &&
-      value.matchedRuleIds.includes(ATTACHMENT_POLICY_RULE_ID)
-    ) {
-      return false;
-    }
-    if (value.action === "allow") {
-      return (
-        (value.reasonCode === POLICY_REASON_CODE.NO_FINDINGS &&
-          isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
-          value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id) ||
-        (value.reasonCode === POLICY_REASON_CODE.POLICY_MATCH &&
-          isDenseExactArray(value.matchedRuleIds, 1, 2, isPolicyRuleId) &&
-          hasUniqueItems(value.matchedRuleIds) &&
-          hasPolicyRuleOrder(value.matchedRuleIds) &&
-          hasOnlyConfigurableContactRules(value.matchedRuleIds))
-      );
-    }
-
-    return (
-      value.reasonCode === POLICY_REASON_CODE.POLICY_MATCH &&
-      isDenseExactArray(
+      !isDenseExactArray(
         value.matchedRuleIds,
         1,
         POLICY_RULE_IDS.length - 1,
         isPolicyRuleId,
-      ) &&
-      !value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) &&
-      hasUniqueItems(value.matchedRuleIds) &&
-      hasPolicyRuleOrder(value.matchedRuleIds) &&
-      hasCompatibleRuleSet(value.matchedRuleIds) &&
-      hasKnowableActionForRules(value.action, value.matchedRuleIds)
+      ) ||
+      value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) ||
+      !hasUniqueItems(value.matchedRuleIds) ||
+      !hasPolicyRuleOrder(value.matchedRuleIds)
+    ) {
+      return false;
+    }
+
+    const attachmentContributed = value.matchedRuleIds.includes(
+      ATTACHMENT_POLICY_RULE_ID,
+    );
+    if (
+      attachmentContributed !==
+        (value.reasonCode === POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT) ||
+      (attachmentContributed &&
+        (!value.attachmentPresent || value.action === "redact"))
+    ) {
+      return false;
+    }
+
+    const findingRuleIds = value.matchedRuleIds.filter(
+      (ruleId) => ruleId !== ATTACHMENT_POLICY_RULE_ID,
+    );
+    const expectedCategories = getContributingCategories(findingRuleIds);
+    const contributingCategories =
+      value.contributingCategories as SensitiveDataCategory[];
+    return (
+      hasCompatibleRuleSet(findingRuleIds) &&
+      hasContributorActionForRules(value.action, findingRuleIds) &&
+      expectedCategories.length === contributingCategories.length &&
+      expectedCategories.every(
+        (category, index) => contributingCategories[index] === category,
+      )
     );
   });
 }
@@ -452,6 +441,7 @@ export function createPolicyDecision(value: PolicyDecision): PolicyDecision {
   return {
     action: snapshot.action,
     matchedRuleIds: [...snapshot.matchedRuleIds],
+    contributingCategories: [...snapshot.contributingCategories],
     reasonCode: snapshot.reasonCode,
     attachmentPresent: snapshot.attachmentPresent,
   };
@@ -484,7 +474,7 @@ export function isStoredSettingsEnvelope(
 function isDecisionResolutionForAction(
   action: PolicyAction,
   resolution: unknown,
-  attachmentPresent: boolean,
+  attachmentContributed: boolean,
 ): boolean {
   if (!isOneOf(resolution, DECISION_RESOLUTIONS)) {
     return false;
@@ -496,7 +486,7 @@ function isDecisionResolutionForAction(
     case "warn":
       return (
         resolution === "cancelled" ||
-        (attachmentPresent
+        (attachmentContributed
           ? resolution === "attachment_bypassed"
           : resolution === "bypassed") ||
         resolution === "redacted"
@@ -584,11 +574,12 @@ function isDecisionAuditEventSnapshot(
       !isDecisionResolutionForAction(
         value.policyAction,
         value.resolution,
-        value.attachmentPresent,
+        value.reasonCode === POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT,
       ) ||
       !isPolicyDecisionSnapshot({
         action: value.policyAction,
         matchedRuleIds: value.matchedRuleIds,
+        contributingCategories: value.detectorCategories,
         reasonCode: value.reasonCode,
         attachmentPresent: value.attachmentPresent,
       })
@@ -596,50 +587,9 @@ function isDecisionAuditEventSnapshot(
       return false;
     }
 
-    if (value.attachmentPresent) {
-      const findingRuleIds = (
-        value.matchedRuleIds as readonly PolicyRuleId[]
-      ).filter((ruleId) => ruleId !== ATTACHMENT_POLICY_RULE_ID);
-      if (findingRuleIds.length === 0) {
-        return (
-          value.findingCount === 0 &&
-          isDenseExactArray(
-            value.detectorCategories,
-            0,
-            0,
-            isSensitiveDataCategory,
-          ) &&
-          !Object.hasOwn(value, "maskedExcerpt")
-        );
-      }
-      if (
-        !isNonNegativeSafeInteger(value.findingCount) ||
-        value.findingCount < 1 ||
-        value.findingCount > 700_000 ||
-        !isDenseExactArray(
-          value.detectorCategories,
-          1,
-          SENSITIVE_DATA_CATEGORIES.length,
-          isSensitiveDataCategory,
-        ) ||
-        !hasUniqueItems(value.detectorCategories) ||
-        !hasCompatibleRuleSet(findingRuleIds) ||
-        !hasCorrelatedRuleCategories(
-          findingRuleIds,
-          value.detectorCategories,
-        ) ||
-        value.findingCount < value.detectorCategories.length
-      ) {
-        return false;
-      }
-      return (
-        !Object.hasOwn(value, "maskedExcerpt") ||
-        hasCorrelatedMaskedExcerpt(
-          value.maskedExcerpt,
-          value.detectorCategories,
-        )
-      );
-    }
+    const findingRuleIds = (
+      value.matchedRuleIds as readonly PolicyRuleId[]
+    ).filter((ruleId) => ruleId !== ATTACHMENT_POLICY_RULE_ID);
 
     if (value.policyAction === "allow") {
       const isCleanAllow =
@@ -653,6 +603,18 @@ function isDecisionAuditEventSnapshot(
         ) &&
         isDenseExactArray(value.matchedRuleIds, 1, 1, isPolicyRuleId) &&
         value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id &&
+        !Object.hasOwn(value, "maskedExcerpt");
+
+      const isAttachmentOnlyAllow =
+        value.resolution === "submitted" &&
+        value.findingCount === 0 &&
+        findingRuleIds.length === 0 &&
+        isDenseExactArray(
+          value.detectorCategories,
+          0,
+          0,
+          isSensitiveDataCategory,
+        ) &&
         !Object.hasOwn(value, "maskedExcerpt");
 
       const isConfiguredAllow =
@@ -671,21 +633,28 @@ function isDecisionAuditEventSnapshot(
         ) &&
         hasUniqueItems(value.detectorCategories) &&
         value.findingCount >= value.detectorCategories.length &&
-        isDenseExactArray(value.matchedRuleIds, 1, 2, isPolicyRuleId) &&
-        hasUniqueItems(value.matchedRuleIds) &&
-        hasPolicyRuleOrder(value.matchedRuleIds) &&
-        hasOnlyConfigurableContactRules(value.matchedRuleIds) &&
-        hasCorrelatedRuleCategories(
-          value.matchedRuleIds,
-          value.detectorCategories,
-        ) &&
+        hasOnlyConfigurableContactRules(findingRuleIds) &&
+        hasCorrelatedRuleCategories(findingRuleIds, value.detectorCategories) &&
         (!Object.hasOwn(value, "maskedExcerpt") ||
           hasCorrelatedMaskedExcerpt(
             value.maskedExcerpt,
             value.detectorCategories,
           ));
 
-      return isCleanAllow || isConfiguredAllow;
+      return isCleanAllow || isAttachmentOnlyAllow || isConfiguredAllow;
+    }
+
+    if (findingRuleIds.length === 0) {
+      return (
+        value.findingCount === 0 &&
+        isDenseExactArray(
+          value.detectorCategories,
+          0,
+          0,
+          isSensitiveDataCategory,
+        ) &&
+        !Object.hasOwn(value, "maskedExcerpt")
+      );
     }
 
     if (
@@ -699,21 +668,8 @@ function isDecisionAuditEventSnapshot(
         isSensitiveDataCategory,
       ) ||
       !hasUniqueItems(value.detectorCategories) ||
-      !isDenseExactArray(
-        value.matchedRuleIds,
-        1,
-        POLICY_RULE_IDS.length - 1,
-        isPolicyRuleId,
-      ) ||
-      value.matchedRuleIds.includes(POLICY_NO_FINDINGS_RULE.id) ||
-      !hasUniqueItems(value.matchedRuleIds) ||
-      !hasPolicyRuleOrder(value.matchedRuleIds) ||
-      !hasCompatibleRuleSet(value.matchedRuleIds) ||
-      !hasKnowableActionForRules(value.policyAction, value.matchedRuleIds) ||
-      !hasCorrelatedRuleCategories(
-        value.matchedRuleIds,
-        value.detectorCategories,
-      )
+      !hasCompatibleRuleSet(findingRuleIds) ||
+      !hasCorrelatedRuleCategories(findingRuleIds, value.detectorCategories)
     ) {
       return false;
     }
@@ -822,7 +778,7 @@ function isStoredAuditEnvelopeSnapshot(
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, ["schemaVersion", "events"]) &&
-      value.schemaVersion === 2 &&
+      value.schemaVersion === 3 &&
       isDenseExactArray(value.events, 0, 1_000, isAuditEventSnapshot),
   );
 }

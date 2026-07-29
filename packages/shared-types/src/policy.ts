@@ -63,6 +63,7 @@ export type PolicyInput = PromptDerivedBoundary & {
 export type PolicyDecision = PromptFreeBoundary & {
   action: PolicyAction;
   matchedRuleIds: PromptFreeArray<string>;
+  contributingCategories: PromptFreeArray<SensitiveDataCategory>;
   reasonCode: DecisionReason;
   attachmentPresent: boolean;
 };

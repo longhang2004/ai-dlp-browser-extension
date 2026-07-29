@@ -117,6 +117,7 @@ const validPolicyFinding: PolicyFinding = {
 const validPolicyDecision: PolicyDecision = {
   action: "warn",
   matchedRuleIds: ["warn.email"],
+  contributingCategories: ["email"],
   reasonCode: "policy_match",
   attachmentPresent: false,
 };
@@ -138,7 +139,7 @@ const validDialog: ProtectionDialogModel =
   createProtectionDialogModel(validDialogInput);
 
 const validAuditEnvelope: StoredAuditEnvelope = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   events: [validDecisionEvent],
 };
 
@@ -686,6 +687,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["allow.no-findings"],
+        contributingCategories: [],
         reasonCode: "no_findings",
         attachmentPresent: false,
       }),
@@ -694,6 +696,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: [],
+        contributingCategories: [],
         reasonCode: "no_findings",
         attachmentPresent: false,
       }),
@@ -702,6 +705,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "no_findings",
         attachmentPresent: false,
       }),
@@ -710,6 +714,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["allow.no-findings"],
+        contributingCategories: [],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -718,6 +723,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "warn",
         matchedRuleIds: [],
+        contributingCategories: [],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -726,6 +732,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "warn",
         matchedRuleIds: ["block.private-key"],
+        contributingCategories: ["private_key"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -734,6 +741,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["block.private-key", "warn.email"],
+        contributingCategories: ["private_key", "email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -742,6 +750,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["warn.email", "block.private-key"],
+        contributingCategories: ["email", "private_key"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -750,6 +759,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "redact",
         matchedRuleIds: ["block.private-key"],
+        contributingCategories: ["private_key"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -758,6 +768,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "redact",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -766,6 +777,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -774,6 +786,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email", "warn.phone"],
+        contributingCategories: ["email", "phone"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -782,6 +795,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "allow",
         matchedRuleIds: ["warn.email", "warn.protected-keyword"],
+        contributingCategories: ["email", "protected_keyword"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -790,6 +804,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "warn",
         matchedRuleIds: ["warn.email", "warn.phone"],
+        contributingCategories: ["email", "phone"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -798,6 +813,7 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -806,8 +822,33 @@ describe("policy runtime boundaries", () => {
       isPolicyDecision({
         action: "block",
         matchedRuleIds: ["warn.api-secret.medium"],
+        contributingCategories: ["api_secret"],
         reasonCode: "policy_match",
         attachmentPresent: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("requires contributor-only rules and correlated contributing categories", () => {
+    const contributorDecision = {
+      action: "warn",
+      matchedRuleIds: ["warn.phone"],
+      contributingCategories: ["phone"],
+      reasonCode: "policy_match",
+      attachmentPresent: false,
+    };
+
+    expect(isPolicyDecision(contributorDecision)).toBe(true);
+    expect(
+      isPolicyDecision({
+        ...contributorDecision,
+        matchedRuleIds: ["warn.email", "warn.phone"],
+      }),
+    ).toBe(false);
+    expect(
+      isPolicyDecision({
+        ...contributorDecision,
+        contributingCategories: ["email"],
       }),
     ).toBe(false);
   });
@@ -1117,11 +1158,48 @@ describe("sanitized preview construction", () => {
 });
 
 describe("audit validation", () => {
+  it("derives warning bypass resolution from attachment contribution", () => {
+    const promptWarningWithAllowedAttachment = {
+      ...validDecisionEvent,
+      resolution: "bypassed",
+      attachmentPresent: true,
+    };
+    const attachmentWarning = {
+      kind: "decision",
+      id: createAuditEventId("00000000-0000-4000-8000-000000000006"),
+      timestamp: createAuditTimestamp("2026-07-26T12:00:05.000Z"),
+      application: "chatgpt",
+      policyAction: "warn",
+      resolution: "attachment_bypassed",
+      detectorCategories: [],
+      matchedRuleIds: ["attachment.unsupported"],
+      findingCount: 0,
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      adapterVersion: CHATGPT_ADAPTER_VERSION,
+    };
+
+    expect(isDecisionAuditEvent(promptWarningWithAllowedAttachment)).toBe(true);
+    expect(
+      isDecisionAuditEvent({
+        ...promptWarningWithAllowedAttachment,
+        resolution: "attachment_bypassed",
+      }),
+    ).toBe(false);
+    expect(isDecisionAuditEvent(attachmentWarning)).toBe(true);
+    expect(
+      isDecisionAuditEvent({
+        ...attachmentWarning,
+        resolution: "bypassed",
+      }),
+    ).toBe(false);
+  });
+
   it("accepts all supported event variants", () => {
     expect(isStoredAuditEnvelope(validAuditEnvelope)).toBe(true);
     expect(
       isStoredAuditEnvelope({
-        schemaVersion: 2,
+        schemaVersion: 3,
         events: [
           validDecisionEvent,
           {
@@ -1297,7 +1375,7 @@ describe("audit validation", () => {
 
   it.each([
     {},
-    { schemaVersion: 3, events: [] },
+    { schemaVersion: 2, events: [] },
     { schemaVersion: 1, events: [], prompt: "secret" },
     {
       schemaVersion: 1,
@@ -1377,7 +1455,7 @@ describe("audit validation", () => {
     )) {
       expect(
         isStoredAuditEnvelope({
-          schemaVersion: 2,
+          schemaVersion: 3,
           events,
         }),
       ).toBe(false);

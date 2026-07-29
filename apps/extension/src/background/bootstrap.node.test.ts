@@ -191,7 +191,7 @@ describe("background bootstrap", () => {
 
     expect(response).toMatchObject({
       type: "audit.result",
-      envelope: { schemaVersion: 2, events: [event] },
+      envelope: { schemaVersion: 3, events: [event] },
     });
   });
 

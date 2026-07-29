@@ -165,6 +165,7 @@ const rejectedInputWithAugmentedFindings: PolicyInput =
 const decision = {
   action: "warn",
   matchedRuleIds: ["warn.email"],
+  contributingCategories: ["email"],
   reasonCode: "policy_match",
   attachmentPresent: false,
 } satisfies PolicyDecision;
@@ -183,6 +184,7 @@ const rejectedDecisionWithAugmentedRules: PolicyDecision =
 const openStringDecisionContract = {
   action: "warn",
   matchedRuleIds: ["attachment.unsupported"],
+  contributingCategories: [],
   reasonCode: "unsupported_attachment",
   attachmentPresent: true,
 } satisfies PolicyDecision;

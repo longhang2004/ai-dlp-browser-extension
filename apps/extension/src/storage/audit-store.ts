@@ -1,9 +1,14 @@
 import {
+  ATTACHMENT_POLICY_RULE_ID,
   CHATGPT_ADAPTER_VERSION,
   isAuditEvent,
   isStoredAuditEnvelope,
+  POLICY_ACTION_PRECEDENCE,
+  POLICY_NO_FINDINGS_RULE,
+  POLICY_RULE_CATALOG,
   type AdapterHealthAuditEvent,
   type AuditEvent,
+  type PolicyAction,
   type StoredAuditEnvelope,
 } from "@ai-dlp/shared-types";
 
@@ -22,7 +27,7 @@ export interface AuditStore {
 }
 
 function emptyEnvelope(): StoredAuditEnvelope {
-  return { schemaVersion: 2, events: [] };
+  return { schemaVersion: 3, events: [] };
 }
 
 function isPersistable(event: AuditEvent): boolean {
@@ -110,105 +115,242 @@ function isPlainDenseDataArray(
   );
 }
 
-function migrateV1Event(value: unknown): AuditEvent | null {
+type LegacyFindingRule = Exclude<
+  (typeof POLICY_RULE_CATALOG)[number],
+  { category: null }
+>;
+
+const LEGACY_FINDING_RULE_BY_ID = new Map<string, LegacyFindingRule>(
+  POLICY_RULE_CATALOG.flatMap((rule) =>
+    rule.category === null
+      ? []
+      : ([[rule.id, rule]] as [string, LegacyFindingRule][]),
+  ),
+);
+
+function sameStrings(left: unknown, right: readonly string[]): boolean {
+  return (
+    isPlainDenseDataArray(left, right.length) &&
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+function migrateLegacyDecision(
+  value: Record<string, unknown>,
+  schemaVersion: 1 | 2,
+): AuditEvent | null {
+  const v1Keys = [
+    "kind",
+    "id",
+    "timestamp",
+    "application",
+    "policyAction",
+    "resolution",
+    "detectorCategories",
+    "matchedRuleIds",
+    "findingCount",
+    "adapterVersion",
+  ] as const;
+  if (
+    !hasExactKeys(
+      value,
+      schemaVersion === 1
+        ? v1Keys
+        : [...v1Keys, "reasonCode", "attachmentPresent"],
+      ["maskedExcerpt"],
+    ) ||
+    !isPlainDenseDataArray(value.matchedRuleIds, 9) ||
+    !isPlainDenseDataArray(value.detectorCategories, 7) ||
+    typeof value.policyAction !== "string" ||
+    !["allow", "warn", "redact", "block"].includes(value.policyAction)
+  ) {
+    return null;
+  }
+
+  const policyAction = value.policyAction as PolicyAction;
+  const reasonCode =
+    schemaVersion === 1
+      ? value.matchedRuleIds.length === 1 &&
+        value.matchedRuleIds[0] === POLICY_NO_FINDINGS_RULE.id
+        ? "no_findings"
+        : "policy_match"
+      : value.reasonCode;
+  const attachmentPresent =
+    schemaVersion === 1 ? false : value.attachmentPresent;
+
+  if (reasonCode === "no_findings") {
+    const migrated = {
+      ...value,
+      ...(schemaVersion === 1 ? { reasonCode, attachmentPresent } : {}),
+    };
+    return isAuditEvent(migrated) ? structuredClone(migrated) : null;
+  }
+  if (
+    (reasonCode !== "policy_match" &&
+      reasonCode !== "unsupported_attachment") ||
+    typeof attachmentPresent !== "boolean"
+  ) {
+    return null;
+  }
+
+  const attachmentContributed = reasonCode === "unsupported_attachment";
+  const hadAttachmentRule = value.matchedRuleIds.includes(
+    ATTACHMENT_POLICY_RULE_ID,
+  );
+  if (
+    (attachmentContributed && (!attachmentPresent || !hadAttachmentRule)) ||
+    (!attachmentPresent && hadAttachmentRule)
+  ) {
+    return null;
+  }
+
+  const findingRuleIds = value.matchedRuleIds.filter(
+    (ruleId): ruleId is string =>
+      typeof ruleId === "string" && ruleId !== ATTACHMENT_POLICY_RULE_ID,
+  );
+  if (
+    findingRuleIds.length !==
+    value.matchedRuleIds.length - (hadAttachmentRule ? 1 : 0)
+  ) {
+    return null;
+  }
+  const rules = findingRuleIds.map((ruleId) =>
+    LEGACY_FINDING_RULE_BY_ID.get(ruleId),
+  );
+  if (rules.some((rule) => rule === undefined)) {
+    return null;
+  }
+  const findingRules = rules.filter(
+    (rule): rule is NonNullable<typeof rule> => rule !== undefined,
+  );
+  const fixedRules = findingRules.filter(
+    (rule) => rule.actionSource.mode === "fixed",
+  );
+  if (
+    fixedRules.some(
+      (rule) =>
+        rule.actionSource.mode === "fixed" &&
+        rule.actionSource.requiredAction !== policyAction &&
+        POLICY_ACTION_PRECEDENCE.indexOf(rule.actionSource.requiredAction) >=
+          POLICY_ACTION_PRECEDENCE.indexOf(policyAction),
+    )
+  ) {
+    return null;
+  }
+  const configuredRules = findingRules.filter(
+    (rule) => rule.actionSource.mode === "configured",
+  );
+  if (
+    policyAction !== "allow" &&
+    configuredRules.length > 0 &&
+    (configuredRules.length !== 1 ||
+      fixedRules.length !== 0 ||
+      attachmentContributed)
+  ) {
+    return null;
+  }
+
+  const contributingRules = findingRules.filter(
+    (rule) =>
+      rule.actionSource.mode === "configured" ||
+      rule.actionSource.requiredAction === policyAction,
+  );
+  const allCategories = [...new Set(findingRules.map((rule) => rule.category))];
+  if (!sameStrings(value.detectorCategories, allCategories)) {
+    return null;
+  }
+  const contributingCategories = [
+    ...new Set(contributingRules.map((rule) => rule.category)),
+  ];
+  const omittedFixedRules = fixedRules.filter(
+    (rule) =>
+      rule.actionSource.mode === "fixed" &&
+      rule.actionSource.requiredAction !== policyAction,
+  );
+  let findingCount = value.findingCount;
+  if (omittedFixedRules.length > 0) {
+    if (
+      Object.hasOwn(value, "maskedExcerpt") ||
+      value.findingCount !== allCategories.length ||
+      allCategories.length !== findingRules.length
+    ) {
+      return null;
+    }
+    findingCount = contributingCategories.length;
+  }
+  const matchedRuleIds = [
+    ...contributingRules.map((rule) => rule.id),
+    ...(attachmentContributed ? [ATTACHMENT_POLICY_RULE_ID] : []),
+  ];
+  let resolution = value.resolution;
+  if (
+    policyAction === "warn" &&
+    (resolution === "bypassed" || resolution === "attachment_bypassed")
+  ) {
+    resolution = attachmentContributed ? "attachment_bypassed" : "bypassed";
+  }
+  const migrated = {
+    ...value,
+    detectorCategories: contributingCategories,
+    matchedRuleIds,
+    findingCount,
+    resolution,
+    ...(schemaVersion === 1 ? { reasonCode, attachmentPresent } : {}),
+  };
+  return isAuditEvent(migrated) ? structuredClone(migrated) : null;
+}
+
+function migrateLegacyEvent(
+  value: unknown,
+  schemaVersion: 1 | 2,
+): AuditEvent | null {
   if (
     !isPlainDataRecord(value) ||
-    value.adapterVersion !== "1" ||
+    (schemaVersion === 1
+      ? value.adapterVersion !== "1"
+      : value.adapterVersion !== "1" && value.adapterVersion !== "2") ||
     value.application !== "chatgpt"
   ) {
     return null;
   }
-  let migrated: unknown;
   if (value.kind === "decision") {
-    if (
-      !hasExactKeys(
-        value,
-        [
-          "kind",
-          "id",
-          "timestamp",
-          "application",
-          "policyAction",
-          "resolution",
-          "detectorCategories",
-          "matchedRuleIds",
-          "findingCount",
-          "adapterVersion",
-        ],
-        ["maskedExcerpt"],
-      )
-    ) {
-      return null;
-    }
-    migrated = {
-      ...value,
-      reasonCode:
-        Array.isArray(value.matchedRuleIds) &&
-        value.matchedRuleIds.length === 1 &&
-        value.matchedRuleIds[0] === "allow.no-findings"
-          ? "no_findings"
-          : "policy_match",
-      attachmentPresent: false,
-    };
-  } else if (value.kind === "enforcement_error") {
-    if (
-      !hasExactKeys(value, [
-        "kind",
-        "id",
-        "timestamp",
-        "application",
-        "errorCode",
-        "adapterVersion",
-      ])
-    ) {
-      return null;
-    }
-    migrated = value;
-  } else if (value.kind === "adapter_health") {
-    if (
-      value.healthCode === "ambiguous_submission_context" ||
-      !hasExactKeys(value, [
-        "kind",
-        "id",
-        "timestamp",
-        "application",
-        "status",
-        "healthCode",
-        "adapterVersion",
-      ])
-    ) {
-      return null;
-    }
-    migrated = value;
-  } else {
+    return migrateLegacyDecision(value, schemaVersion);
+  }
+  if (
+    schemaVersion === 1 &&
+    value.kind === "adapter_health" &&
+    value.healthCode === "ambiguous_submission_context"
+  ) {
     return null;
   }
-  return isAuditEvent(migrated) ? structuredClone(migrated) : null;
+  return isAuditEvent(value) ? structuredClone(value) : null;
 }
 
-function migrateV1Envelope(value: unknown): StoredAuditEnvelope | null {
+function migrateLegacyEnvelope(value: unknown): StoredAuditEnvelope | null {
   if (
     !isPlainDataRecord(value) ||
     !hasExactKeys(value, ["schemaVersion", "events"]) ||
-    value.schemaVersion !== 1 ||
+    (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
     !isPlainDenseDataArray(value.events, 1_000)
   ) {
     return null;
   }
   const events: AuditEvent[] = [];
   for (const candidate of value.events) {
-    const migrated = migrateV1Event(candidate);
-    if (migrated === null) return null;
-    events.push(migrated);
+    const migrated = migrateLegacyEvent(candidate, value.schemaVersion);
+    if (migrated !== null) {
+      events.push(migrated);
+    }
   }
-  return { schemaVersion: 2, events };
+  return { schemaVersion: 3, events };
 }
 
 function sanitizeEnvelope(value: unknown): {
   envelope: StoredAuditEnvelope;
   migrated: boolean;
 } {
-  const migratedEnvelope = migrateV1Envelope(value);
+  const migratedEnvelope = migrateLegacyEnvelope(value);
   const source = isStoredAuditEnvelope(value) ? value : migratedEnvelope;
   if (source === null) {
     return { envelope: emptyEnvelope(), migrated: false };
@@ -229,7 +371,7 @@ function sanitizeEnvelope(value: unknown): {
     events.push(structuredClone(candidate));
   }
   return {
-    envelope: { schemaVersion: 2, events },
+    envelope: { schemaVersion: 3, events },
     migrated: migratedEnvelope !== null,
   };
 }
@@ -254,7 +396,7 @@ export function createAuditStore(
         (stored.events.length !== retainedEvents.length ||
           envelope.events.length !== retainedEvents.length));
     const retained: StoredAuditEnvelope = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       events: retainedEvents,
     };
     if (shouldRewrite) {

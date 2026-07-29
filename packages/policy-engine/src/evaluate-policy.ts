@@ -93,12 +93,16 @@ export function evaluatePolicy(value: unknown): PolicyDecision {
     return validatePolicyDecision({
       action: "allow",
       matchedRuleIds: [POLICY_NO_FINDINGS_RULE.id],
+      contributingCategories: [],
       reasonCode: POLICY_REASON_CODE.NO_FINDINGS,
       attachmentPresent: false,
     });
   }
 
-  const matchedRuleIds: string[] = [];
+  const matches: {
+    rule: PolicyCatalogRule;
+    action: PolicyAction;
+  }[] = [];
   let action: PolicyAction = "allow";
 
   for (const rule of POLICY_RULE_CATALOG) {
@@ -106,34 +110,48 @@ export function evaluatePolicy(value: unknown): PolicyDecision {
       continue;
     }
     if (input.findings.some((finding) => ruleMatchesFinding(rule, finding))) {
-      matchedRuleIds.push(rule.id);
-      action = selectHigherPrecedence(
-        action,
-        resolvePolicyRuleAction(rule, input.policy),
-      );
+      const ruleAction = resolvePolicyRuleAction(rule, input.policy);
+      matches.push({ rule, action: ruleAction });
+      action = selectHigherPrecedence(action, ruleAction);
     }
   }
 
-  let reasonCode:
-    | typeof POLICY_REASON_CODE.POLICY_MATCH
-    | typeof POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT =
-    POLICY_REASON_CODE.POLICY_MATCH;
+  let attachmentContributed = false;
   if (input.attachmentPresent) {
-    matchedRuleIds.push(ATTACHMENT_POLICY_RULE_ID);
     const textPriority = POLICY_ACTION_PRECEDENCE.indexOf(action);
     const attachmentPriority = POLICY_ACTION_PRECEDENCE.indexOf(
       input.policy.attachmentAction,
     );
     if (attachmentPriority >= textPriority) {
       action = input.policy.attachmentAction;
-      reasonCode = POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT;
+      attachmentContributed = true;
     }
   }
+
+  const contributingMatches = matches.filter(
+    (match) => match.action === action,
+  );
+  const matchedRuleIds: string[] = contributingMatches.map(
+    (match) => match.rule.id,
+  );
+  if (attachmentContributed) {
+    matchedRuleIds.push(ATTACHMENT_POLICY_RULE_ID);
+  }
+  const contributingCategories = [
+    ...new Set(
+      contributingMatches.flatMap((match) =>
+        match.rule.category === null ? [] : [match.rule.category],
+      ),
+    ),
+  ];
 
   return validatePolicyDecision({
     action,
     matchedRuleIds,
-    reasonCode,
+    contributingCategories,
+    reasonCode: attachmentContributed
+      ? POLICY_REASON_CODE.UNSUPPORTED_ATTACHMENT
+      : POLICY_REASON_CODE.POLICY_MATCH,
     attachmentPresent: input.attachmentPresent,
   });
 }

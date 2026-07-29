@@ -13,6 +13,49 @@ import { App } from "./App.js";
 afterEach(cleanup);
 
 describe("audit App", () => {
+  it("distinguishes prompt and attachment bypass labels", async () => {
+    const promptBypass = {
+      kind: "decision",
+      id: createAuditEventId("00000000-0000-4000-8000-000000000010"),
+      timestamp: createAuditTimestamp("2026-07-26T12:00:10.000Z"),
+      application: "chatgpt",
+      policyAction: "warn",
+      resolution: "bypassed",
+      detectorCategories: ["email"],
+      matchedRuleIds: ["warn.email"],
+      findingCount: 1,
+      reasonCode: "policy_match",
+      attachmentPresent: true,
+      adapterVersion: CHATGPT_ADAPTER_VERSION,
+    };
+    const attachmentBypass = {
+      kind: "decision",
+      id: createAuditEventId("00000000-0000-4000-8000-000000000011"),
+      timestamp: createAuditTimestamp("2026-07-26T12:00:11.000Z"),
+      application: "chatgpt",
+      policyAction: "warn",
+      resolution: "attachment_bypassed",
+      detectorCategories: [],
+      matchedRuleIds: ["attachment.unsupported"],
+      findingCount: 0,
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+      adapterVersion: CHATGPT_ADAPTER_VERSION,
+    };
+    const sendMessage = vi.fn().mockResolvedValue({
+      type: "audit.result",
+      envelope: {
+        schemaVersion: 3,
+        events: [promptBypass, attachmentBypass],
+      },
+    });
+
+    render(<App runtime={{ sendMessage }} />);
+
+    expect(await screen.findByText("warn · bypassed")).not.toBeNull();
+    expect(screen.getByText("warn · attachment_bypassed")).not.toBeNull();
+  });
+
   it("renders safe fields and clears only after explicit confirmation", async () => {
     const user = userEvent.setup();
     const sendMessage = vi
@@ -20,7 +63,7 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 2,
+          schemaVersion: 3,
           events: [
             {
               kind: "enforcement_error",
@@ -71,7 +114,7 @@ describe("audit App", () => {
     const sendMessage = vi.fn().mockResolvedValue({
       type: "audit.result",
       envelope: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         events: [
           {
             kind: "enforcement_error",
@@ -107,7 +150,7 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 2,
+          schemaVersion: 3,
           events: [
             {
               kind: "enforcement_error",
@@ -141,7 +184,7 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 2,
+          schemaVersion: 3,
           events: [
             {
               kind: "enforcement_error",
@@ -193,7 +236,7 @@ describe("audit App", () => {
     const sendMessage = vi.fn().mockResolvedValue({
       type: "audit.result",
       envelope: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         events: [
           {
             kind: "decision",

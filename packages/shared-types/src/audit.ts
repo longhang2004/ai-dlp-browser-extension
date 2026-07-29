@@ -111,8 +111,8 @@ export const ADAPTER_HEALTH_CODES = Object.freeze([
   "unsupported_dom_variant",
 ] as const);
 
-export const CHATGPT_ADAPTER_VERSIONS = Object.freeze(["1", "2"] as const);
-export const CHATGPT_ADAPTER_VERSION = "2" as const;
+export const CHATGPT_ADAPTER_VERSIONS = Object.freeze(["1", "2", "3"] as const);
+export const CHATGPT_ADAPTER_VERSION = "3" as const;
 
 export type ChatGptAdapterVersion = (typeof CHATGPT_ADAPTER_VERSIONS)[number];
 
@@ -132,6 +132,6 @@ export type AuditEvent =
   DecisionAuditEvent | EnforcementErrorAuditEvent | AdapterHealthAuditEvent;
 
 export type StoredAuditEnvelope = PromptFreeBoundary & {
-  schemaVersion: 2;
+  schemaVersion: 3;
   events: PromptFreeArray<AuditEvent>;
 };

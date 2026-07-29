@@ -67,12 +67,13 @@ describe("evaluatePolicy", () => {
     ).toEqual({
       action: "allow",
       matchedRuleIds: ["allow.no-findings"],
+      contributingCategories: [],
       reasonCode: "no_findings",
       attachmentPresent: false,
     });
   });
 
-  it("evaluates every applicable rule once in fixed table order", () => {
+  it("reports only highest-precedence contributors in fixed table order", () => {
     const decision = evaluatePolicy({
       application: "chatgpt",
       attachmentPresent: false,
@@ -97,22 +98,20 @@ describe("evaluatePolicy", () => {
         "block.aws-access-key",
         "block.payment-card",
         "block.api-secret.high",
-        "warn.api-secret.medium",
-        "warn.email",
-        "warn.phone",
-        "warn.protected-keyword",
+      ],
+      contributingCategories: [
+        "private_key",
+        "aws_access_key",
+        "payment_card",
+        "api_secret",
       ],
       reasonCode: "policy_match",
       attachmentPresent: false,
     });
-    expect(decision.matchedRuleIds).toEqual(
-      POLICY_RULE_CATALOG.filter((rule) => rule.category !== null).map(
-        (rule) => rule.id,
-      ),
-    );
     expect(Reflect.ownKeys(decision)).toEqual([
       "action",
       "matchedRuleIds",
+      "contributingCategories",
       "reasonCode",
       "attachmentPresent",
     ]);
@@ -120,13 +119,25 @@ describe("evaluatePolicy", () => {
   });
 
   it.each([
-    ["block", "warn", "block"],
-    ["redact", "warn", "redact"],
-    ["warn", "allow", "warn"],
-    ["allow", "allow", "allow"],
+    ["block", "warn", "block", ["warn.email"], ["email"]],
+    ["redact", "warn", "redact", ["warn.email"], ["email"]],
+    ["warn", "allow", "warn", ["warn.email"], ["email"]],
+    [
+      "allow",
+      "allow",
+      "allow",
+      ["warn.email", "warn.phone"],
+      ["email", "phone"],
+    ],
   ] as const)(
     "uses block > redact > warn > allow precedence for contact actions %s/%s",
-    (emailAction, phoneAction, expectedAction) => {
+    (
+      emailAction,
+      phoneAction,
+      expectedAction,
+      matchedRuleIds,
+      contributingCategories,
+    ) => {
       expect(
         evaluatePolicy({
           application: "chatgpt",
@@ -139,7 +150,8 @@ describe("evaluatePolicy", () => {
         }),
       ).toEqual({
         action: expectedAction,
-        matchedRuleIds: ["warn.email", "warn.phone"],
+        matchedRuleIds,
+        contributingCategories,
         reasonCode: "policy_match",
         attachmentPresent: false,
       });
@@ -161,6 +173,7 @@ describe("evaluatePolicy", () => {
       ).toMatchObject({
         action,
         matchedRuleIds: ["warn.email", "warn.phone"],
+        contributingCategories: ["email", "phone"],
       });
     }
   });
@@ -197,6 +210,7 @@ describe("evaluatePolicy", () => {
       ).toEqual({
         action,
         matchedRuleIds: [ruleId],
+        contributingCategories: [category],
         reasonCode: "policy_match",
         attachmentPresent: false,
       });
@@ -238,21 +252,77 @@ describe("evaluatePolicy", () => {
   });
 
   it.each([
-    ["allow", "allow", "allow", "unsupported_attachment"],
-    ["allow", "warn", "warn", "unsupported_attachment"],
-    ["allow", "block", "block", "unsupported_attachment"],
-    ["warn", "allow", "warn", "policy_match"],
-    ["warn", "warn", "warn", "unsupported_attachment"],
-    ["warn", "block", "block", "unsupported_attachment"],
-    ["redact", "allow", "redact", "policy_match"],
-    ["redact", "warn", "redact", "policy_match"],
-    ["redact", "block", "block", "unsupported_attachment"],
-    ["block", "allow", "block", "policy_match"],
-    ["block", "warn", "block", "policy_match"],
-    ["block", "block", "block", "unsupported_attachment"],
+    [
+      "allow",
+      "allow",
+      "allow",
+      ["warn.email", "attachment.unsupported"],
+      ["email"],
+      "unsupported_attachment",
+    ],
+    [
+      "allow",
+      "warn",
+      "warn",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    [
+      "allow",
+      "block",
+      "block",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    ["warn", "allow", "warn", ["warn.email"], ["email"], "policy_match"],
+    [
+      "warn",
+      "warn",
+      "warn",
+      ["warn.email", "attachment.unsupported"],
+      ["email"],
+      "unsupported_attachment",
+    ],
+    [
+      "warn",
+      "block",
+      "block",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    ["redact", "allow", "redact", ["warn.email"], ["email"], "policy_match"],
+    ["redact", "warn", "redact", ["warn.email"], ["email"], "policy_match"],
+    [
+      "redact",
+      "block",
+      "block",
+      ["attachment.unsupported"],
+      [],
+      "unsupported_attachment",
+    ],
+    ["block", "allow", "block", ["warn.email"], ["email"], "policy_match"],
+    ["block", "warn", "block", ["warn.email"], ["email"], "policy_match"],
+    [
+      "block",
+      "block",
+      "block",
+      ["warn.email", "attachment.unsupported"],
+      ["email"],
+      "unsupported_attachment",
+    ],
   ] as const)(
     "combines text %s with attachment %s as %s from %s",
-    (textAction, attachmentAction, expectedAction, reasonCode) => {
+    (
+      textAction,
+      attachmentAction,
+      expectedAction,
+      matchedRuleIds,
+      contributingCategories,
+      reasonCode,
+    ) => {
       expect(
         evaluatePolicy({
           application: "chatgpt",
@@ -262,7 +332,8 @@ describe("evaluatePolicy", () => {
         }),
       ).toEqual({
         action: expectedAction,
-        matchedRuleIds: ["warn.email", "attachment.unsupported"],
+        matchedRuleIds,
+        contributingCategories,
         reasonCode,
         attachmentPresent: true,
       });
@@ -282,6 +353,7 @@ describe("evaluatePolicy", () => {
       ).toEqual({
         action: attachmentAction,
         matchedRuleIds: ["attachment.unsupported"],
+        contributingCategories: [],
         reasonCode: "unsupported_attachment",
         attachmentPresent: true,
       });

@@ -25,7 +25,9 @@ import {
 import { toPolicyFinding } from "./display-model.js";
 import { createSubmissionController } from "./submission-controller.js";
 
-function emailFinding(prompt = "person@example.com"): SensitiveDataFinding {
+function emailFinding(
+  prompt = "person@example.com",
+): Extract<SensitiveDataFinding, { category: "email" }> {
   return {
     id: createFindingId("email", 0, prompt.length),
     detectorId: "email",
@@ -35,6 +37,21 @@ function emailFinding(prompt = "person@example.com"): SensitiveDataFinding {
     confidence: "high",
     matchedText: prompt,
     redactedText: SENSITIVE_DATA_PLACEHOLDERS.email,
+  };
+}
+
+function phoneFinding(
+  prompt = "+1 415 555 0132",
+): Extract<SensitiveDataFinding, { category: "phone" }> {
+  return {
+    id: createFindingId("phone", 0, prompt.length),
+    detectorId: "phone",
+    category: "phone",
+    start: 0,
+    end: prompt.length,
+    confidence: "high",
+    matchedText: prompt,
+    redactedText: SENSITIVE_DATA_PLACEHOLDERS.phone,
   };
 }
 
@@ -148,6 +165,12 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
               harnessOptions.action === "allow"
             ? ["allow.no-findings"]
             : ["warn.email"],
+        contributingCategories:
+          hasAttachment ||
+          harnessOptions.action === undefined ||
+          harnessOptions.action === "allow"
+            ? []
+            : ["email"],
         reasonCode: hasAttachment
           ? "unsupported_attachment"
           : harnessOptions.action === undefined ||
@@ -361,6 +384,7 @@ describe("submission controller", () => {
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email", "attachment.unsupported"],
+        contributingCategories: ["email"],
         reasonCode: "unsupported_attachment",
         attachmentPresent: true,
       }),
@@ -385,6 +409,149 @@ describe("submission controller", () => {
     });
   });
 
+  it("uses bypassed when a prompt warning wins over an allowed attachment", async () => {
+    const finding = emailFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      hasAttachment: true,
+      attachmentAction: "allow",
+      dialogIntent: "bypass",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
+        reasonCode: "policy_match",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.events[0]).toMatchObject({
+      resolution: "bypassed",
+      matchedRuleIds: ["warn.email"],
+      detectorCategories: ["email"],
+      findingCount: 1,
+      reasonCode: "policy_match",
+      attachmentPresent: true,
+    });
+  });
+
+  it("uses bypassed when a phone warning wins over an allowed attachment", async () => {
+    const finding = phoneFinding();
+    const harness = createHarness({
+      prompt: finding.matchedText,
+      findings: [finding],
+      hasAttachment: true,
+      attachmentAction: "allow",
+      dialogIntent: "bypass",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.phone"],
+        contributingCategories: ["phone"],
+        reasonCode: "policy_match",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.events[0]).toMatchObject({
+      resolution: "bypassed",
+      matchedRuleIds: ["warn.phone"],
+      detectorCategories: ["phone"],
+      findingCount: 1,
+      reasonCode: "policy_match",
+      attachmentPresent: true,
+    });
+  });
+
+  it("omits non-contributing allowed findings from the dialog and audit", async () => {
+    const email = emailFinding("person@example.com");
+    const phone = phoneFinding("+1 415 555 0132");
+    const prompt = `${email.matchedText} ${phone.matchedText}`;
+    const shiftedPhone = {
+      ...phone,
+      id: createFindingId("phone", email.matchedText.length + 1, prompt.length),
+      start: email.matchedText.length + 1,
+      end: prompt.length,
+    };
+    const harness = createHarness({
+      prompt,
+      findings: [email, shiftedPhone],
+      dialogIntent: "cancel",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["warn.phone"],
+        contributingCategories: ["phone"],
+        reasonCode: "policy_match",
+        attachmentPresent: false,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        findings: [
+          {
+            category: "phone",
+            confidence: "high",
+            placeholder: "[PHONE]",
+          },
+        ],
+        maskedPreview: "… [PHONE] …",
+      }),
+    );
+    expect(harness.events[0]).toMatchObject({
+      detectorCategories: ["phone"],
+      matchedRuleIds: ["warn.phone"],
+      findingCount: 1,
+      maskedExcerpt: "… [PHONE] …",
+    });
+  });
+
+  it("omits an allowed phone when the attachment drives the warning", async () => {
+    const phone = phoneFinding();
+    const harness = createHarness({
+      prompt: phone.matchedText,
+      findings: [phone],
+      hasAttachment: true,
+      attachmentAction: "warn",
+      dialogIntent: "cancel",
+      evaluate: () => ({
+        action: "warn",
+        matchedRuleIds: ["attachment.unsupported"],
+        contributingCategories: [],
+        reasonCode: "unsupported_attachment",
+        attachmentPresent: true,
+      }),
+    });
+
+    harness.fire();
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.dialog.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        findings: [],
+        attachmentPresent: true,
+        reasonCode: "unsupported_attachment",
+      }),
+    );
+    expect(harness.events[0]).toMatchObject({
+      detectorCategories: [],
+      matchedRuleIds: ["attachment.unsupported"],
+      findingCount: 0,
+      reasonCode: "unsupported_attachment",
+      attachmentPresent: true,
+    });
+    expect(harness.events[0]).not.toHaveProperty("maskedExcerpt");
+  });
+
   it("does not let attachment approval bypass a stricter prompt block", async () => {
     const finding = emailFinding();
     const harness = createHarness({
@@ -394,7 +561,8 @@ describe("submission controller", () => {
       dialogIntent: "bypass",
       evaluate: () => ({
         action: "block",
-        matchedRuleIds: ["warn.email", "attachment.unsupported"],
+        matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: true,
       }),
@@ -763,6 +931,7 @@ describe("submission controller", () => {
     const evaluate = vi.fn<(input: unknown) => PolicyDecision>(() => ({
       action: "warn",
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
       attachmentPresent: false,
     }));

@@ -85,6 +85,7 @@ function createHarness(prompt: string, action: "warn" | "redact" = "warn") {
     evaluate: () => ({
       action,
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
       attachmentPresent: false,
     }),
@@ -126,6 +127,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const evaluate = vi.fn(() => ({
       action: "allow" as const,
       matchedRuleIds: ["allow.no-findings"],
+      contributingCategories: [],
       reasonCode: "no_findings" as const,
       attachmentPresent: false,
     }));
@@ -220,6 +222,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -285,6 +288,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -349,6 +353,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),
@@ -504,6 +509,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
       evaluate: () => ({
         action: "warn",
         matchedRuleIds: ["warn.email"],
+        contributingCategories: ["email"],
         reasonCode: "policy_match",
         attachmentPresent: false,
       }),

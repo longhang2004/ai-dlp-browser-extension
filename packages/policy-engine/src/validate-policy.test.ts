@@ -48,6 +48,7 @@ describe("policy validation", () => {
     const decision = validatePolicyDecision({
       action: "warn",
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
       attachmentPresent: false,
     });
@@ -64,12 +65,14 @@ describe("policy validation", () => {
     expect(decision).toEqual({
       action: "warn",
       matchedRuleIds: ["warn.email"],
+      contributingCategories: ["email"],
       reasonCode: "policy_match",
       attachmentPresent: false,
     });
     expect(Reflect.ownKeys(decision)).toEqual([
       "action",
       "matchedRuleIds",
+      "contributingCategories",
       "reasonCode",
       "attachmentPresent",
     ]);
@@ -262,7 +265,9 @@ describe("policy validation", () => {
         validatePolicyDecision({
           action: "warn",
           matchedRuleIds: ["warn.email"],
+          contributingCategories: ["email"],
           reasonCode: "policy_match",
+          attachmentPresent: false,
           ...extra,
         }),
       ).toThrow(

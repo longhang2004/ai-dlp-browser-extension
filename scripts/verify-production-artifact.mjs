@@ -24,7 +24,7 @@ const allowlistPath = resolve(
 );
 const reportPath = resolve(
   repositoryRoot,
-  "artifacts/verification/url-report.json",
+  process.argv[3] ?? "artifacts/verification/url-report.json",
 );
 
 const failures = [];

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -67,9 +67,11 @@ async function createArtifact(entries = cleanArtifact()) {
   return root;
 }
 
-async function run(command, artifact) {
+async function run(command, artifact, reportPath) {
+  const args = [command, artifact];
+  if (reportPath !== undefined) args.push(reportPath);
   try {
-    const result = await execFileAsync(process.execPath, [command, artifact], {
+    const result = await execFileAsync(process.execPath, args, {
       cwd: repositoryRoot,
     });
     return { code: 0, output: `${result.stdout}${result.stderr}` };
@@ -81,8 +83,19 @@ async function run(command, artifact) {
   }
 }
 
+async function runVerifier(artifact) {
+  const reportDirectory = await mkdtemp(
+    join(tmpdir(), "ai-dlp-verify-report-"),
+  );
+  const reportPath = join(reportDirectory, "url-report.json");
+  return {
+    reportPath,
+    result: await run(verifier.pathname, artifact, reportPath),
+  };
+}
+
 test("verify artifact accepts a clean 12-file reachable artifact", async () => {
-  const result = await run(verifier.pathname, await createArtifact());
+  const { result } = await runVerifier(await createArtifact());
   assert.equal(result.code, 0, result.output);
 });
 
@@ -92,8 +105,7 @@ for (const [label, file] of [
   ["stale prior-build page bundle", "assets/popup-deadbeef.js"],
 ]) {
   test(`verify artifact rejects ${label}`, async () => {
-    const result = await run(
-      verifier.pathname,
+    const { result } = await runVerifier(
       await createArtifact([...cleanArtifact(), [file, "stale"]]),
     );
     assert.notEqual(result.code, 0, result.output);
@@ -108,14 +120,38 @@ for (const [label, file] of [
 }
 
 test("verify artifact rejects a missing imported asset", async () => {
-  const result = await run(
-    verifier.pathname,
+  const { result } = await runVerifier(
     await createArtifact(
       cleanArtifact().filter(([file]) => file !== "assets/runtime.js"),
     ),
   );
   assert.notEqual(result.code, 0, result.output);
   assert.match(result.output, /imports missing local asset/u);
+});
+
+test("verify artifact isolates URL reports for concurrent fixtures", async () => {
+  const artifacts = await Promise.all([
+    createArtifact(),
+    createArtifact(),
+    createArtifact(),
+  ]);
+  const verifications = await Promise.all(
+    artifacts.map((artifact) => runVerifier(artifact)),
+  );
+  for (const { reportPath, result } of verifications) {
+    assert.equal(result.code, 0, result.output);
+    assert.deepEqual(
+      Object.keys(JSON.parse(await readFile(reportPath, "utf8"))),
+      ["schemaVersion", "generatedAt", "artifactRoot", "urls"],
+    );
+  }
+});
+
+test("pnpm build creates and verifies a clean artifact", async () => {
+  const result = await execFileAsync("pnpm", ["build"], {
+    cwd: repositoryRoot,
+  });
+  assert.match(result.stdout, /Verified MV3 build topology \(12 files\)\./u);
 });
 
 test("canonical digest runs only after reachability passes", async () => {

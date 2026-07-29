@@ -69,9 +69,9 @@ existing `apps/extension/dist` as-is and rejects missing, non-local,
 source-mapped, or unallowlisted unreachable output. `pnpm artifact:digest`
 repeats that reachability check before it hashes the canonical artifact.
 
-The reviewed remediation verification on 2026-07-29 passed 745 Vitest tests and
-7 Node artifact-script tests. The production build contained 12 reachable files,
-no source maps, and no required local-asset allowlist entries.
+The reviewed remediation verification on 2026-07-29 produced a 12-file,
+manifest-reachable build with no source maps or required local-asset allowlist
+entries.
 
 ## Load the unpacked extension
 

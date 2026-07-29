@@ -1,8 +1,8 @@
-# AI DLP for ChatGPT
+# PromptGuard — AI DLP for ChatGPT
 
-AI DLP is a privacy-first Chromium Manifest V3 extension that inspects ChatGPT
-prompts locally before submission. Milestone 1 supports `https://chatgpt.com/*`
-only and never sends prompt content to a backend.
+PromptGuard is a privacy-first Chromium Manifest V3 extension that inspects
+ChatGPT prompts locally before submission. Milestone 1 supports
+`https://chatgpt.com/*` only and never sends prompt content to a backend.
 
 It detects email addresses, phone numbers, payment cards, AWS access key IDs,
 PEM private keys, contextual API secrets, and locally configured protected
@@ -121,6 +121,20 @@ or mobile applications, network traffic, or content submitted before settings
 initialization. Enterprise policy, forced installation, central audit export,
 and tamper resistance are future work; see
 [managed deployment](docs/managed-deployment.md).
+
+PromptGuard's documented future direction is **Universal AI Interaction DLP and
+Governance**. Future application visibility means coarse awareness of an
+approved AI surface; it is not content monitoring. Future audit metadata remains
+an allowlisted, prompt-free record of decisions and system state. Quarantine
+would be a separate, explicitly approved mode and is not part of Milestone 1 or
+the current roadmap commitments.
+
+See the [roadmap](docs/roadmap.md),
+[product vision](docs/architecture/product-vision.md), and
+[multi-surface architecture](docs/architecture/multi-surface-architecture.md).
+These documents define approval gates and proposed contracts; they do not
+implement additional adapters, endpoint components, management services, or
+dashboards.
 
 ## Development guides
 

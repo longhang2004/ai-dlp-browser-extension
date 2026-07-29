@@ -1,4 +1,4 @@
-# Threat model
+# PromptGuard threat model
 
 ## Assets and security goals
 
@@ -66,6 +66,14 @@ Security goals are:
   they do not make a locally loaded unpacked extension tamper-proof.
 - Managed fail-closed startup, forced installation, signed policy, centralized
   audit, and health monitoring are future work.
+
+Future management-plane documents do not change these current guarantees.
+Application visibility must not be represented as content monitoring; a
+discovered adapter cannot claim enforcement; remotely supplied policy cannot
+contain executable adapters; and any endpoint agent, employee-detail view, or
+quarantine mode requires a separately approved threat model. See the
+[multi-surface architecture](architecture/multi-surface-architecture.md) and
+[management-plane architecture](architecture/management-plane.md).
 
 ## Failure posture
 

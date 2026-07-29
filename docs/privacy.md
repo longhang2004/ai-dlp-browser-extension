@@ -1,7 +1,7 @@
-# Privacy model and data inventory
+# PromptGuard privacy model and data inventory
 
-AI DLP is designed to make a local enforcement decision without turning prompt
-inspection into monitoring or telemetry.
+PromptGuard is designed to make a local enforcement decision without turning
+prompt inspection into monitoring or telemetry.
 
 ## Raw prompt ownership
 
@@ -137,3 +137,25 @@ files. The canonical extension digest is computed only after this graph passes.
 CI publishes the verified extension and digest with a `git archive` source
 tarball for the same reviewed commit, preserving review provenance without
 copying prompt-derived data.
+
+## Future governance terminology
+
+Future documents use these terms narrowly:
+
+- **Detection** is local classification into an approved risk category.
+- **Enforcement** is an allow, warn, or block action at a verified submission
+  boundary.
+- **Audit metadata** is an allowlisted, prompt-free decision or system record.
+- **Application visibility** is coarse awareness of an approved AI surface and
+  does not imply content access.
+- **Content monitoring** makes interaction content available outside the narrow
+  local enforcement boundary and is not part of the roadmap.
+- **Quarantine** retains content or an artifact for later review and would
+  require a separately approved mode.
+
+The proposed future [event taxonomy](architecture/event-taxonomy.md) prohibits
+prompt/completion content, matched values, hashes of content, filenames, paths,
+commands, full URLs, conversation identifiers, screenshots, and arbitrary
+metadata maps. Clean allows remain absent by default. Any aggregate heartbeat,
+employee detail, or quarantine mode requires explicit approval, transparency,
+RBAC, bounded retention, deletion, and regional controls.

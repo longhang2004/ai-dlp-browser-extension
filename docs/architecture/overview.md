@@ -1,4 +1,4 @@
-# Architecture overview
+# PromptGuard architecture overview
 
 Milestone 1 is a local-only Chromium MV3 vertical slice for ChatGPT. Browser-
 independent contracts, detectors, policy, and redaction live in workspace
@@ -137,3 +137,18 @@ executable, page, or source-map file. CI computes a canonical SHA-256 only after
 that graph passes and publishes the verified extension, digest, and a
 commit-addressed `git archive` source tarball. Reviewed live QA must use that
 matching artifact set.
+
+## Future architecture boundary
+
+The current packages do not implement multi-surface, endpoint, management-plane,
+or dashboard contracts. Proposed future boundaries are documented in the
+[roadmap](../roadmap.md),
+[multi-surface architecture](multi-surface-architecture.md),
+[event taxonomy](event-taxonomy.md), [management plane](management-plane.md),
+and [privacy-safe dashboard](privacy-safe-admin-dashboard.md).
+
+Those documents distinguish detection, enforcement, prompt-free audit metadata,
+coarse application visibility, content monitoring—which is not provided—and
+quarantine, which would require separate approval and storage controls. Remote
+policy may eventually select packaged capabilities, but it must never deliver
+executable adapters.

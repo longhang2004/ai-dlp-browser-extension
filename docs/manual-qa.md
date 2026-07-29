@@ -1,4 +1,4 @@
-# Manual QA
+# PromptGuard manual QA
 
 This checklist uses identifiers from `tests/fixtures/sensitive-values.json`.
 Never copy fixture values into documentation, screenshots, tickets, logs, or
@@ -78,6 +78,50 @@ Automated ambiguity coverage includes shared-Send click and Enter fail-closed
 behavior, DOM order and selector-priority reversal, stale and hidden candidates,
 separate composer roots, immediate `ambiguous_submission_context` health, and
 prompt-free transitions, messages, errors, audit, and logs.
+
+## Current Part A authenticated Edge attempt — 2026-07-29
+
+This attempt used the exact reviewed Part A artifact and privacy-safe synthetic
+fixtures. It recorded no screenshots, prompt excerpts, matched values,
+filenames, page HTML, storage dumps, or page-derived metadata.
+
+| Field                                      | Recorded value                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Reviewed Part A commit                     | `4c0581ce480afca3a3e267770092db4b00f23b4b`                                                                                           |
+| CI run                                     | [30429601994](https://github.com/longhang2004/ai-dlp-browser-extension/actions/runs/30429601994), successful at the exact Part A SHA |
+| Published and recomputed canonical SHA-256 | `e72b6385d20f1afe626c60084d93902f4c6ff1af873dd2483cfe5144231368a7`                                                                   |
+| Verified extension artifact                | 12 manifest-reachable files; 43 reviewed URL literals; no source maps                                                                |
+| Microsoft Edge                             | `150.0.4078.105`                                                                                                                     |
+| PromptGuard extension                      | `0.1.0`, unpacked ID `pijpmkiflojfgamgjjkahaggifgpbnha`                                                                              |
+| Execution context                          | Authenticated `https://chatgpt.com`, 2026-07-29, Asia/Ho_Chi_Minh                                                                    |
+
+The exact artifact was the only enabled unpacked PromptGuard copy. Two older
+unpacked copies were disabled before testing.
+
+| Scenario                                      | Authenticated result                                                                                                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Click and keyboard interception               | Click and unmodified Enter were intercepted; Shift+Enter inserted a structural newline without submission                                                                     |
+| Text warning privacy and accessibility        | Contributor category, confidence, and placeholder-only preview appeared; raw fixture content was absent; open Shadow DOM and focus containment passed                         |
+| Cancel and focus restoration                  | Cancel did not submit and returned focus to the semantic Send control                                                                                                         |
+| Text one-shot bypass                          | One approval submitted once; a repeated attempt required a new decision                                                                                                       |
+| New policy after enforcement change           | After email policy changed from warn to block, a fresh attempt showed **Submission blocked**, Close only, and no bypass                                                       |
+| Stale warning during settings UI navigation   | `unavailable`: switching away from the ChatGPT tab and back removed the host-owned dialog even without saving settings, so the live path cannot attribute removal to revision |
+| Retention-only and identical-save persistence | `unavailable` for the same tab-switch control reason; direct bootstrap tests prove revision and active-attempt preservation                                                   |
+| Automatic redaction                           | No current editor variant exposed Redact                                                                                                                                      |
+| Attachment warning and one-shot bypass        | Fixed uninspected-attachment copy and accessible bypass appeared; a later attempt required a new decision                                                                     |
+| Attachment policy block/allow                 | `unavailable` through the authenticated settings path; production Playwright exercised both settings end to end                                                               |
+| Combined text and attachment warning          | One generic bypass displayed both final-action contributors without raw prompt or filename                                                                                    |
+| Contributor-only setting permutations         | `unavailable` through the authenticated settings path; controller, validator, audit, and production-extension tests cover both permutations                                   |
+| Strict block with attachment                  | Strict text policy remained blocked, included the inspection limitation, and exposed no bypass                                                                                |
+| Attachment mutation while approval is pending | `unavailable` in the authenticated control surface; adapter/controller DOM tests cover add, remove, replace, and mutation invalidation                                        |
+| Navigation and stale authorization            | SPA navigation invalidated a pending authorization and did not submit                                                                                                         |
+| Shared Send ambiguity                         | `unavailable` on the current single-composer page; production DOM tests are authoritative                                                                                     |
+| Non-Send controls                             | Add-files did not trigger protection; voice/dictation was not visible in the tested variant                                                                                   |
+| Popup and audit extension pages               | `unavailable` to the browser-control surface; production Playwright verified active/disabled truthfulness, retention, and prompt-free audit rendering                         |
+
+All unavailable authenticated items passed their corresponding automated
+production-build, unit, or DOM tests. They remain limitations rather than being
+reported as live passes.
 
 ## Interactive current-ChatGPT checklist
 

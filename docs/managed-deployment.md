@@ -1,4 +1,4 @@
-# Managed deployment
+# PromptGuard managed deployment
 
 Managed deployment is not implemented in Milestone 1. The current extension is
 an unmanaged local tool: a user can change exposed settings, disable protection,
@@ -46,3 +46,12 @@ A future design must receive separate approval and define:
 
 No future management feature should weaken the existing prompt-free policy, UI,
 messaging, storage, audit, or logging boundaries.
+
+The future [management-plane architecture](architecture/management-plane.md),
+[event taxonomy](architecture/event-taxonomy.md), and
+[privacy-safe dashboard contract](architecture/privacy-safe-admin-dashboard.md)
+define approval questions without implementing a service. They keep application
+visibility separate from content monitoring and make quarantine a separately
+approved mode. The [roadmap](roadmap.md) requires explicit gates for identity,
+signing/key rotation, endpoint IPC, RBAC, retention, regional residency, SIEM,
+optional host permissions, employee detail, and any quarantine proposal.

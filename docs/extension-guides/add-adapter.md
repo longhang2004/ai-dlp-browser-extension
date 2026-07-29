@@ -1,4 +1,4 @@
-# Add an application adapter
+# Add a PromptGuard application adapter
 
 Milestone 1 ships only the ChatGPT adapter. A new adapter requires an explicit
 design review because it expands host scope, DOM assumptions, manifest matches,
@@ -99,3 +99,18 @@ A new application also requires:
 Do not add `tabs`, `activeTab`, `scripting`, broad host permissions,
 `web_accessible_resources`, page-world injection, or remote assets unless a new
 approved specification demonstrates necessity.
+
+## Future trust classification
+
+The documented future `AiSurface`, `AdapterCapabilities`, and `AdapterTrust`
+contracts do not authorize a new adapter. Each surface still requires the review
+above. A `verified` adapter may claim only capabilities proven against the
+application's real submission path. A `discovered` surface provides coarse
+application visibility only, and `unsupported` provides no enforcement claim.
+
+IDE and CLI integrations are official-hook-first. Process scraping, terminal
+history, keylogging, clipboard polling, network interception, and arbitrary
+filesystem watching are not fallback adapters. Managed policy may configure a
+packaged adapter but must never deliver executable adapter code or remotely
+interpreted selectors. See the
+[multi-surface architecture](../architecture/multi-surface-architecture.md).

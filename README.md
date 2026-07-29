@@ -63,11 +63,11 @@ pnpm artifact:digest
 `pnpm test:browser` uses Playwright's bundled Chromium, loads the production
 `apps/extension/dist` directory, and fulfills the real ChatGPT match URL with a
 local fixture. The fixture blocks and fails on any unexpected HTTP(S) request.
-`pnpm build` clears the prior extension output first. `pnpm verify:artifact`
-then validates a manifest-rooted reachability graph, rejecting missing,
-non-local, source-mapped, or unallowlisted unreachable output.
-`pnpm artifact:digest` repeats that reachability check before it hashes the
-canonical artifact.
+`pnpm build` clears the prior extension output first, creates a clean artifact,
+and verifies that output. `pnpm verify:artifact` does not build: it verifies the
+existing `apps/extension/dist` as-is and rejects missing, non-local,
+source-mapped, or unallowlisted unreachable output. `pnpm artifact:digest`
+repeats that reachability check before it hashes the canonical artifact.
 
 The reviewed remediation verification on 2026-07-29 passed 745 Vitest tests and
 7 Node artifact-script tests. The production build contained 12 reachable files,

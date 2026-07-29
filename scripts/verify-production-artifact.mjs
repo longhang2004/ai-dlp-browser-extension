@@ -6,9 +6,13 @@ import {
   inspectProductionSource,
   isProductionSourceFile,
 } from "./artifact-security-rules.mjs";
+import { verifyExtensionArtifactReachability } from "../apps/extension/scripts/artifact-reachability.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
-const distRoot = resolve(repositoryRoot, "apps/extension/dist");
+const distRoot = resolve(
+  repositoryRoot,
+  process.argv[2] ?? "apps/extension/dist",
+);
 const manifestPath = resolve(distRoot, "manifest.json");
 const fixturesPath = resolve(
   repositoryRoot,
@@ -436,6 +440,12 @@ try {
   files = await listFiles(distRoot);
 } catch (error) {
   fail(`Production artifact could not be listed: ${String(error)}`);
+}
+
+try {
+  await verifyExtensionArtifactReachability(distRoot);
+} catch (error) {
+  fail(String(error));
 }
 
 assert(files.length > 0, "Production artifact is empty.");

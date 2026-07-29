@@ -43,10 +43,7 @@ function cleanArtifact() {
     ["background.js", "export const background = true;"],
     ["content-script.js", 'var content = "https://react.dev/errors/";'],
     ["popup.html", page("assets/popup-12345678.js", "assets/popup.css")],
-    [
-      "options.html",
-      page("assets/options-12345678.js", "assets/options.css"),
-    ],
+    ["options.html", page("assets/options-12345678.js", "assets/options.css")],
     ["audit.html", page("assets/audit-12345678.js", "assets/popup.css")],
     [
       "assets/popup-12345678.js",
@@ -103,7 +100,7 @@ for (const [label, file] of [
     assert.match(
       result.output,
       new RegExp(
-        `unreachable executable or page asset: ${file.replace(".", "\\\\.")}`,
+        `unreachable executable or page asset: ${file.replaceAll(".", String.raw`\.`)}`,
         "u",
       ),
     );
@@ -118,7 +115,7 @@ test("verify artifact rejects a missing imported asset", async () => {
     ),
   );
   assert.notEqual(result.code, 0, result.output);
-  assert.match(result.output, /imports missing local module/u);
+  assert.match(result.output, /imports missing local asset/u);
 });
 
 test("canonical digest runs only after reachability passes", async () => {

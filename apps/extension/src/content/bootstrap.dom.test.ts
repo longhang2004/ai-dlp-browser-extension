@@ -7,6 +7,7 @@ import {
 } from "@ai-dlp/shared-types";
 
 import type {
+  AttachmentStateFingerprint,
   ChatApplicationAdapter,
   LiveSubmissionContext,
   SubmitInterceptor,
@@ -85,7 +86,11 @@ function createScheduler(): RetryScheduler & { runNext(): void } {
   };
 }
 
-function settingsSnapshot(enabled = true, generation = 0) {
+function settingsSnapshot(
+  enabled = true,
+  generation = 0,
+  overrides: Partial<ProtectionSettings> = {},
+) {
   const settings: ProtectionSettings = {
     protectionEnabled: enabled,
     emailAction: "warn",
@@ -93,6 +98,7 @@ function settingsSnapshot(enabled = true, generation = 0) {
     attachmentAction: "warn",
     protectedKeywords: [],
     auditRetentionLimit: 100,
+    ...overrides,
   };
   return {
     type: "settings.snapshot" as const,
@@ -100,6 +106,14 @@ function settingsSnapshot(enabled = true, generation = 0) {
     envelope: { schemaVersion: 2 as const, settings },
   };
 }
+
+const ENFORCEMENT_POLICY_CHANGES: Array<[string, Partial<ProtectionSettings>]> =
+  [
+    ["email", { emailAction: "block" }],
+    ["phone", { phoneAction: "block" }],
+    ["attachment", { attachmentAction: "block" }],
+    ["protected keyword", { protectedKeywords: ["project atlas"] }],
+  ];
 
 class FakeAdapter implements ChatApplicationAdapter {
   readonly id = "chatgpt" as const;
@@ -139,6 +153,124 @@ class FakeAdapter implements ChatApplicationAdapter {
     return this.unregister;
   }
   resumeSubmission(): void {}
+}
+
+class IntegrationAdapter implements ChatApplicationAdapter {
+  readonly id = "chatgpt" as const;
+  readonly version = "1";
+  readonly composer = document.createElement("textarea");
+  readonly sendControl = document.createElement("button");
+  readonly submissionRegion = document.createElement("form");
+  readonly attachmentFingerprint = {} as AttachmentStateFingerprint;
+  readonly dispose = vi.fn();
+  readonly resumeSubmission = vi.fn();
+  interceptor: SubmitInterceptor | null = null;
+  attachmentPresent = false;
+
+  constructor(prompt: string, attachmentPresent = false) {
+    this.composer.value = prompt;
+    this.attachmentPresent = attachmentPresent;
+    this.submissionRegion.append(this.composer, this.sendControl);
+    document.body.append(this.submissionRegion);
+  }
+
+  matches(): boolean {
+    return true;
+  }
+  resolveCurrentSubmissionContext(): LiveSubmissionContext | null {
+    return this.resolveSubmissionContext();
+  }
+  resolveSubmissionContext(): LiveSubmissionContext | null {
+    return {
+      composer: this.composer,
+      sendControl: this.sendControl,
+      submissionRegion: this.submissionRegion,
+      applicationUrl: new URL("https://chatgpt.com/"),
+      contextIdentity: 1,
+      contextVersion: 1,
+    };
+  }
+  inspectSubmissionCapabilities() {
+    return {
+      attachmentPresent: this.attachmentPresent,
+      attachmentStateFingerprint: this.attachmentFingerprint,
+    };
+  }
+  getPromptReplacementCapability() {
+    return "unsupported" as const;
+  }
+  readPrompt(): string {
+    return this.composer.value;
+  }
+  replacePrompt() {
+    return { ok: false as const, reason: "unsupported_editor" as const };
+  }
+  registerSubmitInterceptor(handler: SubmitInterceptor): () => void {
+    this.interceptor = handler;
+    return () => {
+      this.interceptor = null;
+    };
+  }
+  submit(id: string): void {
+    this.interceptor?.({
+      id,
+      source: "click",
+      contextIdentity: 1,
+      initialContextVersion: 1,
+    });
+  }
+}
+
+function enforcementIntegrationHarness(options: {
+  prompt: string;
+  initial: Partial<ProtectionSettings>;
+  attachmentPresent?: boolean;
+}) {
+  const port = createPort();
+  const adapter = new IntegrationAdapter(
+    options.prompt,
+    options.attachmentPresent,
+  );
+  const audits: AuditEvent[] = [];
+  let settleWarning: ((intent: "bypass") => void) | undefined;
+  const dialog: ProtectionDialogController = {
+    show: vi.fn((intent) => {
+      if (intent.kind === "warn") {
+        return new Promise((resolve: (intent: "bypass") => void) => {
+          settleWarning = resolve;
+        });
+      }
+      return Promise.resolve("cancel" as const);
+    }),
+    cancel: vi.fn(),
+    dispose: vi.fn(),
+  };
+  const content = bootstrapContent({
+    document,
+    runtime: {
+      connect: () => port,
+      sendMessage: async (message) => {
+        const request = message as { type: string; event?: AuditEvent };
+        if (request.type === "audit.append" && request.event !== undefined) {
+          audits.push(request.event);
+        }
+        return { type: "audit.appended" };
+      },
+    },
+    createAdapter: () => adapter,
+    createDialog: () => dialog,
+    eventId: () => "00000000-0000-4000-8000-000000000001",
+    now: () => new Date("2026-07-26T00:00:00.000Z"),
+  });
+  port.emitMessage(settingsSnapshot(true, 0, options.initial));
+  return {
+    adapter,
+    audits,
+    content,
+    dialog,
+    port,
+    settleWarning: () => settleWarning?.("bypass"),
+  };
 }
 
 function harness() {
@@ -302,6 +434,52 @@ describe("content bootstrap", () => {
     expect(h.controller.dispose).toHaveBeenCalledOnce();
   });
 
+  it.each(ENFORCEMENT_POLICY_CHANGES)(
+    "increments the enforcement revision and cancels active work for a %s policy change",
+    (_label, overrides) => {
+      const h = harness();
+      h.firstPort.emitMessage(settingsSnapshot(true, 0));
+      const controllerOptions = h.getControllerOptions() as
+        | (SubmissionControllerOptions & { currentRevision?: () => number })
+        | undefined;
+
+      expect(controllerOptions?.currentRevision?.()).toBe(1);
+      h.firstPort.emitMessage(settingsSnapshot(true, 1, overrides));
+
+      expect(controllerOptions?.currentRevision?.()).toBe(2);
+      expect(h.controller.cancelActiveAttempt).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("preserves the enforcement revision and active attempt for an audit retention-only update", () => {
+    const h = harness();
+    h.firstPort.emitMessage(settingsSnapshot(true, 0));
+    const controllerOptions = h.getControllerOptions() as
+      | (SubmissionControllerOptions & { currentRevision?: () => number })
+      | undefined;
+
+    h.firstPort.emitMessage(
+      settingsSnapshot(true, 1, { auditRetentionLimit: 99 }),
+    );
+
+    expect(controllerOptions?.currentRevision?.()).toBe(1);
+    expect(h.controller.cancelActiveAttempt).not.toHaveBeenCalled();
+    expect(h.content.getSettings()?.auditRetentionLimit).toBe(99);
+  });
+
+  it("preserves the enforcement revision and active attempt for an identical normalized settings snapshot", () => {
+    const h = harness();
+    h.firstPort.emitMessage(settingsSnapshot(true, 0));
+    const controllerOptions = h.getControllerOptions() as
+      | (SubmissionControllerOptions & { currentRevision?: () => number })
+      | undefined;
+
+    h.firstPort.emitMessage(settingsSnapshot(true, 1));
+
+    expect(controllerOptions?.currentRevision?.()).toBe(1);
+    expect(h.controller.cancelActiveAttempt).not.toHaveBeenCalled();
+  });
+
   it("disposes interception on disconnect and needs a fresh reconnect snapshot", () => {
     const h = harness();
     h.firstPort.emitMessage(settingsSnapshot());
@@ -309,6 +487,9 @@ describe("content bootstrap", () => {
 
     expect(h.controller.cancelActiveAttempt).toHaveBeenCalledOnce();
     expect(h.registrationDispose).toHaveBeenCalledOnce();
+    expect(h.controller.dispose).toHaveBeenCalledOnce();
+    expect(h.dialog.dispose).toHaveBeenCalledOnce();
+    expect(h.adapter.dispose).toHaveBeenCalledOnce();
     expect(h.content.getStatus()).toEqual({
       state: "unavailable",
       application: "chatgpt",
@@ -321,6 +502,97 @@ describe("content bootstrap", () => {
     h.secondPort.emitMessage(settingsSnapshot());
     expect(h.controller.register).toHaveBeenCalledTimes(2);
     expect(h.content.getStatus().state).toBe("active");
+  });
+
+  it.each([
+    ["email", "person@example.com", { emailAction: "block" }],
+    ["phone", "+1 415 555 2671", { phoneAction: "block" }],
+    ["attachment", "clean", { attachmentAction: "block" }, true],
+  ] as const)(
+    "makes a stale %s warning inert and blocks a new submission through the production runtime",
+    async (
+      _name,
+      prompt,
+      changedSettings,
+      attachmentPresent: boolean = false,
+    ) => {
+      const h = enforcementIntegrationHarness({
+        prompt,
+        initial: { attachmentAction: "warn" },
+        attachmentPresent,
+      });
+      h.adapter.submit("first");
+      await vi.waitFor(() =>
+        expect(h.dialog.show).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "warn" }),
+        ),
+      );
+
+      h.port.emitMessage(settingsSnapshot(true, 1, changedSettings));
+      h.settleWarning();
+      await vi.waitFor(() =>
+        expect(h.audits).toContainEqual(
+          expect.objectContaining({
+            kind: "decision",
+            policyAction: "warn",
+            resolution: "cancelled",
+          }),
+        ),
+      );
+
+      expect(h.adapter.resumeSubmission).not.toHaveBeenCalled();
+      expect(
+        h.audits.filter(
+          (event) =>
+            event.kind === "decision" &&
+            event.policyAction === "warn" &&
+            event.resolution === "cancelled",
+        ),
+      ).toHaveLength(1);
+
+      h.adapter.submit("second");
+      await vi.waitFor(() =>
+        expect(h.dialog.show).toHaveBeenLastCalledWith(
+          expect.objectContaining({ kind: "block" }),
+        ),
+      );
+      expect(h.adapter.resumeSubmission).not.toHaveBeenCalled();
+      h.content.dispose();
+    },
+  );
+
+  it("makes a stale protected-keyword warning inert and evaluates a resubmission under the replacement keyword set", async () => {
+    const h = enforcementIntegrationHarness({
+      prompt: "project atlas",
+      initial: { protectedKeywords: ["project atlas"] },
+    });
+    h.adapter.submit("first");
+    await vi.waitFor(() =>
+      expect(h.dialog.show).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "warn" }),
+      ),
+    );
+
+    h.port.emitMessage(
+      settingsSnapshot(true, 1, { protectedKeywords: ["other project"] }),
+    );
+    h.settleWarning();
+    await vi.waitFor(() =>
+      expect(h.audits).toContainEqual(
+        expect.objectContaining({
+          kind: "decision",
+          policyAction: "warn",
+          resolution: "cancelled",
+        }),
+      ),
+    );
+    expect(h.adapter.resumeSubmission).not.toHaveBeenCalled();
+
+    h.adapter.submit("second");
+    await vi.waitFor(() =>
+      expect(h.adapter.resumeSubmission).toHaveBeenCalledOnce(),
+    );
+    h.content.dispose();
   });
 
   it("wires content-free health audit, degraded status, and dialog failure", async () => {

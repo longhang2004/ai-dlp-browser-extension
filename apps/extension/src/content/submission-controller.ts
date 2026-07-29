@@ -6,6 +6,7 @@ import {
 import { evaluatePolicy } from "@ai-dlp/policy-engine";
 import {
   CHATGPT_ADAPTER_VERSION,
+  cloneProtectionSettings,
   createAuditEventId,
   createAuditTimestamp,
   type AuditEvent,
@@ -43,6 +44,7 @@ import {
   toDetectorCategories,
   toPolicyFindings,
 } from "./display-model.js";
+import type { EnforcementRevision } from "./enforcement-settings.js";
 
 export { MAX_PROMPT_CODE_UNITS };
 
@@ -73,11 +75,14 @@ export type SubmissionControllerOptions = {
   wallClockNow?: () => Date;
   eventId?: () => string;
   isProtectionEnabled?: () => boolean;
+  currentRevision: () => EnforcementRevision;
 };
 
 type ActiveAttempt = {
   attempt: CapturedSubmitAttempt;
   generation: number;
+  revision: EnforcementRevision;
+  settings: ReadonlyProtectionSettings;
   promptSnapshot: string | null;
   authorization: SubmissionAuthorization | null;
   cancelled: boolean;
@@ -195,6 +200,7 @@ export function createSubmissionController(
   const eventId = options.eventId ?? defaultEventId;
   const isProtectionEnabled =
     options.isProtectionEnabled ?? (() => options.settings().protectionEnabled);
+  const currentRevision = options.currentRevision;
   let state: SubmissionControllerState = "idle";
   let active: ActiveAttempt | null = null;
   let generation = 0;
@@ -203,12 +209,31 @@ export function createSubmissionController(
   let pending: Promise<void> = Promise.resolve();
 
   function isCurrent(attempt: ActiveAttempt): boolean {
+    let revisionIsCurrent: boolean;
+    try {
+      revisionIsCurrent = currentRevision() === attempt.revision;
+    } catch {
+      revisionIsCurrent = false;
+    }
     return (
       active === attempt &&
       attempt.generation === generation &&
+      revisionIsCurrent &&
       !attempt.cancelled &&
       !disposed
     );
+  }
+
+  function snapshotSettings(
+    settings: ReadonlyProtectionSettings,
+  ): ReadonlyProtectionSettings {
+    const snapshot = cloneProtectionSettings(settings);
+    return Object.freeze({
+      ...snapshot,
+      protectedKeywords: Object.freeze([
+        ...snapshot.protectedKeywords,
+      ]) as ReadonlyProtectionSettings["protectedKeywords"],
+    }) as ReadonlyProtectionSettings;
   }
 
   function releaseSensitiveState(attempt: ActiveAttempt): void {
@@ -453,6 +478,9 @@ export function createSubmissionController(
     }
 
     try {
+      if (!isCurrent(attempt)) {
+        return { kind: "authorization_invalid" };
+      }
       options.adapter.resumeSubmission(resumeContext, consumed);
     } catch {
       return { kind: "error", errorCode: "resume_failure" };
@@ -490,6 +518,10 @@ export function createSubmissionController(
   }
 
   async function processAttempt(attempt: ActiveAttempt): Promise<void> {
+    if (!isCurrent(attempt)) {
+      finish(attempt, "cancelled");
+      return;
+    }
     const capture = capturePromptSynchronously(
       options.adapter,
       attempt.attempt,
@@ -514,7 +546,7 @@ export function createSubmissionController(
 
     try {
       attempt.findings = analyze(attempt.promptSnapshot, {
-        protectedKeywords: options.settings().protectedKeywords,
+        protectedKeywords: attempt.settings.protectedKeywords,
       });
     } catch {
       await showError(attempt, "detector_failure");
@@ -530,7 +562,7 @@ export function createSubmissionController(
         application: "chatgpt",
         attachmentPresent: attempt.attachmentPresent,
         findings: toPolicyFindings(attempt.findings),
-        policy: derivePolicy(options.settings()),
+        policy: derivePolicy(attempt.settings),
       });
     } catch {
       await showError(attempt, "policy_failure");
@@ -561,6 +593,10 @@ export function createSubmissionController(
         await resumeApproved(attempt, "redacted", "redacted");
         return;
       case "block": {
+        if (!isCurrent(attempt)) {
+          finish(attempt, "cancelled");
+          return;
+        }
         const model = createSubmissionDialogModel(
           "block",
           decision,
@@ -584,6 +620,10 @@ export function createSubmissionController(
         return;
       }
       case "warn": {
+        if (!isCurrent(attempt)) {
+          finish(attempt, "cancelled");
+          return;
+        }
         const model = createSubmissionDialogModel(
           "warn",
           decision,
@@ -634,6 +674,14 @@ export function createSubmissionController(
     if (active !== null) {
       return "intercept";
     }
+    let revision: EnforcementRevision;
+    let settings: ReadonlyProtectionSettings;
+    try {
+      revision = currentRevision();
+      settings = snapshotSettings(options.settings());
+    } catch {
+      return "intercept";
+    }
     generation += 1;
     const attempt: ActiveAttempt = {
       attempt: {
@@ -643,6 +691,8 @@ export function createSubmissionController(
         initialContextVersion: captured.initialContextVersion,
       },
       generation,
+      revision,
+      settings,
       promptSnapshot: null,
       authorization: null,
       cancelled: false,

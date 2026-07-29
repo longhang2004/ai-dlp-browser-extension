@@ -30,6 +30,12 @@ import {
   type SubmissionController,
   type SubmissionControllerOptions,
 } from "./submission-controller.js";
+import {
+  areEnforcementSettingsEqual,
+  snapshotEnforcementSettings,
+  type EnforcementRevision,
+  type EnforcementSettings,
+} from "./enforcement-settings.js";
 
 export type ContentRuntimePort = ContentSettingsPort;
 
@@ -93,6 +99,8 @@ export function bootstrapContent(options: {
   const eventId = options.eventId ?? (() => crypto.randomUUID());
   const now = options.now ?? (() => new Date());
   let settings: ProtectionSettings | null = null;
+  let enforcementSettings: EnforcementSettings | null = null;
+  let enforcementRevision: EnforcementRevision = 0;
   let status: ContentProtectionStatus | ReturnType<typeof unavailableStatus> =
     initializingStatus();
   let adapter: ChatApplicationAdapter | null = null;
@@ -232,6 +240,7 @@ export function bootstrapContent(options: {
           return cloneProtectionSettings(settings);
         },
         isProtectionEnabled: () => settings?.protectionEnabled === true,
+        currentRevision: () => enforcementRevision,
       });
       adapter = createdAdapter;
       dialog = createdDialog;
@@ -316,9 +325,26 @@ export function bootstrapContent(options: {
     },
     onSettings(nextSettings) {
       if (disposed) return;
-      settings = cloneProtectionSettings(nextSettings);
+      const next = cloneProtectionSettings(nextSettings);
+      const nextEnforcement = snapshotEnforcementSettings(next);
+      const enforcementChanged =
+        enforcementSettings === null ||
+        !areEnforcementSettingsEqual(enforcementSettings, nextEnforcement);
+      if (enforcementChanged) {
+        enforcementRevision += 1;
+        enforcementSettings = nextEnforcement;
+        if (next.protectionEnabled) {
+          try {
+            controller?.cancelActiveAttempt();
+          } catch {
+            // A revision change must still become visible after best-effort cancellation.
+          }
+        } else {
+          disposeProtectionRuntime();
+        }
+      }
+      settings = next;
       if (!settings.protectionEnabled) {
-        disposeProtectionRuntime();
         publish({
           state: "disabled",
           application: "chatgpt",

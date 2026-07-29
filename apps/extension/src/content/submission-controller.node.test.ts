@@ -50,6 +50,7 @@ type HarnessOptions = {
   hasAttachment?: boolean;
   attachmentAction?: "block" | "warn" | "allow";
   replacementCapability?: "supported" | "unsupported";
+  currentRevision?: () => number;
 };
 
 function createHarness(value: string | HarnessOptions = "clean prompt") {
@@ -129,6 +130,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     ...(harnessOptions.monotonicNow === undefined
       ? {}
       : { monotonicNow: harnessOptions.monotonicNow }),
+    currentRevision: harnessOptions.currentRevision ?? (() => 1),
     analyze:
       harnessOptions.analyze ??
       (() => structuredClone(harnessOptions.findings ?? [])),
@@ -154,6 +156,8 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
             : "policy_match",
         attachmentPresent: hasAttachment,
       })),
+  } as Parameters<typeof createSubmissionController>[0] & {
+    currentRevision: () => number;
   });
   controller.register();
   return {
@@ -484,6 +488,7 @@ describe("submission controller", () => {
     const controller = createSubmissionController({
       adapter: harness.adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog: harness.dialog,
       analyze,
       audit: { append: async (event) => void events.push(event) },
@@ -589,6 +594,7 @@ describe("submission controller", () => {
         ...createDefaultProtectionSettings(),
         protectionEnabled: false,
       }),
+      currentRevision: () => 1,
       dialog: harness.dialog,
       audit: { append: vi.fn() },
     });
@@ -891,6 +897,35 @@ describe("submission controller", () => {
 
     expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
     expect(harness.events[0]).toMatchObject({ resolution: "cancelled" });
+  });
+
+  it("cancels a visible warning after an enforcement revision change before its stale bypass can resume", async () => {
+    let revision = 1;
+    let settle!: (intent: ProtectionDialogIntent) => void;
+    const harness = createHarness({
+      prompt: "person@example.com",
+      findings: [emailFinding()],
+      action: "warn",
+      currentRevision: () => revision,
+    });
+    harness.dialog.show.mockImplementation(
+      () => new Promise((resolve) => (settle = resolve)),
+    );
+    harness.fire();
+    await vi.waitFor(() => expect(harness.dialog.show).toHaveBeenCalledOnce());
+
+    revision = 2;
+    settle("bypass");
+    await harness.controller.whenSettledForTesting();
+
+    expect(harness.adapter.resumeSubmission).not.toHaveBeenCalled();
+    expect(harness.events).toHaveLength(1);
+    expect(harness.events[0]).toMatchObject({
+      kind: "decision",
+      policyAction: "warn",
+      resolution: "cancelled",
+    });
+    expect(JSON.stringify(harness.events)).not.toContain("person@example.com");
   });
 
   it("clears sensitive state immediately when dialog cancellation throws and never settles", async () => {

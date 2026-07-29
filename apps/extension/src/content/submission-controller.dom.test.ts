@@ -78,6 +78,7 @@ function createHarness(prompt: string, action: "warn" | "redact" = "warn") {
   const controller = createSubmissionController({
     adapter,
     settings: () => createDefaultProtectionSettings(),
+    currentRevision: () => 1,
     dialog,
     audit: { append: async (event) => void events.push(event) },
     analyze: () => [finding],
@@ -136,6 +137,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: async (event) => void events.push(event) },
       analyze,
@@ -211,6 +213,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: vi.fn() },
       analyze,
@@ -275,6 +278,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: (event) => void events.push(event) },
       analyze: (prompt) => [findingFor(prompt)],
@@ -338,6 +342,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: (event) => void events.push(event) },
       analyze: (prompt) => [findingFor(prompt)],
@@ -492,6 +497,7 @@ describe("submission controller with the semantic ChatGPT adapter", () => {
     const controller = createSubmissionController({
       adapter,
       settings: () => createDefaultProtectionSettings(),
+      currentRevision: () => 1,
       dialog,
       audit: { append: async (event) => void events.push(event) },
       analyze: () => [findingFor(prompt)],

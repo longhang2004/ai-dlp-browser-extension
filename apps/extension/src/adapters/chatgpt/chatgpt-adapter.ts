@@ -702,6 +702,7 @@ export class ChatGptAdapter implements ChatApplicationAdapter {
     this.#observer.observe(observationRoot, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributes: true,
       attributeFilter: [
         "aria-disabled",

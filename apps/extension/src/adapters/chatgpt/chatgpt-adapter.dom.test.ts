@@ -61,6 +61,18 @@ function dispatchEnter(
   return event;
 }
 
+async function updateTextNode(node: Text, value: string): Promise<void> {
+  const delivered = new Promise<void>((resolve) => {
+    const checkpoint = new MutationObserver(() => {
+      checkpoint.disconnect();
+      resolve();
+    });
+    checkpoint.observe(node, { characterData: true });
+  });
+  node.nodeValue = value;
+  await delivered;
+}
+
 afterEach(() => {
   for (const adapter of createdAdapters.splice(0)) {
     adapter.dispose();
@@ -347,6 +359,108 @@ describe("ChatGptAdapter prompt operations", () => {
     expect(JSON.stringify(removed.attachmentStateFingerprint)).not.toContain(
       "composer",
     );
+  });
+
+  it("keeps attachment fingerprints stable for unchanged evidence and non-evidence text mutations", async () => {
+    const attachmentText = "attachment-text-private-before";
+    renderFixture(`
+      <section data-testid="composer-root">
+        <div id="prompt-textarea" contenteditable="true" role="textbox">prompt-before</div>
+        <div data-testid="composer-attachment"><span id="attachment-text">${attachmentText}</span></div>
+        <div id="unrelated-text">unrelated-before</div>
+        <button data-testid="send-button" aria-label="Send prompt">Send</button>
+      </section>
+    `);
+    const attempts: unknown[] = [];
+    const errors: unknown[] = [];
+    const adapter = createAdapter({
+      onAdapterError: (error) => errors.push(error),
+    });
+    adapter.registerSubmitInterceptor((attempt) => {
+      attempts.push(attempt);
+      return "intercept";
+    });
+    const context = adapter.resolveCurrentSubmissionContext();
+    const promptText = document.querySelector("#prompt-textarea")?.firstChild;
+    const unrelatedText = document.querySelector("#unrelated-text")?.firstChild;
+    if (
+      context === null ||
+      !(promptText instanceof Text) ||
+      !(unrelatedText instanceof Text)
+    ) {
+      throw new Error("Expected text-node mutation fixture.");
+    }
+
+    const initial = adapter.inspectSubmissionCapabilities(context);
+    expect(
+      adapter.inspectSubmissionCapabilities(context).attachmentStateFingerprint,
+    ).toBe(initial.attachmentStateFingerprint);
+
+    await updateTextNode(promptText, "prompt-after");
+    expect(
+      adapter.inspectSubmissionCapabilities(context).attachmentStateFingerprint,
+    ).toBe(initial.attachmentStateFingerprint);
+
+    await updateTextNode(unrelatedText, "unrelated-after");
+    const afterUnrelated = adapter.inspectSubmissionCapabilities(context);
+    expect(afterUnrelated.attachmentStateFingerprint).toBe(
+      initial.attachmentStateFingerprint,
+    );
+
+    const serializedBoundary = JSON.stringify({
+      diagnostics: adapter.getDiagnosticsForTesting(),
+      events: attempts,
+      errors,
+      messages: errors.map((error) =>
+        error instanceof Error ? error.message : error,
+      ),
+      fingerprints: [
+        initial.attachmentStateFingerprint,
+        afterUnrelated.attachmentStateFingerprint,
+      ],
+    });
+    expect(serializedBoundary).not.toContain(attachmentText);
+  });
+
+  it("rotates attachment fingerprints when direct and nested evidence text changes", async () => {
+    renderFixture(`
+      <section data-testid="composer-root">
+        <div id="prompt-textarea" contenteditable="true" role="textbox">prompt</div>
+        <div data-testid="composer-attachment">
+          <span id="direct-attachment-text">attachment-direct-before</span>
+          <span><em id="nested-attachment-text">attachment-nested-before</em></span>
+        </div>
+        <button data-testid="send-button" aria-label="Send prompt">Send</button>
+      </section>
+    `);
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor(() => "intercept");
+    const context = adapter.resolveCurrentSubmissionContext();
+    const directText = document.querySelector(
+      "#direct-attachment-text",
+    )?.firstChild;
+    const nestedText = document.querySelector(
+      "#nested-attachment-text",
+    )?.firstChild;
+    if (
+      context === null ||
+      !(directText instanceof Text) ||
+      !(nestedText instanceof Text)
+    ) {
+      throw new Error("Expected attachment text-node mutation fixture.");
+    }
+
+    const initial = adapter.inspectSubmissionCapabilities(context);
+    await updateTextNode(directText, "attachment-direct-after");
+    const afterDirect = adapter.inspectSubmissionCapabilities(context);
+    expect(afterDirect.attachmentStateFingerprint).not.toBe(
+      initial.attachmentStateFingerprint,
+    );
+
+    await updateTextNode(nestedText, "attachment-nested-after");
+    expect(
+      adapter.inspectSubmissionCapabilities(context).attachmentStateFingerprint,
+    ).not.toBe(afterDirect.attachmentStateFingerprint);
   });
 
   it("fails closed when attachment ownership cannot be bounded to one region", () => {

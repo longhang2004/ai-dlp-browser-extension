@@ -11,6 +11,7 @@ import {
 } from "@ai-dlp/shared-types";
 
 import type { ChatApplicationAdapter } from "../adapters/chat-application-adapter.js";
+import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/adapter-catalog.js";
 import {
   ChatGptAdapter,
   type ChatGptAdapterOptions,
@@ -306,7 +307,23 @@ export function bootstrapContent(options: {
   }
 
   const cache = createSettingsCache({
-    connect: () => options.runtime.connect({ name: SETTINGS_PORT_NAME }),
+    connect: () => {
+      const port = options.runtime.connect({ name: SETTINGS_PORT_NAME });
+      try {
+        port.postMessage({
+          type: "content.handshake",
+          descriptor: structuredClone(CHATGPT_ADAPTER_DESCRIPTOR),
+        });
+      } catch (error) {
+        try {
+          port.disconnect();
+        } catch {
+          // The failed handshake port may already be invalidated.
+        }
+        throw error;
+      }
+      return port;
+    },
     ...(options.scheduler === undefined
       ? {}
       : { scheduler: options.scheduler }),

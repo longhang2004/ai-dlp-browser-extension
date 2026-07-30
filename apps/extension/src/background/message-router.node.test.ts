@@ -495,6 +495,58 @@ describe("message router", () => {
     });
   });
 
+  it("rejects an audit identity whose version does not match the sender catalog descriptor", async () => {
+    const { listener } = setup();
+    const event = {
+      kind: "enforcement_error",
+      id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
+      timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
+      application: "chatgpt",
+      errorCode: "detector_failure",
+      adapterVersion: "2",
+    };
+
+    await expect(
+      invoke(listener, { type: "audit.append", event }, contentSender),
+    ).resolves.toEqual({
+      returned: true,
+      response: { type: "error", errorCode: "invalid_sender" },
+    });
+    expect(await invoke(listener, { type: "audit.read" })).toMatchObject({
+      response: { type: "audit.result", envelope: { events: [] } },
+    });
+  });
+
+  it("rejects alternate-port audit appends without retaining an event", async () => {
+    const { listener } = setup();
+    const event = {
+      kind: "enforcement_error",
+      id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
+      timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
+      application: "chatgpt",
+      errorCode: "detector_failure",
+      adapterVersion: CHATGPT_ADAPTER_VERSION,
+    };
+
+    await expect(
+      invoke(
+        listener,
+        { type: "audit.append", event },
+        {
+          ...contentSender,
+          url: "https://chatgpt.com:8443/",
+          origin: "https://chatgpt.com:8443",
+        },
+      ),
+    ).resolves.toEqual({
+      returned: true,
+      response: { type: "error", errorCode: "invalid_sender" },
+    });
+    expect(await invoke(listener, { type: "audit.read" })).toMatchObject({
+      response: { type: "audit.result", envelope: { events: [] } },
+    });
+  });
+
   it("never claims active protection before a validated content status exists", async () => {
     const { listener } = setup();
     await expect(invoke(listener, { type: "status.read" })).resolves.toEqual({

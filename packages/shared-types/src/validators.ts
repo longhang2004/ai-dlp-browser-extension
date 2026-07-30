@@ -1,6 +1,5 @@
 import {
   ADAPTER_HEALTH_CODES,
-  CHATGPT_ADAPTER_VERSION,
   CHATGPT_ADAPTER_VERSIONS,
   DECISION_RESOLUTIONS,
   ENFORCEMENT_ERROR_CODES,
@@ -33,6 +32,7 @@ import type {
 } from "./findings.js";
 import { RUNTIME_ERROR_CODES } from "./messages.js";
 import type {
+  ContentHandshakePortMessage,
   RuntimeRequest,
   RuntimeResponse,
   ContentStatusPortMessage,
@@ -1056,8 +1056,7 @@ function isRuntimeRequestSnapshot(value: unknown): value is RuntimeRequest {
       case "audit.append":
         return (
           hasExactOwnKeys(value, ["type", "event"]) &&
-          isAuditEventSnapshot(value.event) &&
-          value.event.adapterVersion === CHATGPT_ADAPTER_VERSION
+          isAuditEventSnapshot(value.event)
         );
       default:
         return false;
@@ -1143,6 +1142,23 @@ export function isSettingsPortMessage(
   value: unknown,
 ): value is SettingsPortMessage {
   return validatesStructuredSnapshot(value, isSettingsPortMessageSnapshot);
+}
+
+export function isContentHandshakePortMessage(
+  expectedDescriptor: AdapterDescriptor,
+  value: unknown,
+): value is ContentHandshakePortMessage {
+  return validatesStructuredSnapshot(
+    value,
+    (snapshot): snapshot is ContentHandshakePortMessage =>
+      safelyValidate(
+        () =>
+          isPlainRecord(snapshot) &&
+          hasExactOwnKeys(snapshot, ["type", "descriptor"]) &&
+          snapshot.type === "content.handshake" &&
+          isAdapterDescriptorClaim(expectedDescriptor, snapshot.descriptor),
+      ),
+  );
 }
 
 function isContentStatusPortMessageSnapshot(

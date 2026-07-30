@@ -67,6 +67,7 @@ export type {
   RuntimeErrorResponse,
   RuntimeRequest,
   RuntimeResponse,
+  ContentHandshakePortMessage,
   ContentStatusPortMessage,
   SettingsPortMessage,
 } from "./messages.js";
@@ -166,6 +167,7 @@ export {
   isPolicyInput,
   isRuntimeRequest,
   isRuntimeResponse,
+  isContentHandshakePortMessage,
   isContentStatusPortMessage,
   isSettingsPortMessage,
   isSettingsValidationError,

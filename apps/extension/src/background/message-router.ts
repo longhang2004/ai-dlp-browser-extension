@@ -10,7 +10,7 @@ import {
 import type { AuditStore } from "../storage/audit-store.js";
 import type { SettingsStore } from "../storage/settings-store.js";
 import {
-  isAllowedRuntimeSender,
+  resolveRuntimeSenderAuthorization,
   type RuntimeSender,
 } from "./sender-validation.js";
 
@@ -58,7 +58,20 @@ export function createMessageListener(options: {
       respond({ type: "error", errorCode: "invalid_message" });
       return true;
     }
-    if (!isAllowedRuntimeSender(request, sender, options.runtimeId)) {
+    const senderAuthorization = resolveRuntimeSenderAuthorization(
+      request,
+      sender,
+      options.runtimeId,
+    );
+    if (
+      senderAuthorization === null ||
+      (request.type === "audit.append" &&
+        (senderAuthorization.source !== "content_script" ||
+          request.event.application !==
+            senderAuthorization.descriptor.adapterId ||
+          request.event.adapterVersion !==
+            senderAuthorization.descriptor.version))
+    ) {
       respond({ type: "error", errorCode: "invalid_sender" });
       return true;
     }

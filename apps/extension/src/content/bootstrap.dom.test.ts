@@ -393,12 +393,16 @@ describe("content bootstrap", () => {
     });
     expect(h.controller.register).not.toHaveBeenCalled();
     expect(h.adapter.interceptor).toBeNull();
-    expect(h.firstPort.postMessage).not.toHaveBeenCalled();
+    expect(h.firstPort.postMessage).toHaveBeenCalledOnce();
+    expect(h.firstPort.postMessage).toHaveBeenCalledWith({
+      type: "content.handshake",
+      descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+    });
 
     h.firstPort.emitMessage({ type: "settings.snapshot", envelope: {} });
     expect(h.content.getStatus().state).toBe("initializing");
     expect(h.controller.register).not.toHaveBeenCalled();
-    expect(h.firstPort.postMessage).not.toHaveBeenCalled();
+    expect(h.firstPort.postMessage).toHaveBeenCalledOnce();
 
     h.firstPort.emitMessage(settingsSnapshot());
     expect(h.controller.register).toHaveBeenCalledOnce();
@@ -412,6 +416,49 @@ describe("content bootstrap", () => {
       generation: 0,
       status: expect.objectContaining({ state: "active" }),
     });
+  });
+
+  it("disconnects a port whose handshake post fails and reconnects cleanly", () => {
+    const firstPort = createPort();
+    const secondPort = createPort();
+    const scheduler = createScheduler();
+    vi.mocked(firstPort.postMessage).mockImplementationOnce(() => {
+      throw new Error("extension context invalidated");
+    });
+    const runtime: ContentRuntime = {
+      connect: vi
+        .fn<() => ContentRuntimePort>()
+        .mockReturnValueOnce(firstPort)
+        .mockReturnValueOnce(secondPort),
+      sendMessage: vi.fn(),
+    };
+
+    const content = bootstrapContent({
+      document,
+      runtime,
+      scheduler,
+      createAdapter: () => new FakeAdapter(),
+    });
+
+    expect(firstPort.disconnect).toHaveBeenCalledOnce();
+    expect(firstPort.listenerCounts()).toEqual({ message: 0, disconnect: 0 });
+    expect(content.getStatus()).toEqual({
+      state: "unavailable",
+      application: "chatgpt",
+      protectionEnabled: null,
+    });
+
+    scheduler.runNext();
+
+    expect(secondPort.postMessage).toHaveBeenCalledWith({
+      type: "content.handshake",
+      descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+    });
+    expect(content.getStatus().state).toBe("initializing");
+    secondPort.emitMessage(settingsSnapshot(false));
+    expect(content.getStatus().state).toBe("disabled");
+    expect(firstPort.listenerCounts()).toEqual({ message: 0, disconnect: 0 });
+    content.dispose();
   });
 
   it("updates atomically, disposes on disable, and recreates on enable", () => {

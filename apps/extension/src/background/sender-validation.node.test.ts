@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isAllowedRuntimeSender,
+  resolveSettingsPortSenderDescriptor,
   isValidSettingsPortSender,
 } from "./sender-validation.js";
 
@@ -104,7 +105,7 @@ describe("runtime sender validation", () => {
     ).toBe(false);
   });
 
-  it("accepts optional documentId for Chrome 102 but requires the exact origin", () => {
+  it("accepts optional documentId and optional sender.origin when the URL derives the exact catalog origin", () => {
     const chrome102Sender = {
       id: contentSender.id,
       url: contentSender.url,
@@ -134,11 +135,87 @@ describe("runtime sender validation", () => {
         },
         runtimeId,
       ),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      resolveSettingsPortSenderDescriptor(
+        {
+          id: contentSender.id,
+          url: contentSender.url,
+          frameId: contentSender.frameId,
+          documentId: contentSender.documentId,
+        },
+        runtimeId,
+      ),
+    ).toMatchObject({
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
+      origins: ["https://chatgpt.com"],
+    });
     for (const origin of [null, "null", "https://evil.example"]) {
       expect(
         isValidSettingsPortSender({ ...contentSender, origin }, runtimeId),
       ).toBe(false);
     }
+  });
+
+  it("fails closed for malformed required fields, page origin claims, and alternate ports", () => {
+    const invalidSenders = [
+      undefined,
+      {
+        url: contentSender.url,
+        origin: contentSender.origin,
+        frameId: contentSender.frameId,
+        documentId: contentSender.documentId,
+      },
+      { ...contentSender, id: "different" },
+      {
+        id: contentSender.id,
+        url: contentSender.url,
+        origin: contentSender.origin,
+        documentId: contentSender.documentId,
+      },
+      { ...contentSender, frameId: 1 },
+      {
+        id: contentSender.id,
+        origin: contentSender.origin,
+        frameId: contentSender.frameId,
+        documentId: contentSender.documentId,
+      },
+      { ...contentSender, url: "not a url" },
+      {
+        ...contentSender,
+        url: "https://chatgpt.com:8443/",
+        origin: "https://chatgpt.com:8443",
+      },
+      {
+        ...contentSender,
+        url: "https://evil.example/",
+        origin: "https://chatgpt.com",
+      },
+      {
+        ...contentSender,
+        url: "https://evil.example/",
+        origin: "https://evil.example",
+      },
+    ];
+
+    for (const sender of invalidSenders) {
+      expect(resolveSettingsPortSenderDescriptor(sender, runtimeId)).toBeNull();
+      expect(isValidSettingsPortSender(sender, runtimeId)).toBe(false);
+    }
+  });
+
+  it("rejects alternate-port audit senders before any audit path can accept them", () => {
+    expect(
+      isAllowedRuntimeSender(
+        { type: "audit.append" },
+        {
+          ...contentSender,
+          url: "https://chatgpt.com:8443/",
+          origin: "https://chatgpt.com:8443",
+        },
+        runtimeId,
+      ),
+    ).toBe(false);
   });
 });

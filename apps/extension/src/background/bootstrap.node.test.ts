@@ -6,6 +6,7 @@ import {
   createAuditTimestamp,
 } from "@ai-dlp/shared-types";
 
+import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/adapter-catalog.js";
 import { bootstrapBackground, type BackgroundChromeApi } from "./bootstrap.js";
 import type { RuntimePortLike } from "./settings-ports.js";
 
@@ -242,6 +243,12 @@ describe("background bootstrap", () => {
       },
     };
     connectListeners[0]?.(port);
+    for (const listener of portMessages) {
+      listener({
+        type: "content.handshake",
+        descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+      });
+    }
 
     const readStatus = () =>
       new Promise<unknown>((resolve) => {

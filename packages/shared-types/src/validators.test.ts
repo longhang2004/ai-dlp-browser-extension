@@ -34,6 +34,7 @@ import {
   isAuditEventId,
   isAuditTimestamp,
   isContentStatusPortMessage,
+  isContentHandshakePortMessage,
   isDecisionAuditEvent,
   isDisplayFinding,
   isEnforcementErrorAuditEvent,
@@ -390,6 +391,55 @@ describe("closed adapter descriptor boundaries", () => {
         untrustedClaudeClaim,
       ),
     ).toBe(false);
+  });
+
+  it("validates only an exact content handshake correlated to its trusted descriptor", () => {
+    expect(
+      isContentHandshakePortMessage(validChatGptDescriptorInput, {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          origins: [...validChatGptDescriptorInput.origins],
+          capabilities: { ...validChatGptDescriptorInput.capabilities },
+        },
+      }),
+    ).toBe(true);
+
+    for (const message of [
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          adapterId: "claude",
+        },
+      },
+      {
+        type: "content.handshake",
+        descriptor: validChatGptDescriptorInput,
+        metadata: {},
+      },
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          capabilities: {
+            ...validChatGptDescriptorInput.capabilities,
+            submissionResume: "unsupported",
+          },
+        },
+      },
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          entryPoint: "other-content.js",
+        },
+      },
+    ]) {
+      expect(
+        isContentHandshakePortMessage(validChatGptDescriptorInput, message),
+      ).toBe(false);
+    }
   });
 });
 
@@ -1673,16 +1723,21 @@ describe("runtime message validation", () => {
       settings: { ...DEFAULT_PROTECTION_SETTINGS, matchedText: "secret" },
     },
     { type: "audit.append", event: { ...validDecisionEvent, text: "secret" } },
-    {
-      type: "audit.append",
-      event: { ...validDecisionEvent, adapterVersion: "1" },
-    },
   ])(
     "rejects unknown, missing, or prompt-bearing request data %#",
     (candidate) => {
       expect(isRuntimeRequest(candidate)).toBe(false);
     },
   );
+
+  it("keeps historical V3 adapter versions structurally valid for sender correlation", () => {
+    expect(
+      isRuntimeRequest({
+        type: "audit.append",
+        event: { ...validDecisionEvent, adapterVersion: "1" },
+      }),
+    ).toBe(true);
+  });
 
   it("validates response and port envelopes without generic payloads", () => {
     expect(

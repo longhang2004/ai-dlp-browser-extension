@@ -1,4 +1,6 @@
-import type { RuntimeRequest } from "@ai-dlp/shared-types";
+import type { AdapterDescriptor, RuntimeRequest } from "@ai-dlp/shared-types";
+
+import { findExecutableAdapterByOrigin } from "../adapters/adapter-catalog.js";
 
 export type RuntimeSender = {
   id?: string;
@@ -7,6 +9,13 @@ export type RuntimeSender = {
   frameId?: number;
   documentId?: string;
 };
+
+export type RuntimeSenderAuthorization =
+  | { readonly source: "extension_page" }
+  | {
+      readonly source: "content_script";
+      readonly descriptor: AdapterDescriptor;
+    };
 
 const EXTENSION_PAGE_PATHS = new Set([
   "/popup.html",
@@ -56,26 +65,35 @@ export function isValidSettingsPortSender(
   sender: RuntimeSender | undefined,
   runtimeId: string,
 ): boolean {
+  return resolveSettingsPortSenderDescriptor(sender, runtimeId) !== null;
+}
+
+export function resolveSettingsPortSenderDescriptor(
+  sender: RuntimeSender | undefined,
+  runtimeId: string,
+): AdapterDescriptor | null {
   if (
     sender === undefined ||
     sender.id !== runtimeId ||
     sender.frameId !== 0 ||
     (sender.documentId !== undefined && sender.documentId.length === 0)
   ) {
-    return false;
+    return null;
   }
   const url = parseUrl(sender.url);
   if (
     url === undefined ||
     url.protocol !== "https:" ||
-    url.hostname !== "chatgpt.com" ||
     url.username !== "" ||
-    url.password !== "" ||
-    url.port !== ""
+    url.password !== ""
   ) {
-    return false;
+    return null;
   }
-  return sender.origin === "https://chatgpt.com";
+  const derivedOrigin = url.origin;
+  if (sender.origin !== undefined && sender.origin !== derivedOrigin) {
+    return null;
+  }
+  return findExecutableAdapterByOrigin(derivedOrigin);
 }
 
 export function isAllowedRuntimeSender(
@@ -83,7 +101,21 @@ export function isAllowedRuntimeSender(
   sender: RuntimeSender,
   runtimeId: string,
 ): boolean {
-  return request.type === "audit.append"
-    ? isValidSettingsPortSender(sender, runtimeId)
-    : isValidExtensionPageSender(sender, runtimeId);
+  return resolveRuntimeSenderAuthorization(request, sender, runtimeId) !== null;
+}
+
+export function resolveRuntimeSenderAuthorization(
+  request: Pick<RuntimeRequest, "type">,
+  sender: RuntimeSender,
+  runtimeId: string,
+): RuntimeSenderAuthorization | null {
+  if (request.type === "audit.append") {
+    const descriptor = resolveSettingsPortSenderDescriptor(sender, runtimeId);
+    return descriptor === null
+      ? null
+      : { source: "content_script", descriptor };
+  }
+  return isValidExtensionPageSender(sender, runtimeId)
+    ? { source: "extension_page" }
+    : null;
 }

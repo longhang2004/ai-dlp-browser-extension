@@ -6,6 +6,7 @@ import type {
 } from "./settings.js";
 import type { ProtectionStatusSnapshot } from "./status.js";
 import type { ContentProtectionStatus } from "./status.js";
+import type { AdapterDescriptor } from "./surfaces.js";
 import type { PromptFreeArray, PromptFreeBoundary } from "./privacy.js";
 
 export const SETTINGS_PORT_NAME = "settings-v2";
@@ -58,6 +59,11 @@ export type SettingsPortMessage = PromptFreeBoundary & {
   type: "settings.snapshot";
   generation: number;
   envelope: StoredSettingsEnvelope;
+};
+
+export type ContentHandshakePortMessage = PromptFreeBoundary & {
+  type: "content.handshake";
+  descriptor: AdapterDescriptor;
 };
 
 export type ContentStatusPortMessage = PromptFreeBoundary & {

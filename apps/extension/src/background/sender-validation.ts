@@ -58,7 +58,8 @@ export function isValidExtensionPageSender(
   ) {
     return false;
   }
-  return sender.origin === `chrome-extension://${runtimeId}`;
+  const derivedOrigin = `${url.protocol}//${url.host}`;
+  return sender.origin === undefined || sender.origin === derivedOrigin;
 }
 
 export function isValidSettingsPortSender(

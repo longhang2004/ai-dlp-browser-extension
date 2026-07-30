@@ -13,6 +13,23 @@ const extensionSender = {
   origin: `chrome-extension://${runtimeId}`,
   frameId: 0,
 };
+const extensionPageCases = [
+  {
+    page: "popup",
+    url: `chrome-extension://${runtimeId}/popup.html`,
+    requestTypes: ["status.read"],
+  },
+  {
+    page: "options",
+    url: `chrome-extension://${runtimeId}/options.html`,
+    requestTypes: ["settings.read", "settings.save"],
+  },
+  {
+    page: "audit",
+    url: `chrome-extension://${runtimeId}/audit.html`,
+    requestTypes: ["audit.read", "audit.clear"],
+  },
+] as const;
 const contentSender = {
   id: runtimeId,
   url: "https://chatgpt.com/c/abc",
@@ -22,19 +39,69 @@ const contentSender = {
 };
 
 describe("runtime sender validation", () => {
-  it("allows only known extension pages for extension-page requests", () => {
-    for (const type of [
-      "settings.read",
-      "settings.save",
-      "audit.read",
-      "audit.clear",
-      "status.read",
-    ] as const) {
-      expect(isAllowedRuntimeSender({ type }, extensionSender, runtimeId)).toBe(
-        true,
-      );
-    }
+  describe.each(extensionPageCases)(
+    "$page extension page",
+    ({ url, requestTypes }) => {
+      it("accepts its natural request paths with the exact extension origin", () => {
+        for (const type of requestTypes) {
+          expect(
+            isAllowedRuntimeSender(
+              { type },
+              {
+                id: runtimeId,
+                url,
+                origin: `chrome-extension://${runtimeId}`,
+                frameId: 0,
+              },
+              runtimeId,
+            ),
+          ).toBe(true);
+        }
+      });
 
+      it("accepts its natural request paths when optional sender.origin is absent under minimum Chrome 102", () => {
+        for (const type of requestTypes) {
+          expect(
+            isAllowedRuntimeSender(
+              { type },
+              {
+                id: runtimeId,
+                url,
+                frameId: 0,
+              },
+              runtimeId,
+            ),
+          ).toBe(true);
+        }
+      });
+    },
+  );
+
+  it("rejects null and mismatched extension-page origin claims", () => {
+    for (const origin of [
+      null,
+      "null",
+      "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba",
+      "https://chatgpt.com",
+    ]) {
+      expect(
+        isAllowedRuntimeSender(
+          { type: "settings.read" },
+          { ...extensionSender, origin },
+          runtimeId,
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("rejects extension pages with the wrong runtime identity or an unknown path", () => {
+    expect(
+      isAllowedRuntimeSender(
+        { type: "settings.read" },
+        { ...extensionSender, id: "different" },
+        runtimeId,
+      ),
+    ).toBe(false);
     expect(
       isAllowedRuntimeSender(
         { type: "settings.read" },
@@ -45,43 +112,55 @@ describe("runtime sender validation", () => {
         runtimeId,
       ),
     ).toBe(false);
-    expect(
-      isAllowedRuntimeSender(
-        { type: "settings.read" },
-        {
-          id: extensionSender.id,
-          url: extensionSender.url,
-          frameId: extensionSender.frameId,
-        },
-        runtimeId,
-      ),
-    ).toBe(false);
-    for (const origin of [null, "null", "https://chatgpt.com"]) {
+  });
+
+  it("rejects extension-page URLs with credentials or a port", () => {
+    for (const url of [
+      `chrome-extension://user:pass@${runtimeId}/popup.html`,
+      `chrome-extension://${runtimeId}:8443/popup.html`,
+    ]) {
       expect(
         isAllowedRuntimeSender(
-          { type: "settings.read" },
-          { ...extensionSender, origin },
+          { type: "status.read" },
+          { ...extensionSender, url },
           runtimeId,
         ),
       ).toBe(false);
     }
+  });
+
+  it("rejects invalid optional frame and document claims from extension pages", () => {
     expect(
       isAllowedRuntimeSender(
         { type: "settings.read" },
-        { ...extensionSender, id: "different" },
+        { ...extensionSender, frameId: 1 },
+        runtimeId,
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedRuntimeSender(
+        { type: "settings.read" },
+        { ...extensionSender, documentId: "" },
         runtimeId,
       ),
     ).toBe(false);
   });
 
-  it("allows audit append only from a top-frame ChatGPT content script", () => {
-    expect(
-      isAllowedRuntimeSender(
-        { type: "audit.append" },
-        contentSender,
-        runtimeId,
-      ),
-    ).toBe(true);
+  it("does not authorize a content-script sender for extension-page requests", () => {
+    for (const type of [
+      "settings.read",
+      "settings.save",
+      "audit.read",
+      "audit.clear",
+      "status.read",
+    ] as const) {
+      expect(isAllowedRuntimeSender({ type }, contentSender, runtimeId)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("does not authorize an extension page to append audit events", () => {
     expect(
       isAllowedRuntimeSender(
         { type: "audit.append" },
@@ -89,6 +168,16 @@ describe("runtime sender validation", () => {
         runtimeId,
       ),
     ).toBe(false);
+  });
+
+  it("allows audit append only from an exact top-frame ChatGPT content script", () => {
+    expect(
+      isAllowedRuntimeSender(
+        { type: "audit.append" },
+        contentSender,
+        runtimeId,
+      ),
+    ).toBe(true);
     expect(
       isAllowedRuntimeSender(
         { type: "audit.append" },
@@ -105,7 +194,36 @@ describe("runtime sender validation", () => {
     ).toBe(false);
   });
 
-  it("accepts optional documentId and optional sender.origin when the URL derives the exact catalog origin", () => {
+  it("requires the content-script runtime id, URL, and top frame", () => {
+    for (const sender of [
+      {
+        url: contentSender.url,
+        origin: contentSender.origin,
+        frameId: contentSender.frameId,
+        documentId: contentSender.documentId,
+      },
+      { ...contentSender, id: "different" },
+      {
+        id: contentSender.id,
+        origin: contentSender.origin,
+        frameId: contentSender.frameId,
+        documentId: contentSender.documentId,
+      },
+      { ...contentSender, url: "not a url" },
+      {
+        id: contentSender.id,
+        url: contentSender.url,
+        origin: contentSender.origin,
+        documentId: contentSender.documentId,
+      },
+      { ...contentSender, frameId: 1 },
+    ]) {
+      expect(resolveSettingsPortSenderDescriptor(sender, runtimeId)).toBeNull();
+      expect(isValidSettingsPortSender(sender, runtimeId)).toBe(false);
+    }
+  });
+
+  it("accepts optional content documentId and sender.origin when the URL derives the exact catalog origin", () => {
     const chrome102Sender = {
       id: contentSender.id,
       url: contentSender.url,
@@ -158,30 +276,10 @@ describe("runtime sender validation", () => {
     }
   });
 
-  it("fails closed for malformed required fields, page origin claims, and alternate ports", () => {
+  it("rejects malformed optional content claims and origins outside the exact catalog", () => {
     const invalidSenders = [
       undefined,
-      {
-        url: contentSender.url,
-        origin: contentSender.origin,
-        frameId: contentSender.frameId,
-        documentId: contentSender.documentId,
-      },
-      { ...contentSender, id: "different" },
-      {
-        id: contentSender.id,
-        url: contentSender.url,
-        origin: contentSender.origin,
-        documentId: contentSender.documentId,
-      },
-      { ...contentSender, frameId: 1 },
-      {
-        id: contentSender.id,
-        origin: contentSender.origin,
-        frameId: contentSender.frameId,
-        documentId: contentSender.documentId,
-      },
-      { ...contentSender, url: "not a url" },
+      { ...contentSender, documentId: "" },
       {
         ...contentSender,
         url: "https://chatgpt.com:8443/",

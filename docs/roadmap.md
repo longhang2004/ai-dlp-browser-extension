@@ -47,10 +47,16 @@ Approval gate:
 Outcome: reuse the browser-independent local detection and policy core across a
 small, approved set of web AI applications.
 
+The proposed design package is documented in
+[Milestone 2 verified browser surfaces](milestone-2/verified-browser-surfaces-design.md).
+It recommends Claude web at the exact `https://claude.ai` origin, but neither
+the surface nor its optional permission, capabilities, or implementation is
+approved merely by publication of the design.
+
 Exit criteria:
 
-- Proposed `AiSurface`, `AdapterCapabilities`, and `AdapterTrust` contracts have
-  an approved specification and threat model.
+- Proposed `AiSurfaceId`, `AdapterDescriptor`, `AdapterCapabilities`, and
+  `AdapterTrust` contracts have an approved specification and threat model.
 - Every shipped adapter is classified `verified`, `discovered`, or
   `unsupported`; only verified capabilities can resume or replace content.
 - Each new origin has an application-specific selector, submission, attachment,
@@ -63,8 +69,10 @@ Exit criteria:
 
 Approval gate:
 
-- Approve the first additional web surface, its exact permissions, and its trust
-  classification before implementation.
+- Approve the first additional web surface, exact origin, permission model,
+  capability claims, and M2.0/M2.1/M2.2 decomposition before implementation.
+- A selected adapter remains unsupported until its exact release artifact passes
+  automated and authenticated capability-specific verification.
 - Approve each later origin independently; approval of one adapter does not
   approve a wildcard family.
 

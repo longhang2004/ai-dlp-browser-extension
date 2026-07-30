@@ -9,6 +9,10 @@ sender validation, status aggregation, permissions, tests, and threat model.
 Browser-specific adapters implement `ChatApplicationAdapter` in
 `apps/extension/src/adapters/chat-application-adapter.ts`:
 
+- expose one immutable packaged `AdapterDescriptor` that correlates the closed
+  adapter ID, surface ID, exact version, exact canonical origins, trust,
+  capability-specific support, and per-origin entry point;
+
 - match only the intended application URL;
 - resolve the live composer and associated enabled send control;
 - synchronously read the active prompt and explicitly report whether safe
@@ -22,6 +26,13 @@ Browser-specific adapters implement `ChatApplicationAdapter` in
 
 The adapter must not evaluate policy, own authorization, show protection UI,
 construct audit events, or receive `SensitiveDataFinding` objects.
+
+The packaged catalog, not page data, storage, or managed policy, owns the
+descriptor. Runtime validators reject unknown IDs, arbitrary versions,
+mismatched adapter/surface/origin/capability combinations, extra keys, and
+arbitrary metadata. A reserved `AdapterId` or known surface does not authorize
+execution; only the current executable catalog does. M2.0 contains ChatGPT only;
+gated M2.2 may add Claude.
 
 ## Prompt ownership
 
@@ -49,6 +60,11 @@ Centralize all selectors in one adapter module and prefer, in order:
 Generated or styling-oriented CSS classes are not primary selectors. Broad
 composer and send-control selectors must be constrained to the same local form
 or region.
+
+Every application owns its selector and context modules. A per-origin thin
+content entry imports the shared controller and exactly one adapter. Selector
+imports across adapter folders are forbidden and verified in source, bundle,
+fixture, and artifact tests.
 
 Maintain fixture-based tests for at least two plausible DOM variants and add a
 fixture for every selector regression. Resolve an exact Send control through one
@@ -89,24 +105,92 @@ failure, duplicate initialization, and disposal.
 
 A new application also requires:
 
-- explicit manifest match review with least privilege;
-- background sender-origin and URL validation;
-- application-specific status and audit identifiers;
+- an independently approved exact origin and least-privilege permission review;
+- a packaged catalog entry and per-origin content IIFE;
+- background correlation of sender origin/URL, adapter ID, surface ID, version,
+  entry point, trust, and capabilities;
+- application-specific prompt-free status and audit identity;
 - local fixture routes that make no remote request;
-- production artifact URL review;
+- reciprocal cross-adapter selector tests, manifest/registration-rooted artifact
+  reachability, orphan-bundle rejection, and production URL review;
 - updated privacy/threat/manual-QA documentation.
 
-Do not add `tabs`, `activeTab`, `scripting`, broad host permissions,
-`web_accessible_resources`, page-world injection, or remote assets unless a new
-approved specification demonstrates necessity.
+For consumer surfaces, request only the approved exact optional host from the
+options page during an explicit click. Dynamic persistent content registration
+requires an independently approved `scripting` permission. Do not add `tabs`,
+`activeTab`, broad host permissions, `web_accessible_resources`, page-world
+injection, or remote assets. Managed enterprise deployment uses independently
+signed exact-origin builds and does not assume host policy silently grants an
+optional permission. See the
+[permission strategy](../milestone-2/permission-strategy.md).
+
+Chrome's official
+[match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
+means a scheme-and-host pattern that omits a port may inject the bootstrap on
+alternate ports. Make the entry's first executable guard require serialized
+`location.origin` to equal the approved default-port origin before adapter
+construction or DOM access, and exit otherwise; background validates it again.
+Alternate-port tests may observe bootstrap injection but must prove no page
+read, accepted adapter/runtime registration or port, status, or audit.
+
+## Evidence and trust review
+
+Before implementation, the surface-selection record must state exact origins,
+authentication needs, composer and submission evidence, Enter/Shift+Enter/IME,
+attachments, SPA behavior, composer/Send ownership, resume and replacement,
+selector/accessibility stability, drift, permission, non-sensitive QA, known
+restrictions, and rollback. Unobserved DOM or submission behavior is recorded as
+unavailable, never inferred.
+
+A `verified` descriptor may claim only capabilities proven through application-
+specific automated tests and authenticated QA on the exact release SHA/artifact.
+Proposed verified trust may appear only in a gated QA release-candidate that is
+not production-accepted and cannot be published or installed outside the QA
+cohort. Only after all evidence passes may that exact same digest, without a
+rebuild or substitution, be accepted and published; failure removes the
+executable entry and restores unsupported. Attachment presence does not imply
+inspection. Synthetic DOM clicks do not prove safe resume. Prompt replacement
+stays unsupported until the application's real state boundary is proved.
+
+Authenticated QA uses a dedicated account and synthetic fixture IDs. Record only
+SHA, CI run, artifact digest/file count, browser/version, exact origin, account
+tier, date/timezone, adapter version, permission, trust, capabilities, fixed
+health codes, and structural outcomes. Never retain prompt/conversation content,
+filenames, attachment metadata, account identifiers, screenshots, HTML, cookies,
+tokens, URL paths, or page titles.
+
+## Rollback
+
+Every adapter review names an origin-local rollback. Dispose all active runtime
+and cancel attempts before unregistering its versioned script; reject stale
+ports and events; report unsupported or transport unavailable once no validated
+port remains; and remove only that adapter's catalog, permission, build-entry,
+and artifact edges in a follow-up release. Other adapters, settings, policy, and
+audit remain intact. Chrome does not remove already injected code merely because
+a dynamic script is unregistered, so live disposal and stale-port rejection are
+mandatory.
+
+Revocation synchronously invalidates background generation before awaited
+cleanup, blocking accepted authorization, status, and audit. The background
+reports the surface inactive immediately, sends disposal, and requires an
+acknowledgement. Disposal and unregistration remain asynchronous best effort; if
+the runtime fails or does not respond, show refresh guidance and make no
+protection claim. Already injected code may keep observing or intercepting local
+submissions until disposal is acknowledged or the page reloads, although the
+background rejects its messages. Test both acknowledged and failed or
+unresponsive disposal. Without an accepted port, registration failure/rollback
+is unsupported or unavailable, never degraded. Degraded requires a connected
+validated verified runtime with a fixed health failure; active describes context
+health, not every capability.
 
 ## Future trust classification
 
-The documented future `AiSurface`, `AdapterCapabilities`, and `AdapterTrust`
-contracts do not authorize a new adapter. Each surface still requires the review
-above. A `verified` adapter may claim only capabilities proven against the
-application's real submission path. A `discovered` surface provides coarse
-application visibility only, and `unsupported` provides no enforcement claim.
+The `AiSurfaceId`, `AdapterCapabilities`, `AdapterDescriptor`, and
+`AdapterTrust` contracts do not authorize a new adapter. Each surface still
+requires the review above. A `verified` adapter may claim only capabilities
+proven against the application's real submission path. A `discovered` surface
+provides coarse application visibility only, reads no prompt or page text, and
+claims no enforcement; `unsupported` provides no enforcement claim.
 
 IDE and CLI integrations are official-hook-first. Process scraping, terminal
 history, keylogging, clipboard polling, network interception, and arbitrary

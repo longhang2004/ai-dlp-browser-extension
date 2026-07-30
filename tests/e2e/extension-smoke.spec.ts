@@ -288,6 +288,73 @@ test("SPA navigation invalidates a visible warning before bypass can resume", as
   await extensionPage.close();
 });
 
+test("policy revision invalidates stale bypass and preserves catalog-correlated status and audit identity", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await waitForProtectionState(extensionPage, "active");
+  const status = (await sendRuntimeMessage(extensionPage, {
+    type: "status.read",
+  })) as {
+    type: string;
+    status: {
+      state: string;
+      application: string | null;
+      surfaceId: string | null;
+    };
+  };
+  expect(status).toMatchObject({
+    type: "status.result",
+    status: {
+      state: "active",
+      application: "chatgpt",
+      surfaceId: "chatgpt_web",
+    },
+  });
+
+  await setComposerText(chatPage, sensitive.email.valid);
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  await expect(protectionDialog(chatPage)).toBeVisible();
+  await saveSettings(extensionPage, { emailAction: "block" });
+  await expect(protectionDialog(chatPage)).toHaveCount(0);
+  expect(await submissionValues(chatPage)).toEqual([]);
+
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  const blocked = protectionDialog(chatPage);
+  await expect(blocked).toContainText("Submission blocked");
+  await expect(
+    blocked.getByRole("button", { name: "Send anyway" }),
+  ).toHaveCount(0);
+  await blocked.getByRole("button", { name: "Close" }).click();
+
+  const audit = (await sendRuntimeMessage(extensionPage, {
+    type: "audit.read",
+  })) as {
+    type: string;
+    envelope: {
+      events: Array<{
+        application?: unknown;
+        adapterVersion?: unknown;
+      }>;
+    };
+  };
+  expect(audit.envelope.events.length).toBeGreaterThan(0);
+  for (const event of audit.envelope.events) {
+    expect(event.application).toBe("chatgpt");
+    expect(event.adapterVersion).toBe("3");
+  }
+  expect(JSON.stringify(audit.envelope.events)).not.toContain(
+    sensitive.email.valid,
+  );
+  await extensionPage.close();
+});
+
 test("shared-Send ambiguity fails closed without a prompt-bearing audit", async ({
   chatPage,
   extensionContext,

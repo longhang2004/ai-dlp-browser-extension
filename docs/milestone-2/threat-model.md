@@ -11,7 +11,7 @@ capabilities come only from reviewed packaged descriptors and current evidence.
   adapter are active per document.
 - Adapter ID, surface ID, version, origin, trust, capabilities, and sender are
   validated as one immutable catalog relationship.
-- Only an enabled surface with effective exact-origin permission and a valid
+- Only an enabled surface with both effective optional grants and a valid
   verified content port can be waiting, active, or degraded.
 - Unknown, ambiguous, stale, unpermitted, or drifted state stops captured
   attempts and never claims active protection.
@@ -22,9 +22,12 @@ capabilities come only from reviewed packaged descriptors and current evidence.
 
 Chrome's official
 [match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-means the approved `https://claude.ai/*` pattern constrains scheme and host but,
-because it omits a port, may inject the bootstrap on alternate ports. The
-bootstrap's first executable guard checks serialized
+documents explicit ports and wildcard behavior when omitted. M2.2 proposes
+`https://claude.ai:443/*`, subject to supported-browser proof across the MV3
+declaration, permission APIs, registration, and port-matching fixtures. A
+recorded concrete rejection is required before explicitly proposing the
+exact-host/wildcard-port `https://claude.ai/*` fallback. The bootstrap's first
+executable guard still checks serialized
 `location.origin === "https://claude.ai"` before adapter construction or DOM
 access and exits otherwise; background sender validation repeats the check.
 
@@ -37,14 +40,16 @@ access and exits otherwise; background sender validation repeats the check.
 - **Security boundary:** untrusted document to packaged catalog/background.
 - **Required invariant:** HTTPS scheme, default port, top frame, and serialized
   origin exactly match the descriptor's canonical origin.
-- **Detection:** parse the sender URL independently and correlate sender origin,
-  surface, adapter, version, and entry point against the catalog.
+- **Detection:** require and parse `sender.url`, require `sender.frameId === 0`
+  and `sender.id === chrome.runtime.id`, compare optional `sender.origin` only
+  when present, and correlate the derived origin, surface, adapter, version, and
+  entry point against the catalog.
 - **Fail-safe behavior:** reject the port/message, dispose any local runtime,
   emit no audit event, and report no active surface.
 - **Tests:** HTTP, subdomain, user-info, opaque origin, malformed URL,
-  origin/URL disagreement, and canonical-origin success. Alternate-port tests
-  may observe bootstrap injection but prove no page read, accepted
-  adapter/runtime registration or port, status, or audit.
+  optional-origin absence, origin/URL disagreement, and canonical-origin
+  success. Alternate-port tests may observe bootstrap injection but prove no
+  page read, accepted adapter/runtime registration or port, status, or audit.
 - **Residual risk:** a compromised approved origin can still control its own
   DOM; DOM behavior is constrained by the separate adapter invariants below.
 
@@ -152,10 +157,11 @@ access and exits otherwise; background sender validation repeats the check.
 - **Entry point:** deceptive page UI, unsolicited prompt, ambiguous origin copy,
   or repeated request flow.
 - **Security boundary:** user intent to Chrome permission grant.
-- **Required invariant:** only the options page, inside an explicit click, asks
-  for one displayed exact origin.
-- **Detection:** request adapter accepts a closed origin allowlist and is
-  callable only from the trusted options action.
+- **Required invariant:** only the M2.2 options page, inside one explicit click,
+  asks for displayed optional `scripting` and `https://claude.ai:443/*`
+  together; M2.1 asks for neither.
+- **Detection:** request adapter accepts one closed host/named-permission tuple
+  and is callable only from the trusted options action.
 - **Fail-safe behavior:** denial changes no setting or policy and causes no
   automatic retry.
 - **Tests:** non-gesture call, content-page request, unknown/broad origin,
@@ -168,23 +174,24 @@ access and exits otherwise; background sender validation repeats the check.
 
 - **Entry point:** permission granted before or after a disabled setting.
 - **Security boundary:** Chrome permission state to activation state.
-- **Required invariant:** a host grant alone never registers or activates an
-  adapter.
+- **Required invariant:** optional grants alone never register or activate an
+  adapter; both grants and enablement are required.
 - **Detection:** startup/event reconciliation requires both permission and
   `enabled: true`.
 - **Fail-safe behavior:** remain `adapter_disabled` with no Claude registration.
 - **Tests:** grant while disabled, restart while disabled/granted, and stale
   registration cleanup.
-- **Residual risk:** Chrome still records the unused host grant until the user
-  removes it.
+- **Residual risk:** Chrome retains the unused surface host grant until explicit
+  access removal; dependency-aware cleanup removes optional `scripting` when
+  safe and reports and retries API failure.
 
 ### Adapter enablement without permission
 
 - **Entry point:** settings change, migration, or managed configuration.
 - **Security boundary:** local settings to Chrome host access.
-- **Required invariant:** enablement cannot manufacture effective permission.
-- **Detection:** `permissions.contains()` during save reconciliation, startup,
-  and before registration.
+- **Required invariant:** enablement cannot manufacture either optional grant.
+- **Detection:** `permissions.contains()` checks the closed host and named tuple
+  during save reconciliation, startup, and before registration.
 - **Fail-safe behavior:** show `permission_not_granted`, register nothing, and
   expose an explicit options-page action.
 - **Tests:** enable without grant, grant denial, restart, storage corruption,
@@ -208,14 +215,14 @@ access and exits otherwise; background sender validation repeats the check.
 - **Residual risk:** Chrome documents that unregistering does not remove already
   injected code; disposal plus background rejection limits it until page reload.
 
-### Revoked permissions
+### Revoked host or named permissions
 
 - **Entry point:** user browser controls, options removal, or enterprise policy.
 - **Security boundary:** Chrome permission event to active content runtime.
-- **Required invariant:** lost permission immediately invalidates protection and
-  all unconsumed authorization for that origin.
-- **Detection:** `permissions.onRemoved`, reconciliation, and effective-access
-  check before future registration.
+- **Required invariant:** loss of either required optional grant immediately
+  invalidates protection and all unconsumed authorization for that origin.
+- **Detection:** `permissions.onRemoved`, reconciliation of host plus named
+  permission, and effective-access check before future registration.
 - **Fail-safe behavior:** synchronously invalidate background generation and
   reject stale authorization, status, and audit before awaited cleanup; show
   `permission_not_granted` and an inactive surface immediately; then
@@ -266,8 +273,10 @@ access and exits otherwise; background sender validation repeats the check.
 
 - **Entry point:** corrupted storage/message, candidate identifier, or UI model.
 - **Security boundary:** candidate/discovery data to trust/status presentation.
-- **Required invariant:** only a packaged descriptor with exact current evidence
-  can carry verified trust; known surface IDs alone confer nothing.
+- **Required invariant:** only the restricted catalog-owned QA candidate may
+  carry proposed verified trust before acceptance; known surface IDs alone
+  confer nothing, and only the external exact-SHA/digest gate creates a
+  production verified claim.
 - **Detection:** descriptor lookup and capability/trust correlation at every
   crossing.
 - **Fail-safe behavior:** reject or represent as unsupported/discovered with no
@@ -424,6 +433,151 @@ access and exits otherwise; background sender validation repeats the check.
   health, unsupported capability copy, and consumer/Microsoft 365 distinction.
 - **Residual risk:** users may ignore status. Managed disclosure, training, and
   support material remain operational controls, not enforcement guarantees.
+
+### Required scripting accidentally granted to every user
+
+- **Entry point:** manifest edit or release packaging places `scripting` in
+  required `permissions`.
+- **Security boundary:** install-time extension authority to optional dynamic
+  surface activation.
+- **Required invariant:** base permissions remain `["storage"]`; surface-only
+  `scripting` appears only in `optional_permissions` and is requested with a
+  usable approved dynamic surface.
+- **Detection:** exact manifest-schema tests, generated-artifact assertions, and
+  install-disclosure review reject required `scripting`.
+- **Fail-safe behavior:** fail build and publication; ChatGPT continues to use
+  its static entry without `scripting`.
+- **Tests:** source/generated manifest required-versus-optional placement,
+  absence in M2.0/M2.1, presence only in approved M2.2 shape, and ChatGPT E2E
+  with `scripting` absent.
+- **Residual risk:** browser UI may describe optional named permission
+  differently across versions; exact artifact inspection remains authoritative.
+
+### Optional scripting retained after its final dependent is removed
+
+- **Entry point:** Claude access removal, disablement, catalog rollback, or
+  partial cleanup after a future second dynamic surface.
+- **Security boundary:** per-surface lifecycle to shared optional named
+  authority.
+- **Required invariant:** optional `scripting` remains granted only while at
+  least one enabled, effectively permitted, catalog-owned dynamic surface
+  requires it.
+- **Detection:** deterministic `isScriptingStillRequired(surfaces)` evaluation
+  after settings, host-permission, catalog, and named-permission changes.
+- **Fail-safe behavior:** invalidate generation, dispose, and unregister first;
+  disablement retains the Claude host grant and removes `scripting` only when
+  `isScriptingStillRequired(surfaces)` returns false. Preserve `scripting` when
+  a hypothetical second approved enabled/granted dependent remains. Explicit
+  Claude access removal separately removes its host grant.
+- **Tests:** Claude-only explicit access removal, disabled Claude with its host
+  grant retained, remaining second dynamic surface, stale/unknown surface,
+  partial API failure, and restart reconciliation.
+- **Residual risk:** an unused host grant can remain until explicit access
+  removal. Browser removal of orphaned `scripting` may fail transiently; fixed
+  inactive status, disclosed cleanup failure, and startup retry prevent treating
+  retained authority as activation.
+
+### Named scripting permission removed while host access remains
+
+- **Entry point:** browser permission controls, API removal, policy change, or
+  permission-event loss.
+- **Security boundary:** live optional named authority to registered Claude
+  runtime.
+- **Required invariant:** host access alone is never permission-ready and cannot
+  keep a dynamic adapter authorized.
+- **Detection:** live `contains()` checks and added/removed-event reconciliation
+  derive `scripting_missing` from the closed two-boolean permission state.
+- **Fail-safe behavior:** synchronously invalidate runtime generation, report
+  `permission_not_granted`, reject stale messages/status/audit, then dispose and
+  unregister asynchronously.
+- **Tests:** named removal while idle, active, and warning; host retained;
+  missed-event startup; cleanup failure; and later joint re-grant.
+- **Residual risk:** injected code can remain until disposal acknowledgement or
+  reload, but its background authority and protection claim end synchronously.
+
+### Claude host access requested before executable support exists
+
+- **Entry point:** M2.1 UI, migration preview, background startup, or an eager
+  permission API wrapper.
+- **Security boundary:** future permission infrastructure to present user
+  intent.
+- **Required invariant:** no real host/named request or activation appears until
+  the same approved M2.2 candidate ships a usable Claude entry and adapter.
+- **Detection:** M2.1 UI tests, permission-wrapper call assertions, manifest
+  checks, bundle reachability, and exact inert-preview copy.
+- **Fail-safe behavior:** show no grant action; if a preview is present, show
+  only “Claude support is not installed in this release.”
+- **Tests:** no M2.1 optional permissions, no request call, no active toggle, no
+  Claude bundle/registration, and no protectable-state claim.
+- **Residual risk:** a user can independently grant extension site access in
+  browser controls; runtime activation still requires the catalog and usable
+  candidate gates.
+
+### All-port host pattern used when an explicit default-port pattern is available
+
+- **Entry point:** manifest, permission request/remove/contains call,
+  registration, catalog metadata, fixture, or artifact allowlist drift.
+- **Security boundary:** reviewed canonical origin to browser match-pattern
+  authority.
+- **Required invariant:** every M2.2 edge uses `https://claude.ai:443/*` unless
+  a supported-browser rejection has been concretely recorded and the
+  wildcard-port fallback separately approved.
+- **Detection:** literal consistency scans, exact artifact rules, registration
+  reconciliation, and pre-M2.2 browser/API proof.
+- **Fail-safe behavior:** fail tests/build; never silently substitute
+  `https://claude.ai/*`. Any approved fallback keeps both runtime guards and is
+  described as exact host with wildcard port.
+- **Tests:** declaration/request/contains/remove/registration equality,
+  default-port match, alternate-port non-match, and explicit fallback evidence
+  fixture.
+- **Residual risk:** browser match-pattern implementations can differ from
+  documentation; the supported-version proof remains a merge prerequisite.
+
+### ChatGPT alternate-port bootstrap
+
+- **Entry point:** the retained static `https://chatgpt.com/*` content-script
+  match on a document such as `https://chatgpt.com:8443/`.
+- **Security boundary:** backward-compatible static match to canonical ChatGPT
+  prompt-reading runtime.
+- **Required invariant:** the entry's first executable action requires
+  `location.origin === "https://chatgpt.com"` before bootstrap, adapter
+  construction, interception, or DOM access.
+- **Detection:** entry-level origin guard plus independent defensive sender
+  validation derived from `sender.url`.
+- **Fail-safe behavior:** exit without adapter construction and reject any port
+  or message; emit no status or audit.
+- **Tests:** alternate port proves no adapter, interception, composer read,
+  accepted port, status, or audit; canonical default-port ChatGPT regression
+  remains green without `scripting`.
+- **Residual risk:** the static bootstrap file may still be delivered by the
+  browser on an alternate port; the guard ensures it performs no page access.
+
+### Premature verified classification before authenticated QA
+
+- **Entry point:** descriptor, commit/PR text, options copy, release notes,
+  artifact promotion, or automated-test result.
+- **Security boundary:** verification candidate evidence to production trust and
+  capability claims.
+- **Required invariant:** `verified` is an external human/release production-
+  acceptance claim granted only after authenticated QA proves submission
+  detection, local prompt read, attachment-presence detection, and submission
+  resume on the exact SHA and digest. The candidate runtime/options copy remains
+  conservative before and after acceptance; no local or network state promotes
+  it, and acceptance causes no rebuild or substitution.
+- **Detection:** candidate-terminology checks, exact evidence-record validation,
+  release gate review, descriptor/capability correlation, and checks that no
+  acceptance flag or alternate runtime copy exists.
+- **Fail-safe behavior:** retain “Claude verification candidate” runtime/options
+  presentation; if any one target lacks proof, remove the executable Claude
+  catalog entry before merge/publication without downgrading capabilities or
+  rebuilding a substitute.
+- **Tests:** automated-only candidate, mismatched SHA/digest, rebuilt artifact,
+  each missing target capability, premature runtime/UI acceptance copy, local or
+  network promotion attempts, and external exact-candidate release acceptance
+  with byte-identical artifact and unchanged runtime/options copy.
+- **Residual risk:** authenticated QA remains a human-operated evidence process;
+  named cohort restriction, minimal records, and explicit approval reduce but do
+  not eliminate review error.
 
 ## Residual posture
 

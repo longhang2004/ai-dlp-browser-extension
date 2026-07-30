@@ -115,23 +115,35 @@ A new application also requires:
   reachability, orphan-bundle rejection, and production URL review;
 - updated privacy/threat/manual-QA documentation.
 
-For consumer surfaces, request only the approved exact optional host from the
-options page during an explicit click. Dynamic persistent content registration
-requires an independently approved `scripting` permission. Do not add `tabs`,
-`activeTab`, broad host permissions, `web_accessible_resources`, page-world
-injection, or remote assets. Managed enterprise deployment uses independently
-signed exact-origin builds and does not assume host policy silently grants an
-optional permission. See the
+Sender correlation derives origin from required `sender.url`, requires
+`sender.frameId === 0` and `sender.id === chrome.runtime.id`, and compares
+optional `sender.origin` only when present. Missing or malformed required fields
+fail closed; absence of optional origin alone does not. Every content entry,
+including ChatGPT's static entry, performs its canonical-origin guard before
+adapter construction, interception, or DOM access.
+
+For a usable consumer dynamic surface, request its approved default-port
+optional host and optional `scripting` together from one explicit options-page
+click. Never put surface-only `scripting` in required permissions. Remove it
+only after the last enabled/granted catalog-owned dynamic dependent is gone. Do
+not add `tabs`, `activeTab`, broad host permissions, `web_accessible_resources`,
+page-world injection, or remote assets. Managed enterprise deployment uses
+independently signed exact-origin builds and does not assume host policy
+silently grants an optional permission. See the
 [permission strategy](../milestone-2/permission-strategy.md).
 
 Chrome's official
 [match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-means a scheme-and-host pattern that omits a port may inject the bootstrap on
-alternate ports. Make the entry's first executable guard require serialized
-`location.origin` to equal the approved default-port origin before adapter
-construction or DOM access, and exit otherwise; background validates it again.
-Alternate-port tests may observe bootstrap injection but must prove no page
-read, accepted adapter/runtime registration or port, status, or audit.
+documents explicit ports and wildcard behavior when omitted. Prefer an explicit
+default-port pattern and prove it against the supported browser's MV3
+declaration, permissions APIs, dynamic registration, and default/alternate-port
+fixtures. Record a concrete rejection before proposing an
+exact-host/wildcard-port fallback; never fall back silently. Make every entry's
+first executable guard require serialized `location.origin` to equal the
+approved default-port origin before adapter construction or DOM access, and exit
+otherwise; background validates it again. Alternate-port tests may observe
+bootstrap injection but must prove no page read, accepted adapter/runtime
+registration or port, status, or audit.
 
 ## Evidence and trust review
 
@@ -142,15 +154,24 @@ selector/accessibility stability, drift, permission, non-sensitive QA, known
 restrictions, and rollback. Unobserved DOM or submission behavior is recorded as
 unavailable, never inferred.
 
-A `verified` descriptor may claim only capabilities proven through application-
-specific automated tests and authenticated QA on the exact release SHA/artifact.
-Proposed verified trust may appear only in a gated QA release-candidate that is
-not production-accepted and cannot be published or installed outside the QA
-cohort. Only after all evidence passes may that exact same digest, without a
-rebuild or substitution, be accepted and published; failure removes the
-executable entry and restores unsupported. Attachment presence does not imply
-inspection. Synthetic DOM clicks do not prove safe resume. Prompt replacement
-stays unsupported until the application's real state boundary is proved.
+A restricted QA verification candidate may contain a proposed
+`trust: "verified"` descriptor solely to exercise final behavior, but that field
+is not production acceptance. `verified` is an external human/release decision
+after authenticated QA proves every targeted capability on the exact SHA and
+digest. The exact artifact's runtime/options copy remains “Claude verification
+candidate” before and after acceptance; no local or network-controlled flag
+promotes it. Signed publication and release metadata may record acceptance, but
+the artifact is not rebuilt or substituted.
+
+For initial Claude M2.2, failure to prove any one of submission detection, local
+prompt read, attachment-presence detection, or submission resume removes the
+executable entry before merge/publication. There is no capability downgrade or
+rebuilt fallback. Attachment presence does not imply inspection, and synthetic
+DOM clicks do not prove safe resume. Prompt replacement and attachment
+inspection are unconditionally `unsupported` in initial Claude M2.2. Only a
+later separate approved design, threat review, RED-first tests, authenticated
+application-state proof, exact-artifact QA, and explicit human approval may
+revisit either capability.
 
 Authenticated QA uses a dedicated account and synthetic fixture IDs. Record only
 SHA, CI run, artifact digest/file count, browser/version, exact origin, account

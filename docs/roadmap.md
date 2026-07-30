@@ -61,8 +61,9 @@ Exit criteria:
   `unsupported`; only verified capabilities can resume or replace content.
 - Each new origin has an application-specific selector, submission, attachment,
   privacy, status, and regression test suite.
-- Optional host permissions are requested per approved surface, with a usable
-  disclosure and a deployment choice that does not silently broaden access.
+- Optional host and required optional named permissions are requested together
+  per usable approved surface, with a usable disclosure and dependency-aware
+  named-permission cleanup that does not silently broaden access.
 - Unknown or drifted surfaces fail honestly without claiming active protection.
 - No remote executable adapter, page-world injection, broad browsing history, or
   network inspection is introduced.
@@ -71,8 +72,11 @@ Approval gate:
 
 - Approve the first additional web surface, exact origin, permission model,
   capability claims, and M2.0/M2.1/M2.2 decomposition before implementation.
-- A selected adapter remains unsupported until its exact release artifact passes
-  automated and authenticated capability-specific verification.
+- A selected adapter remains a verification candidate until its exact release
+  artifact passes automated and authenticated capability-specific acceptance;
+  `verified` is an external human/release production-acceptance claim bound to
+  that SHA and digest. Runtime/options candidate copy does not mutate at the
+  gate, and no local or network state can confer acceptance.
 - Approve each later origin independently; approval of one adapter does not
   approve a wildcard family.
 

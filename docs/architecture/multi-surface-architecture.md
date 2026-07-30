@@ -74,11 +74,11 @@ process name, discovery, storage, page data, or a remote declaration.
 
 ## Adapter trust states
 
-| Trust state   | Meaning                                                       | Permitted claim                                   |
-| ------------- | ------------------------------------------------------------- | ------------------------------------------------- |
-| `verified`    | Reviewed integration and current regression evidence exist    | Only individually verified capabilities           |
-| `discovered`  | An approved application is coarsely visible                   | Application visibility; no content or enforcement |
-| `unsupported` | Identity or submission semantics cannot be established safely | Fixed unsupported status; no protection assertion |
+| Trust state   | Meaning                                                                                            | Permitted claim                                   |
+| ------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `verified`    | Exact-SHA/digest authenticated QA has passed the external human/release production-acceptance gate | Only individually accepted verified capabilities  |
+| `discovered`  | An approved application is coarsely visible                                                        | Application visibility; no content or enforcement |
+| `unsupported` | Identity or submission semantics cannot be established safely                                      | Fixed unsupported status; no protection assertion |
 
 Runtime ambiguity never mutates packaged trust or capability support. It
 invalidates the current attempt and one-shot bypass, then yields
@@ -92,7 +92,12 @@ trust or capability support.
 Milestone 1 remains ChatGPT-only. The proposed first additional surface is
 `claude_web` at exactly `https://claude.ai`, initially unsupported. See the
 [Milestone 2 specification](../milestone-2/verified-browser-surfaces-design.md).
-Each future web chatbot requires:
+The restricted M2.2 QA artifact may contain a proposed `trust: "verified"`
+descriptor to exercise final behavior, but only the external exact-SHA/digest
+acceptance gate makes that a production claim. Its runtime/options copy remains
+“Claude verification candidate” before and after acceptance; no local or network
+state promotes it, and acceptance does not rebuild the artifact. Each future web
+chatbot requires:
 
 - an exact origin and sender-validation update;
 - independent selector and submission semantics;
@@ -104,15 +109,17 @@ Each future web chatbot requires:
 
 Optional host permissions should let an employee or managed deployment enable
 only approved surfaces. A base installation must not silently gain access to all
-browsing. Consumer installation uses explicit exact-origin optional permission;
-persistent dynamic registration also requires separately approved `scripting`.
+browsing. Consumer installation requests the explicit default-port optional host
+and optional `scripting` together only when the usable dynamic surface ships;
+`scripting` is removed only after its last catalog-owned dependent is gone.
 Managed deployment should use separately signed exact-origin builds. Enterprise
 allowed-host policy is not treated as proof that an optional permission was
 granted.
 
 Per-origin thin entry points isolate selectors and rollback. ChatGPT retains its
-static IIFE; an approved Claude adapter receives a Claude-only IIFE that imports
-the shared controller and exactly one adapter. Unknown origins instantiate no
+static IIFE and match but gains a first-executable canonical-origin guard in
+M2.0; an approved Claude adapter receives a Claude-only IIFE that imports the
+shared controller and exactly one adapter. Unknown origins instantiate no
 prompt-reading code, and one document can own at most one verified adapter.
 
 Surface states are `permission_not_granted`, `adapter_disabled`,
@@ -127,12 +134,12 @@ health, not blanket capability support.
 
 Chrome's official
 [match-pattern contract](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-means that `https://claude.ai/*` constrains scheme and host but, because it
-omits a port, may inject the bootstrap on alternate ports. The bootstrap's first
-executable guard requires serialized `location.origin === "https://claude.ai"`
-before adapter construction or DOM access and exits otherwise; background sender
-validation repeats the check. Alternate-port tests may observe bootstrap
-injection but prove no DOM read, accepted adapter/runtime registration or port,
+documents explicit ports and wildcard behavior when omitted. M2.2 proposes
+`https://claude.ai:443/*`, subject to an MV3/permissions/scripting browser proof
+and an explicit, recorded fallback if a supported browser rejects it. Both
+Claude and ChatGPT entries require first-executable canonical-origin guards;
+background validation independently derives origin from `sender.url`, and
+alternate-port tests prove no adapter, interception, DOM read, accepted port,
 status, or audit.
 
 ## IDE and CLI integrations
@@ -198,8 +205,9 @@ they cannot create a new observation or submission capability.
 
 - Claude web as the first post-ChatGPT surface and exact `https://claude.ai`
   origin.
-- Optional Claude host access, separately approved `scripting`, and the managed
-  exact-origin distribution model.
+- Optional Claude default-port host access plus optional `scripting`, requested
+  together in M2.2 with dependency-aware cleanup, and the managed exact-origin
+  distribution model.
 - Claude capability claims and the M2.0/M2.1/M2.2 implementation decomposition.
 - Aggregate minimum counts and clean-activity sampling for discovered surfaces.
 - Employee-detail visibility for application inventory.

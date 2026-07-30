@@ -35,8 +35,8 @@ functionally identical.
 ### Task M2.0.1 — Closed identities and descriptor boundary
 
 1. **Files:** add `packages/shared-types/src/surfaces.ts`; modify
-   `packages/shared-types/src/{status,messages,settings,audit,policy,validators,index}.ts`
-   and `apps/extension/src/adapters/chat-application-adapter.ts`.
+   `packages/shared-types/src/{status,messages,policy,validators,index}.ts` and
+   `apps/extension/src/adapters/chat-application-adapter.ts`.
 2. **Test first:** modify `packages/shared-types/src/validators.test.ts`,
    `packages/shared-types/src/policy-boundary.test-d.ts`, and
    `apps/extension/src/adapters/chat-application-adapter.test-d.ts`.
@@ -62,152 +62,174 @@ functionally identical.
 11. **Approval boundary:** descriptor identity/capability semantics only; no new
     host or adapter.
 
-### Task M2.0.2 — Settings V3 and audit V4 migration
-
-1. **Files:** modify
-   `apps/extension/src/storage/{settings-store,audit-store}.ts` and the shared
-   settings/audit/validator files from M2.0.1.
-2. **Test first:** modify
-   `apps/extension/src/storage/settings-store.node.test.ts` and
-   `apps/extension/src/storage/audit-store.node.test.ts`.
-3. **Expected failure:** V2 cannot create exact ChatGPT-enabled/Claude-disabled
-   surface entries, and V3 events cannot become catalog-correlated V4 records.
-4. **Focused RED:**
-   `pnpm exec vitest run --project node apps/extension/src/storage/settings-store.node.test.ts apps/extension/src/storage/audit-store.node.test.ts`.
-5. **Minimal implementation:** migrate valid V2 settings to V3 while preserving
-   global policy values; migrate provable ChatGPT V3 audit events losslessly to
-   V4; reject duplicates, unknown IDs, unknown keys, and unprovable identity.
-   Never persist permission state.
-6. **Focused GREEN:** rerun the focused node tests.
-7. **Broader regression:** `pnpm typecheck && pnpm test`.
-8. **Documentation:** record final envelope examples and conservative-discard
-   behavior in the architecture/privacy documentation touched by the PR.
-9. **Manual QA:** upgrade an existing local ChatGPT profile copy, confirm policy
-   values and history, and record no storage dump or prompt-derived content.
-10. **Suggested commit:**
-    `feat: migrate settings and audit for explicit surfaces`.
-11. **Approval boundary:** storage identity and compatibility; no permission or
-    executable Claude code.
-
-### Task M2.0.3 — Catalog, registry, sender correlation, and truthful UI
+### Task M2.0.2 — Catalog, registry, sender correlation, and truthful UI
 
 1. **Files:** add
    `apps/extension/src/adapters/{adapter-catalog,adapter-registry}.ts` and their
    node tests; modify
    `apps/extension/src/content/{bootstrap,submission-controller}.ts`,
    `apps/extension/src/background/{sender-validation,settings-ports,message-router}.ts`,
-   and `apps/extension/src/{popup,options,audit}/App.tsx`.
+   and `apps/extension/src/popup/App.tsx`.
 2. **Test first:** add
    `apps/extension/src/adapters/{adapter-catalog,adapter-registry}.node.test.ts`;
    modify `apps/extension/src/content/bootstrap.dom.test.ts`,
    `apps/extension/src/background/{sender-validation,settings-ports,message-router}.node.test.ts`,
-   and each `App.ui.test.tsx`.
+   and `apps/extension/src/popup/App.ui.test.tsx`.
 3. **Expected failure:** duplicate origins and mismatched claims are not catalog
    errors, bootstrap constructs ChatGPT directly, and UI/background cannot
    render or validate the generalized identity/status model.
 4. **Focused RED:**
-   `pnpm exec vitest run --project node apps/extension/src/adapters apps/extension/src/background --project dom apps/extension/src/content/bootstrap.dom.test.ts apps/extension/src/popup/App.ui.test.tsx apps/extension/src/options/App.ui.test.tsx apps/extension/src/audit/App.ui.test.tsx`.
+   `pnpm exec vitest run --project node apps/extension/src/adapters apps/extension/src/background --project dom apps/extension/src/content/bootstrap.dom.test.ts apps/extension/src/popup/App.ui.test.tsx`.
 5. **Minimal implementation:** bind ChatGPT through an immutable catalog and
-   one-adapter registry, centralize sender correlation, derive audit identity
-   from the validated descriptor, and render prompt-free generalized status.
-   Popup names ChatGPT only from a valid port. Disposal is idempotent.
+   one-adapter registry, centralize sender correlation, derive runtime/status
+   identity from the validated descriptor, and render prompt-free generalized
+   status without changing the persisted settings or audit envelope. Popup names
+   ChatGPT only from a valid port. Sender validation derives origin from
+   required `sender.url`, requires `sender.frameId === 0` and
+   `sender.id === chrome.runtime.id`, and compares optional `sender.origin` only
+   when present. Missing or malformed required fields fail closed; absent
+   optional origin alone does not. Add the first-executable
+   `location.origin === "https://chatgpt.com"` guard before bootstrap. Disposal
+   is idempotent.
 6. **Focused GREEN:** rerun the focused Vitest command and `pnpm typecheck`.
 7. **Broader regression:** the shared verification baseline, including the
    unchanged 12-file artifact topology and ChatGPT E2E.
 8. **Documentation:** record stale-content-port rejection and ChatGPT backward
    compatibility.
 9. **Manual QA:** ChatGPT-only regression for click/Enter, attachment policy,
-   health, popup/options/audit, settings migration, and prompt-free evidence.
+   health, popup/options/audit, and prompt-free evidence. Include
+   `https://chatgpt.com:8443/` negative coverage proving no adapter
+   construction, interception, composer read, accepted port, status, or audit.
 10. **Suggested commit:** `refactor: bind chatgpt through the adapter registry`.
 11. **Approval boundary:** generated artifact, permissions, and observable
     ChatGPT enforcement remain unchanged.
 
-## PR M2.1 — Claude setting and exact optional permission, no adapter
+## PR M2.1 — Surface activation and permission infrastructure
 
-This PR may declare optional host access but must contain no Claude selector,
-content bundle, script registration, prompt access, or protection claim. The
-enabled-and-granted Claude state is `adapter_unsupported`.
+This PR introduces the settings/audit envelopes and makes the future permission
+model testable without asking users for access to a feature that does not exist.
+It adds no manifest permission, no real permission request, no Claude
+activation, and no executable Claude code.
 
-### Task M2.1.1 — Permission API and state derivation
-
-1. **Files:** add
-   `apps/extension/src/background/{surface-permissions,surface-permissions.node.test}.ts`;
-   modify
-   `apps/extension/src/background/{chrome-api-adapter,bootstrap,settings-ports}.ts`,
-   `apps/extension/src/options/App.tsx`, `apps/extension/src/popup/App.tsx`, and
-   `apps/extension/public/manifest.json`.
-2. **Test first:** modify
-   `apps/extension/src/background/chrome-api-adapter.node.test.ts`, add the
-   surface-permission test, and modify
-   `apps/extension/src/{options,popup}/App.ui.test.tsx`.
-3. **Expected failure:** Chrome permission contains/request/remove/events are
-   not adapted, surface state does not distinguish permission and enablement,
-   and no explicit-click UX exists.
-4. **Focused RED:**
-   `pnpm exec vitest run --project node apps/extension/src/background/chrome-api-adapter.node.test.ts apps/extension/src/background/surface-permissions.node.test.ts --project dom apps/extension/src/options/App.ui.test.tsx apps/extension/src/popup/App.ui.test.tsx`.
-5. **Minimal implementation:** declare only `https://claude.ai/*` under
-   `optional_host_permissions`; add permission handling; require serialized
-   origin `https://claude.ai` before adapter/DOM work because Chrome's official
-   [match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-   says the omitted port matches all ports; request only from the options click.
-   M2.1 has no Claude bootstrap, content script, or `scripting` permission. The
-   future M2.2 bootstrap may be injected on alternate ports and therefore needs
-   the first-executable origin guard specified below.
-6. **Focused GREEN:** rerun the focused tests and `pnpm typecheck`.
-7. **Broader regression:** `pnpm test`; confirm ChatGPT remains active without a
-   Claude grant.
-8. **Documentation:** update privacy, manual QA, and permission disclosure for
-   the exact optional host only.
-9. **Manual QA:** grant, deny, remove, and re-grant Claude host access; verify
-   grant without enablement and enablement without grant; confirm no Claude page
-   code or active-protection claim.
-10. **Suggested commit:** `test: specify optional surface permission states`,
-    then `feat: add explicit claude host permission flow`.
-11. **Approval boundary:** exact Claude host disclosure and user gesture; no
-    executable adapter.
-
-### Task M2.1.2 — Artifact permission enforcement
+### Task M2.1.1 — Settings V3 and audit V4 infrastructure
 
 1. **Files:** modify
-   `apps/extension/scripts/{build-topology-rules.test,verify-build-topology}.mjs`,
-   `scripts/{artifact-security-rules.test,verify-production-artifact.test,verify-production-artifact}.mjs`,
-   and `scripts/artifact-url-allowlist.json` only as required by the reviewed
-   exact non-fetching origin literals.
-2. **Test first:** add failing cases to
-   `apps/extension/scripts/build-topology-rules.test.mjs` and
-   `scripts/verify-production-artifact.test.mjs` before verifier changes.
-3. **Expected failure:** current verifiers reject every optional-host field and
-   cannot distinguish the one approved exact origin from wildcards or forbidden
-   named permissions.
+   `apps/extension/src/storage/{settings-store,audit-store}.ts`, shared
+   settings/audit/validator files, controller audit construction, background
+   settings ports, and the options/audit views.
+2. **Test first:** modify
+   `apps/extension/src/storage/settings-store.node.test.ts` and
+   `apps/extension/src/storage/audit-store.node.test.ts`, plus the options/audit
+   UI tests, before changing either envelope, migration, or consumer.
+3. **Expected failure:** V2 cannot create exact ChatGPT-enabled/Claude-disabled
+   surface entries, and V3 events cannot become catalog-correlated V4 records.
 4. **Focused RED:**
-   `node --test apps/extension/scripts/build-topology-rules.test.mjs scripts/verify-production-artifact.test.mjs`.
-5. **Minimal implementation:** allow exactly `https://claude.ai/*` only in
-   `optional_host_permissions`; continue rejecting `scripting`, broad patterns,
-   any Claude content entry/bundle, and every forbidden permission in M2.1.
-6. **Focused GREEN:** rerun the focused Node tests, build, and
-   `pnpm verify:artifact`.
-7. **Broader regression:** shared verification baseline plus a
-   generated-manifest manual review and unchanged 12-file reachability
-   expectation.
-8. **Documentation:** record the artifact URL classification and permission
-   review result.
-9. **Manual QA:** inspect the packaged manifest and Chrome permission flow from
-   the exact artifact digest.
-10. **Suggested commit:** `test: enforce exact optional surface permissions`.
-11. **Approval boundary:** artifact allows the optional declaration only; any
-    Claude executable file or `scripting` remains a failure.
+   `pnpm exec vitest run --project node apps/extension/src/storage/settings-store.node.test.ts apps/extension/src/storage/audit-store.node.test.ts --project dom apps/extension/src/options/App.ui.test.tsx apps/extension/src/audit/App.ui.test.tsx`.
+5. **Minimal implementation:** add Settings V3 with one entry per configurable
+   packaged surface and Audit V4 with catalog-derived `surfaceId`, `adapterId`,
+   and version. Migrate valid V2 settings while preserving global policy values;
+   migrate provable ChatGPT V3 audit events losslessly; reject duplicates,
+   unknown IDs/keys, and unprovable identity. Never persist permission state.
+   Derive new audit identity from the validated catalog descriptor and update
+   the options/audit consumers only for the closed V3/V4 envelopes.
+6. **Focused GREEN:** rerun the focused node/DOM tests and `pnpm typecheck`.
+7. **Broader regression:** `pnpm test` with unchanged ChatGPT behavior and
+   permissions.
+8. **Documentation:** record final envelope examples, conservative-discard
+   behavior, and the disabled reserved Claude setting.
+9. **Manual QA:** upgrade an existing local ChatGPT profile copy, confirm policy
+   values and history, and record no storage dump or prompt-derived content.
+10. **Suggested commit:** `test: define explicit surface storage migrations`,
+    then `feat: add explicit surface settings and audit infrastructure` after
+    RED evidence.
+11. **Approval boundary:** storage identity and compatibility only; the disabled
+    Claude setting is not an activation control and adds no permission, request,
+    script, or protection claim.
 
-## PR M2.2 — First verified Claude adapter
+### Task M2.1.2 — Closed permission API and state derivation
 
-Exactly one new application and origin. Attachment presence and safe resume are
-merge gates; if either cannot be proved, remove the executable Claude entry and
-retain `adapter_unsupported`.
+1. **Files:** add the background permission abstraction and tests; modify shared
+   types/validators and options/popup view-model code only as needed for the
+   closed future state.
+2. **Test first:** add mocked tests for request, contains, remove, added/removed
+   events, permission combinations, and closed view models.
+3. **Expected failure:** optional named and host permissions cannot be modeled
+   together, fixed missing-permission reasons do not exist, and permission
+   events cannot trigger deterministic reconciliation.
+4. **Focused RED:** run the focused background node and options/popup DOM
+   suites.
+5. **Minimal implementation:** define `ClaudeEffectivePermission`, the closed
+   `PermissionHealthCode` union, all four host/`scripting` outcomes, and mocked
+   API wrappers. Reject arbitrary permission arrays and unknown named
+   permissions. Add dependency-aware `isScriptingStillRequired(surfaces)`,
+   derived only from immutable catalog metadata, validated settings, and live
+   effective permissions. Either optional-permission change invalidates runtime
+   generation before asynchronous disposal/unregistration and reconciles
+   registrations.
+6. **Focused GREEN:** rerun focused tests and `pnpm typecheck`.
+7. **Broader regression:** `pnpm test`; prove ChatGPT works without `scripting`.
+8. **Documentation:** record the future optional-host/named-permission model and
+   prompt-free reason codes.
+9. **Manual QA:** no real permission QA; inspect the inert view model only.
+10. **Suggested commit:** `test: specify optional surface permission states`,
+    then `feat: add surface permission infrastructure`.
+11. **Approval boundary:** infrastructure only. The manifest remains unchanged;
+    no `permissions.request()` call or working Claude action exists.
 
-The release-candidate may add `claude` with proposed verified trust only inside
-gated authenticated QA. It is not production-accepted and cannot be published or
-installed outside that cohort. Only after every evidence gate passes may that
-exact same digest, without rebuild or substitution, be accepted and published;
-failure removes the entry and restores unsupported state before release.
+### Task M2.1.3 — Future-shape UI and artifact rules
+
+1. **Files:** modify options/popup view models and artifact-rule tests without
+   modifying the manifest or adding a Claude entry/bundle.
+2. **Test first:** require a disabled reserved Claude setting, inert
+   presentation, and rejection of every actual Claude optional permission or
+   executable edge in an M2.1 artifact.
+3. **Expected failure:** current models cannot represent the reserved surface
+   and artifact tests do not encode the future approved permission shape.
+4. **Focused RED:** run focused options/popup DOM and artifact-rule node tests.
+5. **Minimal implementation:** keep normal options UI non-activatable. If a
+   preview is rendered, show exactly “Claude support is not installed in this
+   release.” with no permission action. Teach future-shape rules that an
+   approved later artifact must use optional `scripting` and
+   `https://claude.ai:443/*`, while the current artifact must reject both and
+   retain the unchanged ChatGPT-only topology.
+6. **Focused GREEN:** rerun focused tests, build, and artifact verification.
+7. **Broader regression:** shared verification baseline and unchanged artifact
+   digest topology expectations.
+8. **Documentation:** record that the rules describe M2.2 shape but authorize no
+   M2.1 manifest change.
+9. **Manual QA:** confirm no grant button, permission prompt, Claude script, or
+   protectable-state claim exists.
+10. **Suggested commit:** `test: define future optional surface artifact rules`.
+11. **Approval boundary:** any M2.1 Claude permission, request call, active UI,
+    or executable bundle is a release failure.
+
+## PR M2.2 — Claude verification candidate
+
+Exactly one new application and origin. Submission detection, local prompt read,
+attachment-presence detection, and submission resume are all merge/publication
+gates. If any one cannot be proved, remove the executable Claude entry before
+merge/publication and retain `adapter_unsupported`; do not downgrade a
+capability or rebuild a different artifact.
+
+The restricted verification candidate may add `claude` with a proposed
+`trust: "verified"` descriptor only to exercise final behavior inside the named
+authenticated-QA cohort. That descriptor value is not production acceptance. The
+exact artifact's runtime and options copy says “Claude verification candidate”
+before and after the gate; neither local state nor a network response can
+promote trust or alter that copy. `verified` is an external human/release
+acceptance decision bound to the exact SHA and digest. After acceptance, signed
+publication and release metadata may say production-accepted/verified, but the
+artifact is not rebuilt or substituted and its runtime bits and copy do not
+change.
+
+Before M2.2 implementation, a supported-browser/API proof must establish that
+`https://claude.ai:443/*` is accepted by the MV3 optional host declaration,
+`permissions.request/contains/remove`, and `registerContentScripts`; matches a
+default-port page; and does not match an alternate-port fixture. Record the
+browser/version, pattern, each API result, and two structural match outcomes—no
+page data. A supported-browser rejection must be recorded before explicitly
+proposing `https://claude.ai/*` as an exact-host/wildcard-port fallback. Never
+fall back silently.
 
 ### Task M2.2.1 — Claude context and ownership resolver
 
@@ -251,9 +273,12 @@ failure removes the entry and restores unsupported state before release.
 4. **Focused RED:**
    `pnpm exec vitest run --project dom apps/extension/src/adapters/claude --project node apps/extension/src/adapters/claude`.
 5. **Minimal implementation:** implement the adapter against the resolver;
-   inspect only presence and opaque structure; leave attachment inspection and
-   prompt replacement unsupported; revalidate through the shared controller;
-   perform one guarded synchronous resume; dispose idempotently.
+   inspect only presence and opaque structure; keep attachment inspection and
+   prompt replacement `unsupported` throughout initial M2.2; revalidate through
+   the shared controller; perform one guarded synchronous resume; dispose
+   idempotently. Future support for either unsupported capability requires a
+   separate design, threat review, RED-first tests, authenticated state proof,
+   exact-artifact QA, and explicit human approval.
 6. **Focused GREEN:** rerun the focused tests and `pnpm typecheck`.
 7. **Broader regression:** all adapter/controller unit, node, and DOM tests,
    including reciprocal cross-origin fixtures and unchanged ChatGPT behavior.
@@ -261,8 +286,8 @@ failure removes the entry and restores unsupported state before release.
    QA, privacy inventory, and rollback instructions.
 9. **Manual QA:** no verification classification yet; locally exercise synthetic
    fixture routes without remote requests.
-10. **Suggested commit:** `feat: add the verified claude web adapter` only after
-    the tests are green; the merge gate still controls the word “verified.”
+10. **Suggested commit:** `feat: add claude web verification candidate` only
+    after the tests are green; automated tests do not confer verified status.
 11. **Approval boundary:** code review confirms unsupported replacement/
     inspection and no cross-adapter selector import before registration work.
 
@@ -274,39 +299,42 @@ failure removes the entry and restores unsupported state before release.
    adapter, `apps/extension/public/manifest.json`, and the adapter catalog.
 2. **Test first:** write registration tests for exact fields, startup
    reconciliation, stale versions, permission removal, disablement, active-port
-   disposal, API failures, restarts, and alternate-port behavior. Chrome's
-   official
-   [match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-   means the bootstrap may be injected on an alternate port, so tests prove its
-   first executable `location.origin === "https://claude.ai"` guard exits before
-   DOM access or adapter construction and permits no accepted adapter/runtime
-   registration or port, status, or audit. Add acknowledged-disposal and failed
-   or unresponsive-disposal cases.
-3. **Expected failure:** no Claude IIFE build exists, `scripting` is absent, and
-   persistent exact-origin registration cannot be reconciled or removed.
+   disposal, API failures, restarts, and alternate-port behavior. Cover all four
+   host/`scripting` combinations, both revocation paths, last-dependent cleanup,
+   a hypothetical second catalog-owned dynamic surface, unknown named
+   permissions, and ChatGPT without `scripting`. Prove the first executable
+   `location.origin === "https://claude.ai"` guard and background validation
+   permit no adapter construction, interception, DOM read, accepted port,
+   status, or audit on `https://claude.ai:8443/`. Add acknowledged-disposal and
+   failed or unresponsive-disposal cases.
+3. **Expected failure:** no Claude IIFE build exists, optional `scripting` is
+   absent, and persistent exact-origin registration cannot be reconciled or
+   removed.
 4. **Focused RED:**
    `pnpm exec vitest run --project node apps/extension/src/background/content-registration.node.test.ts apps/extension/src/background/chrome-api-adapter.node.test.ts`.
-5. **Minimal implementation:** add separately approved `scripting`; build one
-   Claude-only IIFE; register `promptguard-claude-v1` for exactly
-   `https://claude.ai/*`, top frame, isolated world, document idle, persistent;
-   on revocation/effective-access failure synchronously invalidate background
-   generation and reject stale authorization, status, and audit before
-   asynchronous disposal/unregistration. Report the surface inactive immediately
-   and require disposal acknowledgement. If the runtime fails or does not
-   respond, provide refresh guidance and make no protection claim; already
-   injected code may keep observing or intercepting local submissions until
-   acknowledgement or reload.
+5. **Minimal implementation:** add `scripting` only under `optional_permissions`
+   and `https://claude.ai:443/*` only under `optional_host_permissions`; request
+   them together from one options gesture; build one Claude-only IIFE; register
+   `promptguard-claude-v1` for that exact default-port pattern, top frame,
+   isolated world, document idle, persistent. Reconcile after either permission
+   changes. On either revocation, synchronously invalidate background generation
+   and reject stale authorization, status, and audit before asynchronous
+   disposal/unregistration. Removing Claude removes optional `scripting` only
+   when `isScriptingStillRequired()` proves that no other enabled/granted
+   catalog-owned dynamic surface depends on it.
 6. **Focused GREEN:** rerun focused tests, `pnpm typecheck`, and `pnpm build`.
 7. **Broader regression:** shared verification baseline.
 8. **Documentation:** record generated entry name, registration ID/version,
    permission removal, startup reconciliation, and rollback.
-9. **Manual QA:** verify grant/enable/register/restart/disable/revoke/reload
-   states, acknowledged disposal, failed or unresponsive disposal, truthful
-   inactive status, and refresh guidance from the exact release artifact without
-   claiming capability success yet.
+9. **Manual QA:** verify joint grant, denial, every partial-permission state,
+   register/restart/disable, both revocation paths, dependency-aware cleanup,
+   reload, truthful inactive status, and refresh guidance from the exact
+   candidate artifact. Runtime/options copy remains “Claude verification
+   candidate” and contains no acceptance switch.
 10. **Suggested commit:** `feat: register the exact claude content entry`.
-11. **Approval boundary:** `scripting`, exact registration fields, and lifecycle
-    must be separately reviewed before authenticated submission QA.
+11. **Approval boundary:** optional `scripting`, exact default-port
+    registration, joint request/removal behavior, and lifecycle must be reviewed
+    before authenticated submission QA.
 
 ### Task M2.2.4 — Cross-adapter artifact and E2E gates
 
@@ -324,8 +352,9 @@ failure removes the entry and restores unsupported state before release.
    `node --test apps/extension/scripts/artifact-reachability.test.mjs apps/extension/scripts/build-topology-rules.test.mjs scripts/artifact-security-rules.test.mjs scripts/verify-production-artifact.test.mjs`
    and the focused Playwright fixture test.
 5. **Minimal implementation:** extend manifest/registration-rooted reachability,
-   exact URL classification, executable-entry allowlist, IIFE checks, orphan
-   rejection, and application-isolation assertions for exactly two entries.
+   exact URL classification for `https://claude.ai:443/*`, optional named/host
+   placement, executable-entry allowlist, IIFE checks, orphan rejection, and
+   application-isolation assertions for exactly two entries.
 6. **Focused GREEN:** rerun focused Node and Playwright tests after a production
    build.
 7. **Broader regression:** shared verification baseline, artifact digest, and
@@ -336,10 +365,11 @@ failure removes the entry and restores unsupported state before release.
 10. **Suggested commit:**
     `test: verify claude artifact and cross-adapter isolation`.
 11. **Approval boundary:** the artifact may merge only after authenticated QA
-    proves every claimed capability on the exact SHA and digest. That exact
-    digest, without rebuild or substitution, is the only artifact that may then
-    be production-accepted and published; otherwise remove Claude's executable
-    entry and keep unsupported state.
+    proves all four verification targets on the exact SHA and digest. That exact
+    digest, without rebuild, substitution, or capability downgrade, is the only
+    artifact that may then be externally production-accepted and published;
+    otherwise remove Claude's executable entry before merge/publication and keep
+    unsupported state.
 
 ## Authenticated Claude merge gate
 
@@ -356,6 +386,7 @@ Application account tier:
 Date and timezone:
 Adapter version:
 Permission state:
+Permission pattern: https://claude.ai:443/*
 Trust state:
 Verified capabilities:
 Unsupported capabilities:
@@ -377,10 +408,12 @@ The exact artifact must prove:
 - popup and audit identities/capabilities are truthful and prompt-free; and
 - ChatGPT remains unchanged.
 
-Failure to prove submission resume or attachment presence prevents a verified
-Claude descriptor from shipping. Remove the executable entry and restore
-unsupported state before release. Prompt replacement and attachment inspection
-remain unsupported regardless of other results.
+Failure to prove any one of submission detection, local prompt read, attachment-
+presence detection, or submission resume removes the executable entry before
+merge/publication and restores unsupported state. There is no per-capability
+downgrade and no rebuilt substitute. Prompt replacement and attachment
+inspection remain unsupported in the initial M2.2 adapter regardless of other
+results.
 
 ## Later independent origin pull requests
 
@@ -404,7 +437,7 @@ broader regression is the shared baseline plus all earlier adapters. Each PR
 updates surface evidence, permissions, threat model, privacy, manual QA,
 artifact rules, and rollback; uses
 `test: define <application> submission boundaries`,
-`feat: add the verified <application> web adapter`, and
+`feat: add <application> web verification candidate`, and
 `test: verify <application> artifact isolation`; and stops at independent
 surface/origin/permission/capability approval. Microsoft 365 is not included in
 the consumer Copilot PR.

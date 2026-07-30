@@ -8,9 +8,9 @@ Exact origin: https://claude.ai
 Proposed adapter ID: claude
 Proposed surface ID: claude_web
 Initial trust: unsupported
-Capabilities expected to be verified: submission detection; local prompt read; attachment-presence detection; submission resume
-Capabilities expected to remain unsupported: attachment inspection; prompt replacement
-Required permission: optional_host_permissions entry https://claude.ai/*; scripting separately approved for persistent dynamic registration in M2.2
+Capabilities targeted for verification: submission detection; local prompt read; attachment-presence detection; submission resume
+Capabilities required to remain unsupported in M2.2: attachment inspection; prompt replacement
+Proposed M2.2 permission: optional_permissions entry scripting plus optional_host_permissions entry https://claude.ai:443/*, requested together from one explicit click and subject to supported-browser proof
 QA prerequisites: dedicated authenticated account; synthetic fixtures; exact SHA, CI run, digest, artifact file count, browser/version, date/timezone, account tier, adapter version, permission, trust, and capabilities; no retained prompt, conversation, filename, account identifier, screenshot, HTML, cookie, or token data
 Primary drift risks: composer/Send ownership; voice-to-Send state changes; attachment representation; SPA replacement; semantic attribute changes
 Rollback posture: dispose active Claude runtimes, unregister only Claude's script, report unsupported or transport unavailable once no validated port remains, and remove only Claude's catalog/permission entry in a follow-up release
@@ -19,29 +19,40 @@ Why the other candidates should wait: authenticated submission/resume evidence i
 ```
 
 `unsupported` is mandatory during design and permission evaluation. An M2.2
-release-candidate may encode proposed verified trust only for gated
-authenticated QA. It is not production-accepted and cannot be published or
-installed outside that cohort. Only after every evidence gate passes may that
-exact same digest, without rebuild or substitution, be accepted and published as
-verified; failure removes the executable entry and restores unsupported state.
+Claude verification candidate may encode a proposed `trust: "verified"`
+descriptor only to exercise final behavior in the named authenticated-QA cohort;
+the field is not production acceptance. `verified` is an external human/release
+acceptance decision bound to the exact SHA and digest. The exact artifact's
+runtime and options copy remains “Claude verification candidate” before and
+after acceptance, and no local or network-controlled flag can promote it. Signed
+publication and release metadata may state production acceptance and verified
+status after the gate, but the artifact is not rebuilt or substituted. Failure
+to prove any of the four verification targets removes the executable catalog
+entry before merge/publication; capability downgrade is not a fallback.
 
 Chrome's official
 [match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-means the approved `https://claude.ai/*` pattern constrains scheme and host but,
-because it omits a port, may inject the bootstrap on alternate ports. The
-bootstrap's first executable guard must require serialized
+documents an explicit port and wildcard behavior when it is omitted. The
+proposed M2.2 pattern is `https://claude.ai:443/*`; before implementation a
+supported-browser proof must cover the MV3 declaration,
+`permissions.request/contains/remove`, `registerContentScripts`, and
+default-versus-alternate-port matching. A concrete supported-browser rejection
+must be recorded before the exact-host/wildcard-port `https://claude.ai/*`
+fallback is explicitly proposed; fallback is never silent. The bootstrap's first
+executable guard must still require serialized
 `location.origin === "https://claude.ai"` before adapter construction or DOM
 access and exit otherwise; background validation repeats the check.
-Alternate-port tests may observe bootstrap injection but prove no page read,
-accepted adapter/runtime registration or port, status, or audit.
+Alternate-port tests prove no adapter construction, interception, page read,
+accepted port, status, or audit.
 
-Permission revocation invalidates the background generation synchronously, so
-authorization, status, and audit from the old runtime are rejected and the
-surface is reported inactive immediately. Disposal must be acknowledged. If the
-runtime fails or does not respond, the UI gives refresh guidance and makes no
-protection claim: already injected code may continue observing or intercepting
-local submissions until disposal acknowledgement or reload. Both acknowledged
-and failed or unresponsive disposal are required tests.
+Revocation of either host access or optional `scripting` invalidates the
+background generation synchronously, so authorization, status, and audit from
+the old runtime are rejected and the surface is reported inactive immediately.
+Disposal must be acknowledged. If the runtime fails or does not respond, the UI
+gives refresh guidance and makes no protection claim: already injected code may
+continue observing or intercepting local submissions until disposal
+acknowledgement or reload. Both acknowledged and failed or unresponsive disposal
+are required tests.
 
 ## Evidence rules
 
@@ -87,13 +98,13 @@ Each candidate subsection uses the same fields required for selection.
 | Exact active composer identifiable         | One candidate was identifiable in the observed state; alternate states and replacement behavior are unavailable.                                                                                                             |
 | Send maps unambiguously to composer        | Nearby semantic control observed; ownership across variants is unavailable.                                                                                                                                                  |
 | Safe resume demonstrated                   | unavailable                                                                                                                                                                                                                  |
-| Prompt replacement demonstrated            | unavailable; must remain unsupported.                                                                                                                                                                                        |
+| Prompt replacement demonstrated            | unavailable; required to remain unsupported in the initial M2.2 adapter.                                                                                                                                                     |
 | Current selector stability                 | Partial semantic/data-attribute evidence from one observation; longitudinal stability unavailable.                                                                                                                           |
 | Accessibility semantics                    | `role="textbox"` and Send accessible label observed.                                                                                                                                                                         |
 | Application drift risk                     | High around composer/Send ownership, empty/voice states, attachments, SPA replacement, and semantic attributes.                                                                                                              |
 | Official browser integration documentation | Product and file behavior exist; no official extension interception/resume contract was found.                                                                                                                               |
 | Non-sensitive authenticated QA             | Feasible with a dedicated account and synthetic fixtures; submission was intentionally not attempted during selection.                                                                                                       |
-| Permission scope                           | Optional pattern `https://claude.ai/*`, exact in scheme/host but matching all ports; runtime origin must equal `https://claude.ai`; `scripting` requires separate M2.2 approval.                                             |
+| Permission scope                           | M2.2 proposes optional `scripting` plus `https://claude.ai:443/*`, requested together and subject to supported-browser proof; runtime origin must equal `https://claude.ai`.                                                 |
 | Rollback                                   | Dispose active Claude state, unregister its versioned script, reject stale ports, show unsupported/transport unavailable once no validated port remains, and remove only Claude in a follow-up release.                      |
 | Known restrictions or anti-automation      | unavailable                                                                                                                                                                                                                  |
 
@@ -207,6 +218,11 @@ Claude has the strongest current combination of enterprise relevance, official
 file support, and privacy-safe structural evidence. The evidence does not yet
 prove click or Enter capture, exact Send ownership, attachment presence,
 one-shot resume, or editor replacement. Those gaps are why Claude starts
-unsupported and why attachment presence plus safe resume are hard M2.2 merge
-gates. Gemini, Perplexity, DeepSeek, and Copilot wait for their own
-authenticated evidence and independent origin approval.
+unsupported. Submission detection, local prompt read, attachment-presence
+detection, and submission resume are all hard M2.2 merge/publication gates;
+failure to prove any one removes the executable Claude catalog entry without a
+capability downgrade or rebuild. Attachment inspection and prompt replacement
+remain unconditionally unsupported in initial M2.2; future support requires a
+separate approved design and evidence cycle. Gemini, Perplexity, DeepSeek, and
+Copilot wait for their own authenticated evidence and independent origin
+approval.

@@ -134,13 +134,20 @@ Validation must establish all of the following together:
 1. The adapter ID exists in the packaged catalog.
 2. The surface ID is the adapter's catalog surface.
 3. The version is an exact packaged version for that adapter.
-4. The top-level sender URL and origin are an exact catalog origin.
-5. The entry point is the catalog entry assigned to that origin.
-6. Trust and every capability equal the packaged descriptor; page data, storage,
+4. The sender URL is present, parses successfully, and derives an exact catalog
+   origin; `sender.frameId === 0` and `sender.id === chrome.runtime.id`.
+5. If optional `sender.origin` is present, it exactly equals the origin derived
+   from `sender.url`; absence of optional `sender.origin` alone does not fail.
+6. The entry point is the catalog entry assigned to that origin.
+7. Trust and every capability equal the packaged descriptor; page data, storage,
    and policy cannot upgrade either.
-7. One origin is owned by at most one executable adapter.
-8. Unknown keys, identifiers, versions, origins, and capability combinations are
+8. One origin is owned by at most one executable adapter.
+9. Unknown keys, identifiers, versions, origins, and capability combinations are
    rejected before state, UI, storage, or audit use.
+
+Missing or malformed required sender fields fail closed. Validation never trusts
+a page-provided origin claim and never assumes optional `MessageSender`
+properties are present without a proven minimum browser contract.
 
 The initial canonical origin relationships are:
 
@@ -174,10 +181,16 @@ not an alternate origin for `copilot_web`.
 | Manifest/build complexity | Lowest                                                      | More entry points, reachability roots, and exact-origin assertions |
 
 PromptGuard will use per-origin thin entry points. ChatGPT retains its existing
-static content script. After the M2.2 gate, Claude receives a separate
-self-contained IIFE importing the shared controller and exactly the Claude
-adapter. Application selectors remain inside their adapter folder and may not be
-imported by the other application, shared controller, registry, or background.
+static content-script match for backward compatibility, but M2.0 adds a
+first-executable `location.origin === "https://chatgpt.com"` guard before
+bootstrap, adapter construction, interception, or DOM access. The existing
+omitted-port match may inject at `https://chatgpt.com:8443/`; tests prove that
+such a document creates no adapter, interception, DOM read, accepted port,
+status, or audit. This does not change ChatGPT's manifest pattern. After the
+M2.2 gate, Claude receives a separate self-contained IIFE importing the shared
+controller and exactly the Claude adapter. Application selectors remain inside
+their adapter folder and may not be imported by the other application, shared
+controller, registry, or background.
 
 The registry/catalog guarantees:
 
@@ -226,7 +239,8 @@ preserves the global protection flag, actions, keywords, and retention; it adds
 enabled `chatgpt_web` and disabled `claude_web`. Invalid input falls back to the
 existing strict defaults plus those surface defaults. Permission state is
 queried from Chrome and never persisted. Granting permission changes no policy
-action.
+action. M2.1 owns the Settings V3 envelope, migration, and tests; M2.0 leaves
+persisted settings unchanged.
 
 Policy input replaces the literal `application: "chatgpt"` with validated
 `surfaceId: AiSurfaceId`. M2.0 introduces no application-specific policy
@@ -236,9 +250,48 @@ Audit becomes prompt-free V4. Every event carries `surfaceId`, `adapterId`, and
 the catalog-validated adapter version. A valid V3 ChatGPT event migrates
 losslessly to `chatgpt_web`/`chatgpt`; an event whose application, version, or
 other identity correlation cannot be proved is discarded rather than guessed.
-Existing contributor-only and retention rules remain unchanged.
+Existing contributor-only and retention rules remain unchanged. M2.1 owns the
+Audit V4 envelope, migration, and tests; M2.0 leaves persisted audit records in
+V3 while introducing the ChatGPT-only catalog and sender boundary.
 
-## Status and UX
+## Permission, status, and UX
+
+M2.1 defines, but does not exercise against Claude, these closed contracts:
+
+```ts
+type ClaudeEffectivePermission = {
+  readonly hostGranted: boolean;
+  readonly scriptingGranted: boolean;
+};
+
+type PermissionHealthCode =
+  "host_access_missing" | "scripting_missing" | "host_and_scripting_missing";
+```
+
+Arbitrary permission arrays are forbidden in messages, status, and audit. M2.2
+treats Claude as permission-ready only when both optional grants are effective:
+
+| Host | `scripting` | Result                                                            |
+| ---- | ----------- | ----------------------------------------------------------------- |
+| No   | No          | `permission_not_granted`; `host_and_scripting_missing`            |
+| Yes  | No          | `permission_not_granted`; `scripting_missing`                     |
+| No   | Yes         | `permission_not_granted`; `host_access_missing`                   |
+| Yes  | Yes         | Continue to enablement, descriptor, registration, and port checks |
+
+The proposed M2.2 manifest is exactly:
+
+```json
+{
+  "permissions": ["storage"],
+  "optional_permissions": ["scripting"],
+  "optional_host_permissions": ["https://claude.ai:443/*"]
+}
+```
+
+One explicit options-page gesture requests optional `scripting` and
+`https://claude.ai:443/*` together. M2.1 adds neither manifest entry, exposes no
+real request action, and calls no real permission request. An inert preview, if
+shown, says exactly “Claude support is not installed in this release.”
 
 Surface state is one of:
 
@@ -253,9 +306,9 @@ adapter_unsupported
 
 `initializing` and `unavailable` remain transport-level states and are not
 surface states. `adapter_active`, `adapter_waiting`, and `adapter_degraded`
-require an enabled surface, effective exact-origin permission, a verified
-packaged descriptor, and a valid content-script port. `adapter_degraded` is only
-a connected, catalog-validated verified runtime with a fixed health failure.
+require an enabled surface, both effective optional grants, a verified packaged
+descriptor, and a valid content-script port. `adapter_degraded` is only a
+connected, catalog-validated verified runtime with a fixed health failure.
 Registration failure or rollback without an accepted port is
 `adapter_unsupported` or transport `unavailable`; permission loss is
 `permission_not_granted`. `adapter_active` means the current submission context
@@ -263,27 +316,39 @@ is healthy, not that every capability is verified. A disabled surface is
 `adapter_disabled`; a granted and enabled candidate without a verified
 executable adapter is `adapter_unsupported`.
 
-On permission removal or effective-access failure, the background synchronously
-invalidates its generation before awaited cleanup, immediately rejecting stale
-messages, audit, status, and authorization. Disposal and unregistration are
-asynchronous best effort. The background reports the surface inactive
-immediately and requires an acknowledged disposal; if the runtime fails or does
-not respond, the UI provides refresh guidance and makes no protection claim.
-Already injected content code may keep observing or intercepting local
+On removal of either optional grant or effective-access failure, the background
+synchronously invalidates its generation before awaited cleanup, immediately
+rejecting stale messages, audit, status, and authorization. Disposal and
+unregistration are asynchronous best effort. The background reports the surface
+inactive immediately and requires an acknowledged disposal; if the runtime fails
+or does not respond, the UI provides refresh guidance and makes no protection
+claim. Already injected content code may keep observing or intercepting local
 submissions until disposal is acknowledged or the page reloads, even though the
 background rejects its messages. Tests cover both acknowledged and failed or
 unresponsive disposal. Disabling uses the same generation-first rule.
 
-The options page owns surface enablement and permission request/removal. Its
+M2.2's options page owns surface enablement and permission request/removal. Its
 fixed disclosure is:
 
 > PromptGuard can access only the AI applications that are explicitly enabled
 > and granted permission.
 
-Enabling without permission presents an explicit permission action. Permission
-is requested only inside that click. Granting permission does not silently
-enable the surface; disabling does not silently remove permission, so the user
-can make the two choices independently and see both states.
+Enabling without effective permission presents an explicit permission action.
+Both optional grants are requested only inside that click. Granting permission
+does not silently enable the surface; disabling does not silently remove the
+surface host grant, so the user can make the two choices independently and see
+both states.
+
+Disabling Claude never removes its surface host grant. After generation-first
+disposal and unregistration, disablement may remove optional `scripting` only
+when `isScriptingStillRequired(surfaces)` returns false across the immutable
+catalog, validated settings, and live effective permissions. If another approved
+enabled/granted dynamic surface depends on `scripting`, the named permission is
+retained. Explicitly removing Claude access removes its host grant and applies
+the same dependency-aware `scripting` cleanup. Page data and managed policy
+cannot declare a dependency. Either host- or named-permission change invalidates
+the runtime generation before asynchronous disposal/unregistration and triggers
+registration reconciliation.
 
 The popup eventually presents application, permission, adapter trust, protection
 status, verified capabilities, unsupported capabilities, and the last fixed
@@ -296,13 +361,21 @@ conversation titles, URL paths, page titles, or page text.
 
 Claude's reserved design identity is `adapterId: "claude"`,
 `surfaceId: "claude_web"`, and serialized origin `https://claude.ai`. It remains
-unsupported and absent from the M2.0 executable catalog. An M2.2
-release-candidate may encode the proposed verified descriptor only for gated
-authenticated QA. That artifact is not production-accepted and cannot be
-published or installed outside that cohort. Only after every evidence gate
-passes may that exact same digest, without rebuild or substitution, be accepted
-and published as verified; failure removes the executable entry and restores
-unsupported state before release.
+unsupported and absent from the M2.0 executable catalog. A restricted M2.2 QA
+artifact may encode a proposed `trust: "verified"` descriptor solely to exercise
+final behavior in the named authenticated-QA cohort. The field is not itself
+production acceptance, and the artifact cannot be published or installed outside
+that cohort before the gate.
+
+`verified` is an external human/release production-acceptance decision bound to
+authenticated QA on the exact SHA and digest. The exact artifact's runtime and
+options copy remains “Claude verification candidate” both before and after
+acceptance. No persisted flag, page claim, permission state, runtime message, or
+network response can upgrade trust or alter that copy. After the gate passes,
+signed publication and release metadata may state production-accepted/verified,
+but the accepted artifact is the same digest without rebuild or substitution. If
+any target fails, remove the executable entry before merge/publication; do not
+downgrade capability claims or build a substitute.
 
 The implementation, if approved, has these boundaries:
 
@@ -311,14 +384,21 @@ The implementation, if approved, has these boundaries:
   ChatGPT selector or context module.
 - URL: Chrome's official
   [match-pattern contract](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-  means `https://claude.ai/*` constrains scheme and host but, because it omits a
-  port, may inject the bootstrap on alternate ports. The bootstrap's first
-  executable guard, before adapter construction or any DOM access, requires
-  serialized `location.origin === "https://claude.ai"` and exits otherwise.
-  Background sender validation repeats the check. Alternate-port tests may
-  observe bootstrap injection but prove no DOM read, accepted adapter/runtime
-  registration or port, status, or audit. Redirects, subdomains, opaque origins,
-  embedded frames, and `m365.cloud.microsoft` are also rejected.
+  documents explicit ports and wildcard behavior when the port is omitted. The
+  preferred pattern is `https://claude.ai:443/*` for the optional declaration,
+  request/contains/remove calls, dynamic registration, catalog metadata,
+  validators, artifact rules, fixtures, and QA. The bootstrap's first executable
+  guard, before adapter construction or any DOM access, requires serialized
+  `location.origin === "https://claude.ai"` and exits otherwise. Background
+  sender validation repeats the check. Alternate-port tests prove no adapter
+  construction, interception, DOM read, accepted port, status, or audit. Before
+  M2.2, a supported-browser proof must establish that the explicit-port pattern
+  is accepted by the MV3 declaration, `request()`, `contains()`, `remove()`, and
+  `registerContentScripts()` and matches the default-port page but not an
+  alternate-port fixture. A supported-browser rejection must be recorded before
+  an explicit `https://claude.ai/*` fallback is proposed; fallback is never
+  silent and remains exact-host/wildcard-port. Redirects, subdomains, opaque
+  origins, embedded frames, and `m365.cloud.microsoft` are also rejected.
 - Composer: resolve exactly one visible, connected, enabled live composer within
   one submission region. Current authenticated evidence includes
   `[role="textbox"][contenteditable="true"][data-testid="chat-input"]`, but this
@@ -337,7 +417,8 @@ The implementation, if approved, has these boundaries:
   fingerprint only structural element identity plus mutation version. Never read
   filenames, paths, extensions, MIME types, sizes, labels, accessible text,
   previews, contents, or HTML. Add, remove, replace, or character-data mutation
-  invalidates authorization. `attachmentInspection` remains `unsupported`.
+  invalidates authorization. `attachmentInspection` is required to remain
+  `unsupported` in the initial M2.2 adapter.
 - Warning/bypass: attachment policy uses the existing block/warn/allow
   semantics. A warning bypass is controller-owned, one-shot, revision-bound, and
   consumed only after prompt, URL, context, ownership, presence, and fingerprint
@@ -346,8 +427,9 @@ The implementation, if approved, has these boundaries:
   clear the recursion guard in `finally`. Authenticated QA must demonstrate that
   the reviewed synthetic prompt, rather than stale application state, is
   submitted exactly once. A synthetic DOM click alone is not evidence.
-- Replacement: `promptReplacement` is `unsupported`; the adapter never mutates
-  the Claude editor for redaction.
+- Replacement: `promptReplacement` is required to remain `unsupported` in the
+  initial M2.2 adapter; the adapter never mutates the Claude editor for
+  redaction.
 - Health: waiting is normal while no composer exists. In a connected,
   catalog-validated verified runtime, ambiguity, unsupported DOM, ownership
   loss, resume failure, and grace expiry use fixed, prompt-free health or error
@@ -362,9 +444,22 @@ The implementation, if approved, has these boundaries:
   version, permission, trust, capabilities, fixture IDs, and structural
   outcomes.
 
+Authenticated QA must prove all four targets—submission detection, local prompt
+read, attachment-presence detection, and submission resume—on that exact
+artifact. Failure of any one blocks merge/publication with the executable Claude
+catalog entry. Attachment inspection and prompt replacement remain
+unconditionally unsupported in initial M2.2 and are not downgrade options.
+
 Fixed diagnostic codes extend the shared closed health/error unions with
 Claude-neutral meanings; application-specific copy does not include DOM or user
 content. The exact code additions are test-first work in M2.2.
+
+The four positive capabilities are targets for authenticated verification, not
+pre-approved verified claims. Failure to prove any target removes the executable
+Claude entry before merge/publication; it does not produce a reduced-capability
+artifact. Future support for prompt replacement or attachment inspection
+requires a separate design, threat review, RED-before-GREEN tests, authenticated
+application-state proof, exact-artifact QA, and explicit human approval.
 
 Rollback unregisters only the versioned Claude registration, first instructs
 every active Claude port to dispose, rejects subsequent Claude ports/events, and
@@ -424,15 +519,22 @@ No production implementation begins until a human explicitly approves all five
 items:
 
 1. Claude web as the first additional surface.
-2. Exact origin `https://claude.ai`.
-3. Consumer optional `https://claude.ai/*` host access plus the separately
-   approved `scripting` permission at M2.2, and separate exact-origin managed
-   builds.
-4. Expected verified capabilities (submission detection, local prompt read,
-   attachment-presence detection, submission resume) and permanently unsupported
-   capabilities (attachment inspection, prompt replacement).
-5. The M2.0/M2.1/M2.2 pull-request decomposition.
+2. Canonical origin `https://claude.ai` and proposed default-port pattern
+   `https://claude.ai:443/*`, subject to supported-browser proof and the
+   explicit fallback rule.
+3. Consumer optional `https://claude.ai:443/*` host access plus optional
+   `scripting`, requested together only in M2.2 with dependency-aware cleanup;
+   the pattern remains subject to the documented browser proof and explicit
+   fallback process.
+4. Capabilities targeted for verification: submission detection, local prompt
+   read, attachment-presence detection, and submission resume. Capabilities
+   required to remain unsupported in M2.2: attachment inspection and prompt
+   replacement.
+5. The revised M2.0 ChatGPT-only, M2.1 infrastructure-only, and M2.2 Claude
+   verification-candidate decomposition.
 
-The host pattern above matches all ports; runtime serialized-origin equality
-supplies the default-port boundary. Approval does not mark Claude verified.
-Verification uses only the gated M2.2 release-candidate process above.
+Approval does not mark Claude or a targeted capability verified. Production
+acceptance is the later external human/release gate on the exact SHA and digest;
+the artifact and its conservative candidate copy do not mutate at that gate.
+Failure to prove any of the four targets removes the Claude executable catalog
+entry before merge or publication, without capability downgrade or rebuild.

@@ -1,5 +1,4 @@
 import {
-  CHATGPT_ADAPTER_VERSION,
   SETTINGS_PORT_NAME,
   cloneProtectionSettings,
   createAuditEventId,
@@ -10,12 +9,12 @@ import {
   type RuntimeResponse,
 } from "@ai-dlp/shared-types";
 
-import type { ChatApplicationAdapter } from "../adapters/chat-application-adapter.js";
 import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/adapter-catalog.js";
 import {
-  ChatGptAdapter,
-  type ChatGptAdapterOptions,
-} from "../adapters/chatgpt/chatgpt-adapter.js";
+  createDocumentAdapterRegistry,
+  type DocumentAdapterRegistry,
+} from "../adapters/adapter-registry.js";
+import type { ChatGptAdapterOptions } from "../adapters/chatgpt/chatgpt-adapter.js";
 import {
   createProtectionDialogController,
   type ProtectionDialogController,
@@ -48,14 +47,23 @@ export type ContentRuntime = {
 export type ContentBootstrap = {
   getStatus():
     | ContentProtectionStatus
-    | { state: "unavailable"; application: "chatgpt"; protectionEnabled: null };
+    | {
+        state: "unavailable";
+        application: typeof CHATGPT_ADAPTER_DESCRIPTOR.adapterId;
+        protectionEnabled: null;
+      };
   getSettings(): ProtectionSettings | null;
   dispose(): void;
 };
 
-type AdapterFactory = (
-  options: ChatGptAdapterOptions,
-) => ChatApplicationAdapter;
+type RegistryFactory = (options: {
+  document: Document;
+  entryPoint: string;
+  adapterOptions: Pick<
+    ChatGptAdapterOptions,
+    "onAdapterError" | "onHealthTransition"
+  >;
+}) => DocumentAdapterRegistry | null;
 type DialogFactory = (
   documentValue: Document,
   options: ProtectionDialogControllerOptions,
@@ -67,7 +75,7 @@ type ControllerFactory = (
 function unavailableStatus() {
   return {
     state: "unavailable" as const,
-    application: "chatgpt" as const,
+    application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
     protectionEnabled: null,
   };
 }
@@ -75,7 +83,7 @@ function unavailableStatus() {
 function initializingStatus(): ContentProtectionStatus {
   return {
     state: "initializing",
-    application: "chatgpt",
+    application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
     protectionEnabled: null,
   };
 }
@@ -84,15 +92,22 @@ export function bootstrapContent(options: {
   document: Document;
   runtime: ContentRuntime;
   scheduler?: RetryScheduler;
-  createAdapter?: AdapterFactory;
+  createRegistry?: RegistryFactory;
   createDialog?: DialogFactory;
   createController?: ControllerFactory;
   eventId?: () => string;
   now?: () => Date;
 }): ContentBootstrap {
-  const adapterFactory =
-    options.createAdapter ??
-    ((adapterOptions) => new ChatGptAdapter(adapterOptions));
+  if (options.document.defaultView?.location.origin !== "https://chatgpt.com") {
+    return {
+      getStatus: unavailableStatus,
+      getSettings: () => null,
+      dispose() {},
+    };
+  }
+
+  const registryFactory =
+    options.createRegistry ?? createDocumentAdapterRegistry;
   const dialogFactory =
     options.createDialog ?? createProtectionDialogController;
   const controllerFactory =
@@ -104,7 +119,7 @@ export function bootstrapContent(options: {
   let enforcementRevision: EnforcementRevision = 0;
   let status: ContentProtectionStatus | ReturnType<typeof unavailableStatus> =
     initializingStatus();
-  let adapter: ChatApplicationAdapter | null = null;
+  let adapterRegistry: DocumentAdapterRegistry | null = null;
   let dialog: ProtectionDialogController | null = null;
   let controller: SubmissionController | null = null;
   let unregister: (() => void) | null = null;
@@ -137,7 +152,7 @@ export function bootstrapContent(options: {
     if (!current.protectionEnabled) {
       publish({
         state: "disabled",
-        application: "chatgpt",
+        application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
         protectionEnabled: false,
       });
       return;
@@ -148,7 +163,7 @@ export function bootstrapContent(options: {
         : adapterWaiting
           ? "waiting_for_composer"
           : "active",
-      application: "chatgpt",
+      application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
       protectionEnabled: true,
     });
   }
@@ -177,10 +192,10 @@ export function bootstrapContent(options: {
       kind: "adapter_health",
       id: createAuditEventId(eventId()),
       timestamp: createAuditTimestamp(now().toISOString()),
-      application: "chatgpt",
+      application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
       status: "degraded",
       healthCode: transition.healthCode,
-      adapterVersion: CHATGPT_ADAPTER_VERSION,
+      adapterVersion: CHATGPT_ADAPTER_DESCRIPTOR.version,
     });
     publishReadyStatus();
   }
@@ -199,9 +214,9 @@ export function bootstrapContent(options: {
       kind: "enforcement_error",
       id: createAuditEventId(eventId()),
       timestamp: createAuditTimestamp(now().toISOString()),
-      application: "chatgpt",
+      application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
       errorCode: "extension_context_invalidated",
-      adapterVersion: CHATGPT_ADAPTER_VERSION,
+      adapterVersion: CHATGPT_ADAPTER_DESCRIPTOR.version,
     });
     try {
       void Promise.resolve(
@@ -218,20 +233,24 @@ export function bootstrapContent(options: {
 
   function ensureRuntime(): boolean {
     if (controller !== null) return true;
-    let createdAdapter: ChatApplicationAdapter | null = null;
+    let createdRegistry: DocumentAdapterRegistry | null = null;
     let createdDialog: ProtectionDialogController | null = null;
     let createdController: SubmissionController | null = null;
     try {
-      createdAdapter = adapterFactory({
+      createdRegistry = registryFactory({
         document: options.document,
-        onHealthTransition: handleHealth,
-        onAdapterError: handleAdapterError,
+        entryPoint: CHATGPT_ADAPTER_DESCRIPTOR.entryPoint,
+        adapterOptions: {
+          onHealthTransition: handleHealth,
+          onAdapterError: handleAdapterError,
+        },
       });
+      if (createdRegistry === null) return false;
       createdDialog = dialogFactory(options.document, {
         onRenderFailure: () => createdController?.reportDialogRenderFailure(),
       });
       createdController = controllerFactory({
-        adapter: createdAdapter,
+        adapter: createdRegistry.adapter,
         dialog: createdDialog,
         audit: { append: sendAudit },
         settings: () => {
@@ -243,7 +262,7 @@ export function bootstrapContent(options: {
         isProtectionEnabled: () => settings?.protectionEnabled === true,
         currentRevision: () => enforcementRevision,
       });
-      adapter = createdAdapter;
+      adapterRegistry = createdRegistry;
       dialog = createdDialog;
       controller = createdController;
       return true;
@@ -259,7 +278,7 @@ export function bootstrapContent(options: {
         // Partial bootstrap cleanup is best effort.
       }
       try {
-        createdAdapter?.dispose();
+        createdRegistry?.dispose();
       } catch {
         // Partial bootstrap cleanup is best effort.
       }
@@ -295,13 +314,13 @@ export function bootstrapContent(options: {
       // Continue through every independent cleanup boundary.
     }
     try {
-      adapter?.dispose();
+      adapterRegistry?.dispose();
     } catch {
       // Continue through every independent cleanup boundary.
     }
     controller = null;
     dialog = null;
-    adapter = null;
+    adapterRegistry = null;
     adapterDegraded = false;
     adapterWaiting = false;
   }
@@ -364,7 +383,7 @@ export function bootstrapContent(options: {
       if (!settings.protectionEnabled) {
         publish({
           state: "disabled",
-          application: "chatgpt",
+          application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
           protectionEnabled: false,
         });
         return;
@@ -380,7 +399,7 @@ export function bootstrapContent(options: {
       if (unregister === null) {
         publish({
           state: "degraded",
-          application: "chatgpt",
+          application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
           protectionEnabled: true,
         });
         return;

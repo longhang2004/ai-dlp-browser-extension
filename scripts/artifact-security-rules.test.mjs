@@ -28,6 +28,13 @@ test("accepts only the locked ChatGPT production URL identifiers", () => {
     ),
     [],
   );
+  assert.deepEqual(
+    inspectProductionSource(
+      "apps/extension/src/content/bootstrap.ts",
+      'if (location.origin !== "https://chatgpt.com") return;',
+    ),
+    [],
+  );
   assert.match(
     inspectProductionSource(
       "apps/extension/src/background/sender-validation.ts",

@@ -2,7 +2,10 @@ import type { AdapterDescriptor } from "@ai-dlp/shared-types";
 
 import type { ChatApplicationAdapter } from "./chat-application-adapter.js";
 import { findExecutableAdapterByOrigin } from "./adapter-catalog.js";
-import { ChatGptAdapter } from "./chatgpt/chatgpt-adapter.js";
+import {
+  ChatGptAdapter,
+  type ChatGptAdapterOptions,
+} from "./chatgpt/chatgpt-adapter.js";
 
 export type DocumentAdapterRegistry = {
   readonly descriptor: AdapterDescriptor;
@@ -15,10 +18,14 @@ const activeRegistries = new WeakMap<Document, DocumentAdapterRegistry>();
 function constructCatalogAdapter(
   descriptor: AdapterDescriptor,
   document: Document,
+  adapterOptions: Pick<
+    ChatGptAdapterOptions,
+    "onAdapterError" | "onHealthTransition"
+  >,
 ): ChatApplicationAdapter | null {
   switch (descriptor.adapterId) {
     case "chatgpt":
-      return new ChatGptAdapter({ document });
+      return new ChatGptAdapter({ document, ...adapterOptions });
     case "claude":
       return null;
   }
@@ -67,6 +74,10 @@ function createImmutableAdapterFacade(
 export function createDocumentAdapterRegistry(options: {
   document: Document;
   entryPoint: string;
+  adapterOptions?: Pick<
+    ChatGptAdapterOptions,
+    "onAdapterError" | "onHealthTransition"
+  >;
 }): DocumentAdapterRegistry | null {
   const { document, entryPoint } = options;
   const origin = document.defaultView?.location.origin;
@@ -80,7 +91,11 @@ export function createDocumentAdapterRegistry(options: {
 
   let adapter: ChatApplicationAdapter | null;
   try {
-    adapter = constructCatalogAdapter(descriptor, document);
+    adapter = constructCatalogAdapter(
+      descriptor,
+      document,
+      options.adapterOptions ?? {},
+    );
   } catch {
     return null;
   }

@@ -4,10 +4,12 @@ import {
   type AdapterDescriptor,
 } from "@ai-dlp/shared-types";
 
-function freezeDescriptor(descriptor: AdapterDescriptor): AdapterDescriptor {
-  const origins = Object.freeze([...descriptor.origins]);
-  const capabilities = Object.freeze({ ...descriptor.capabilities });
-  return Object.freeze({ ...descriptor, origins, capabilities });
+function freezeDescriptor<const Descriptor extends AdapterDescriptor>(
+  descriptor: Descriptor,
+): Readonly<Descriptor> {
+  Object.freeze(descriptor.origins);
+  Object.freeze(descriptor.capabilities);
+  return Object.freeze(descriptor);
 }
 
 export function assertExecutableAdapterCatalogInvariants(

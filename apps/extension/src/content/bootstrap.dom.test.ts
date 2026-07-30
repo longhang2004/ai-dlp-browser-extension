@@ -13,6 +13,7 @@ import type {
   LiveSubmissionContext,
   SubmitInterceptor,
 } from "../adapters/chat-application-adapter.js";
+import type { DocumentAdapterRegistry } from "../adapters/adapter-registry.js";
 import type { ChatGptAdapterOptions } from "../adapters/chatgpt/chatgpt-adapter.js";
 import {
   CHATGPT_ADAPTER_DESCRIPTOR,
@@ -106,6 +107,36 @@ function settingsSnapshot(
     generation,
     envelope: { schemaVersion: 2 as const, settings },
   };
+}
+
+function originOnlyDocument(origin: string): Document {
+  const location = new Proxy(
+    { origin },
+    {
+      get(target, property) {
+        if (property === "origin") return target.origin;
+        throw new Error(`Unexpected location access: ${String(property)}`);
+      },
+    },
+  );
+  const defaultView = new Proxy(
+    { location },
+    {
+      get(target, property) {
+        if (property === "location") return target.location;
+        throw new Error(`Unexpected window access: ${String(property)}`);
+      },
+    },
+  );
+  return new Proxy(
+    { defaultView },
+    {
+      get(target, property) {
+        if (property === "defaultView") return target.defaultView;
+        throw new Error(`Unexpected document access: ${String(property)}`);
+      },
+    },
+  ) as unknown as Document;
 }
 
 const ENFORCEMENT_POLICY_CHANGES: Array<[string, Partial<ProtectionSettings>]> =
@@ -256,7 +287,11 @@ function enforcementIntegrationHarness(options: {
         return { type: "audit.appended" };
       },
     },
-    createAdapter: () => adapter,
+    createRegistry: () => ({
+      descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+      adapter,
+      dispose: () => adapter.dispose(),
+    }),
     createDialog: () => dialog,
     eventId: () => "00000000-0000-4000-8000-000000000001",
     now: () => new Date("2026-07-26T00:00:00.000Z"),
@@ -308,10 +343,24 @@ function harness() {
       hasAuthorization: false,
     })),
   };
-  const createAdapter = vi.fn((options: ChatGptAdapterOptions) => {
-    adapterOptions = options;
-    return adapter;
-  });
+  const createRegistry = vi.fn(
+    (options: {
+      adapterOptions: Pick<
+        ChatGptAdapterOptions,
+        "onAdapterError" | "onHealthTransition"
+      >;
+    }) => {
+      adapterOptions = {
+        document,
+        ...options.adapterOptions,
+      };
+      return {
+        descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+        adapter,
+        dispose: () => adapter.dispose(),
+      };
+    },
+  );
   const createDialog = vi.fn(
     (_document: Document, options: { onRenderFailure?: () => void }) => {
       dialogFailure = options.onRenderFailure;
@@ -326,7 +375,7 @@ function harness() {
     document,
     runtime,
     scheduler,
-    createAdapter,
+    createRegistry,
     createDialog,
     createController,
     eventId: () => "00000000-0000-4000-8000-000000000001",
@@ -342,7 +391,7 @@ function harness() {
     dialog,
     controller,
     registrationDispose,
-    createAdapter,
+    createRegistry,
     createDialog,
     createController,
     getAdapterOptions: () => adapterOptions,
@@ -352,13 +401,99 @@ function harness() {
 }
 
 describe("content bootstrap", () => {
+  it.each([
+    ["wrong origin", "https://example.test"],
+    ["ChatGPT alternate port", "https://chatgpt.com:8443"],
+  ])(
+    "performs no page access, messaging, or registry construction for %s",
+    (_label, origin) => {
+      const runtime: ContentRuntime = {
+        connect: vi.fn(),
+        sendMessage: vi.fn(),
+      };
+      const createRegistry = vi.fn();
+
+      const content = bootstrapContent({
+        document: originOnlyDocument(origin),
+        runtime,
+        createRegistry,
+      });
+
+      expect(runtime.connect).not.toHaveBeenCalled();
+      expect(runtime.sendMessage).not.toHaveBeenCalled();
+      expect(createRegistry).not.toHaveBeenCalled();
+      expect(content.getSettings()).toBeNull();
+      expect(content.getStatus()).toEqual({
+        state: "unavailable",
+        application: "chatgpt",
+        protectionEnabled: null,
+      });
+      expect(() => content.dispose()).not.toThrow();
+    },
+  );
+
+  it("constructs the enabled ChatGPT runtime only through the catalog registry", () => {
+    const port = createPort();
+    const adapter = new FakeAdapter();
+    const registry: DocumentAdapterRegistry = {
+      descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+      adapter,
+      dispose: vi.fn(() => adapter.dispose()),
+    };
+    const createRegistry = vi.fn(() => registry);
+    const runtime: ContentRuntime = {
+      connect: vi.fn(() => port),
+      sendMessage: vi.fn(),
+    };
+
+    const content = bootstrapContent({
+      document,
+      runtime,
+      createRegistry,
+      createDialog: () => ({
+        show: vi.fn(async () => "cancel" as const),
+        cancel: vi.fn(),
+        dispose: vi.fn(),
+      }),
+      createController: () => ({
+        register: vi.fn(() => vi.fn()),
+        handleCapturedAttempt: vi.fn(() => "intercept" as const),
+        cancelActiveAttempt: vi.fn(),
+        reportDialogRenderFailure: vi.fn(),
+        dispose: vi.fn(),
+        whenSettledForTesting: vi.fn(async () => undefined),
+        getDiagnosticsForTesting: vi.fn(() => ({
+          state: "idle" as const,
+          hasActiveAttempt: false,
+          hasPromptSnapshot: false,
+          hasSensitiveFindings: false,
+          hasAuthorization: false,
+        })),
+      }),
+    });
+
+    port.emitMessage(settingsSnapshot(true));
+
+    expect(createRegistry).toHaveBeenCalledOnce();
+    expect(createRegistry).toHaveBeenCalledWith({
+      document,
+      entryPoint: CHATGPT_ADAPTER_DESCRIPTOR.entryPoint,
+      adapterOptions: expect.objectContaining({
+        onAdapterError: expect.any(Function),
+        onHealthTransition: expect.any(Function),
+      }),
+    });
+    content.dispose();
+    expect(registry.dispose).toHaveBeenCalledOnce();
+  });
+
   it("creates no protection runtime, observer source, or health audit while disabled", () => {
     const h = harness();
 
     h.firstPort.emitMessage(settingsSnapshot(false));
 
     expect(h.content.getStatus().state).toBe("disabled");
-    expect(h.createAdapter).not.toHaveBeenCalled();
+    expect(h.createRegistry).not.toHaveBeenCalled();
     expect(h.createDialog).not.toHaveBeenCalled();
     expect(h.createController).not.toHaveBeenCalled();
     expect(h.controller.register).not.toHaveBeenCalled();
@@ -368,7 +503,7 @@ describe("content bootstrap", () => {
   it("fully disposes on disable and creates exactly one fresh runtime on re-enable", () => {
     const h = harness();
     h.firstPort.emitMessage(settingsSnapshot(true));
-    expect(h.createAdapter).toHaveBeenCalledOnce();
+    expect(h.createRegistry).toHaveBeenCalledOnce();
 
     h.firstPort.emitMessage(settingsSnapshot(false, 1));
     expect(h.registrationDispose).toHaveBeenCalledOnce();
@@ -377,10 +512,10 @@ describe("content bootstrap", () => {
     expect(h.adapter.dispose).toHaveBeenCalledOnce();
 
     h.firstPort.emitMessage(settingsSnapshot(false, 2));
-    expect(h.createAdapter).toHaveBeenCalledOnce();
+    expect(h.createRegistry).toHaveBeenCalledOnce();
     h.firstPort.emitMessage(settingsSnapshot(true, 3));
     h.firstPort.emitMessage(settingsSnapshot(true, 4));
-    expect(h.createAdapter).toHaveBeenCalledTimes(2);
+    expect(h.createRegistry).toHaveBeenCalledTimes(2);
   });
 
   it("passes through the documented initialization interval and cannot report active", () => {
@@ -437,7 +572,14 @@ describe("content bootstrap", () => {
       document,
       runtime,
       scheduler,
-      createAdapter: () => new FakeAdapter(),
+      createRegistry: () => {
+        const adapter = new FakeAdapter();
+        return {
+          descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+          adapter,
+          dispose: () => adapter.dispose(),
+        };
+      },
     });
 
     expect(firstPort.disconnect).toHaveBeenCalledOnce();
@@ -654,6 +796,8 @@ describe("content bootstrap", () => {
       type: "audit.append",
       event: expect.objectContaining({
         kind: "adapter_health",
+        application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+        adapterVersion: CHATGPT_ADAPTER_DESCRIPTOR.version,
         status: "degraded",
         healthCode: "composer_not_found",
       }) as AuditEvent,

@@ -33,6 +33,11 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
+          environmentOptions: {
+            jsdom: {
+              url: "https://chatgpt.com/",
+            },
+          },
           include: ["**/*.dom.test.ts", "**/*.ui.test.tsx"],
           setupFiles: ["./tests/setup-dom.ts"],
         },

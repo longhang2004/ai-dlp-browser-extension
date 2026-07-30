@@ -23,6 +23,10 @@ const APPROVED_SOURCE_URLS = new Map([
     "apps/extension/src/background/sender-validation.ts",
     new Set(["https://chatgpt.com"]),
   ],
+  [
+    "apps/extension/src/content/bootstrap.ts",
+    new Set(["https://chatgpt.com"]),
+  ],
 ]);
 
 const SOURCE_FORBIDDEN_PATTERNS = [

@@ -1,3 +1,8 @@
+import type {
+  AdapterDescriptor,
+  AdapterHealthCode,
+} from "@ai-dlp/shared-types";
+
 export type SubmitSource = "click" | "enter";
 
 export type SubmitInterceptionDisposition = "pass_through" | "intercept";
@@ -52,9 +57,13 @@ export type SubmitInterceptor = (
   attempt: CapturedSubmitAttempt,
 ) => SubmitInterceptionDisposition;
 
+export type AdapterHealthTransition =
+  | { status: "waiting_for_composer" }
+  | { status: "healthy" }
+  | { status: "degraded"; healthCode: AdapterHealthCode };
+
 export interface ChatApplicationAdapter {
-  readonly id: "chatgpt";
-  readonly version: string;
+  readonly descriptor: AdapterDescriptor;
 
   matches(url: URL): boolean;
   resolveCurrentSubmissionContext(): LiveSubmissionContext | null;

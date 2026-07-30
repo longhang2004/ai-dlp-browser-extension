@@ -7,16 +7,17 @@ import {
 } from "@ai-dlp/shared-types";
 
 import type {
+  AdapterHealthTransition,
   AttachmentStateFingerprint,
   ChatApplicationAdapter,
   LiveSubmissionContext,
   SubmitInterceptor,
 } from "../adapters/chat-application-adapter.js";
-import type {
-  AdapterHealthTransition,
-  ChatGptAdapterOptions,
+import type { ChatGptAdapterOptions } from "../adapters/chatgpt/chatgpt-adapter.js";
+import {
+  CHATGPT_ADAPTER_DESCRIPTOR,
+  ChatGptAdapterError,
 } from "../adapters/chatgpt/chatgpt-adapter.js";
-import { ChatGptAdapterError } from "../adapters/chatgpt/chatgpt-adapter.js";
 import type { ProtectionDialogController } from "../ui/protection-dialog/dialog-controller.js";
 import type {
   SubmissionController,
@@ -116,8 +117,7 @@ const ENFORCEMENT_POLICY_CHANGES: Array<[string, Partial<ProtectionSettings>]> =
   ];
 
 class FakeAdapter implements ChatApplicationAdapter {
-  readonly id = "chatgpt" as const;
-  readonly version = "1";
+  readonly descriptor = CHATGPT_ADAPTER_DESCRIPTOR;
   interceptor: SubmitInterceptor | null = null;
   readonly unregister = vi.fn(() => {
     this.interceptor = null;
@@ -156,8 +156,7 @@ class FakeAdapter implements ChatApplicationAdapter {
 }
 
 class IntegrationAdapter implements ChatApplicationAdapter {
-  readonly id = "chatgpt" as const;
-  readonly version = "1";
+  readonly descriptor = CHATGPT_ADAPTER_DESCRIPTOR;
   readonly composer = document.createElement("textarea");
   readonly sendControl = document.createElement("button");
   readonly submissionRegion = document.createElement("form");

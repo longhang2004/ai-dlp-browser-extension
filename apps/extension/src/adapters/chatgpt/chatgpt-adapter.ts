@@ -1,9 +1,11 @@
 import {
   CHATGPT_ADAPTER_VERSION,
   type AdapterHealthCode,
+  type AdapterDescriptor,
 } from "@ai-dlp/shared-types";
 
 import type {
+  AdapterHealthTransition,
   CapturedSubmitAttempt,
   ChatApplicationAdapter,
   ConsumedSubmissionAuthorization,
@@ -24,12 +26,32 @@ import {
 } from "./context-resolver.js";
 import { CHATGPT_SELECTORS } from "./selectors.js";
 
-export type AdapterHealthTransition =
-  | { status: "waiting_for_composer" }
-  | { status: "healthy" }
-  | { status: "degraded"; healthCode: AdapterHealthCode };
-
 export const DEFAULT_HEALTH_GRACE_PERIOD_MS = 10_000;
+
+function freezeChatGptDescriptor(
+  descriptor: AdapterDescriptor,
+): AdapterDescriptor {
+  const origins = Object.freeze([...descriptor.origins]);
+  const capabilities = Object.freeze({ ...descriptor.capabilities });
+  return Object.freeze({ ...descriptor, origins, capabilities });
+}
+
+export const CHATGPT_ADAPTER_DESCRIPTOR = freezeChatGptDescriptor({
+  adapterId: "chatgpt",
+  surfaceId: "chatgpt_web",
+  version: CHATGPT_ADAPTER_VERSION,
+  trust: "verified",
+  origins: ["https://chatgpt.com"],
+  capabilities: {
+    submissionDetection: "verified",
+    promptRead: "verified",
+    attachmentDetection: "verified",
+    attachmentInspection: "unsupported",
+    promptReplacement: "verified",
+    submissionResume: "verified",
+  },
+  entryPoint: "content-script.js",
+});
 
 export const CHATGPT_ADAPTER_ERROR_CODES = Object.freeze([
   "adapter_disposed",
@@ -207,8 +229,7 @@ function nodeContainsAttachmentEvidence(node: Node): boolean {
 }
 
 export class ChatGptAdapter implements ChatApplicationAdapter {
-  readonly id = "chatgpt" as const;
-  readonly version = CHATGPT_ADAPTER_VERSION;
+  readonly descriptor = CHATGPT_ADAPTER_DESCRIPTOR;
 
   #document: Document | null;
   #getCurrentUrl: (() => URL) | null;

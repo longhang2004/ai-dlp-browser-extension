@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import * as sharedTypes from "./index.js";
 import {
+  ADAPTER_CAPABILITY_KEYS,
+  ADAPTER_IDS,
+  ADAPTER_TRUST_LEVELS,
   ADAPTER_HEALTH_CODES,
+  AI_SURFACE_IDS,
+  CAPABILITY_SUPPORT_LEVELS,
   CHATGPT_ADAPTER_VERSION,
   cloneProtectionSettings,
   createAuditEventId,
@@ -21,6 +27,9 @@ import {
   ENFORCEMENT_ERROR_CODES,
   FINDING_CONFIDENCES,
   isAdapterHealthAuditEvent,
+  isAdapterDescriptorClaim,
+  isAdapterId,
+  isAiSurfaceId,
   isAuditEvent,
   isAuditEventId,
   isAuditTimestamp,
@@ -53,6 +62,7 @@ import {
   SETTINGS_VALIDATION_ERROR_CODES,
   SETTINGS_VALIDATION_FIELDS,
   type AuditEvent,
+  type AdapterDescriptor,
   type DetectorId,
   type DisplayFinding,
   type PolicyConfiguration,
@@ -68,6 +78,23 @@ import {
   type StoredAuditEnvelope,
   type StoredSettingsEnvelope,
 } from "./index.js";
+
+const validChatGptDescriptorInput = {
+  adapterId: "chatgpt",
+  surfaceId: "chatgpt_web",
+  version: CHATGPT_ADAPTER_VERSION,
+  trust: "verified",
+  origins: ["https://chatgpt.com"],
+  capabilities: {
+    submissionDetection: "verified",
+    promptRead: "verified",
+    attachmentDetection: "verified",
+    attachmentInspection: "unsupported",
+    promptReplacement: "verified",
+    submissionResume: "verified",
+  },
+  entryPoint: "content-script.js",
+} satisfies AdapterDescriptor;
 
 const validSettingsEnvelope: StoredSettingsEnvelope = {
   schemaVersion: 2,
@@ -206,6 +233,163 @@ describe("frozen schema allowlists", () => {
     expect(new Set(Object.values(DETECTOR_CATEGORY)).size).toBe(
       SENSITIVE_DATA_CATEGORIES.length,
     );
+  });
+});
+
+describe("closed adapter descriptor boundaries", () => {
+  it("exports frozen closed identity and capability allowlists", () => {
+    expect(AI_SURFACE_IDS).toEqual([
+      "chatgpt_web",
+      "claude_web",
+      "gemini_web",
+      "perplexity_web",
+      "deepseek_web",
+      "copilot_web",
+    ]);
+    expect(ADAPTER_IDS).toEqual(["chatgpt", "claude"]);
+    expect(ADAPTER_TRUST_LEVELS).toEqual([
+      "verified",
+      "discovered",
+      "unsupported",
+    ]);
+    expect(CAPABILITY_SUPPORT_LEVELS).toEqual([
+      "verified",
+      "unsupported",
+      "not_applicable",
+    ]);
+    expect(ADAPTER_CAPABILITY_KEYS).toEqual([
+      "submissionDetection",
+      "promptRead",
+      "attachmentDetection",
+      "attachmentInspection",
+      "promptReplacement",
+      "submissionResume",
+    ]);
+    expect(
+      [
+        AI_SURFACE_IDS,
+        ADAPTER_IDS,
+        ADAPTER_TRUST_LEVELS,
+        CAPABILITY_SUPPORT_LEVELS,
+        ADAPTER_CAPABILITY_KEYS,
+      ].every(Object.isFrozen),
+    ).toBe(true);
+    expect(isAiSurfaceId("chatgpt_web")).toBe(true);
+    expect(isAiSurfaceId("unknown_web")).toBe(false);
+    expect(isAdapterId("claude")).toBe(true);
+    expect(isAdapterId("unknown")).toBe(false);
+  });
+
+  it("does not export standalone descriptor authorization or factory APIs", () => {
+    expect(sharedTypes).not.toHaveProperty("isAdapterDescriptor");
+    expect(sharedTypes).not.toHaveProperty("createAdapterDescriptor");
+  });
+
+  it("accepts only a structurally valid claim matching the trusted descriptor", () => {
+    expect(
+      isAdapterDescriptorClaim(
+        validChatGptDescriptorInput,
+        validChatGptDescriptorInput,
+      ),
+    ).toBe(true);
+
+    const invalidClaims = [
+      { ...validChatGptDescriptorInput, adapterId: "unknown" },
+      { ...validChatGptDescriptorInput, surfaceId: "unknown_web" },
+      { ...validChatGptDescriptorInput, surfaceId: "claude_web" },
+      { ...validChatGptDescriptorInput, origins: ["https://claude.ai"] },
+      {
+        ...validChatGptDescriptorInput,
+        origins: ["https://chatgpt.com", "https://chatgpt.com"],
+      },
+      { ...validChatGptDescriptorInput, origins: ["https://chatgpt.com/"] },
+      { ...validChatGptDescriptorInput, version: "" },
+      { ...validChatGptDescriptorInput, entryPoint: "../content-script.js" },
+      { ...validChatGptDescriptorInput, metadata: {} },
+      { ...validChatGptDescriptorInput, prompt: "secret" },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          promptRead: "unknown",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          metadata: {},
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          prompt: "secret",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        trust: "unsupported",
+      },
+    ];
+
+    for (const claim of invalidClaims) {
+      expect(isAdapterDescriptorClaim(validChatGptDescriptorInput, claim)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("rejects runtime identity, trust, capability, origin, and version upgrades", () => {
+    for (const claim of [
+      { ...validChatGptDescriptorInput, adapterId: "claude" },
+      { ...validChatGptDescriptorInput, surfaceId: "claude_web" },
+      { ...validChatGptDescriptorInput, version: "999" },
+      { ...validChatGptDescriptorInput, trust: "discovered" },
+      { ...validChatGptDescriptorInput, origins: ["https://claude.ai"] },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          attachmentInspection: "verified",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        entryPoint: "claude-content-script.js",
+      },
+    ]) {
+      expect(isAdapterDescriptorClaim(validChatGptDescriptorInput, claim)).toBe(
+        false,
+      );
+    }
+
+    expect(
+      isAdapterDescriptorClaim(
+        validChatGptDescriptorInput,
+        validChatGptDescriptorInput,
+      ),
+    ).toBe(true);
+  });
+
+  it("reserves Claude scalar identifiers without authorizing a Claude descriptor", () => {
+    const untrustedClaudeClaim = {
+      ...validChatGptDescriptorInput,
+      adapterId: "claude",
+      surfaceId: "claude_web",
+      origins: ["https://claude.ai"],
+      entryPoint: "claude-content-script.js",
+    };
+
+    expect(isAdapterId(untrustedClaudeClaim.adapterId)).toBe(true);
+    expect(isAiSurfaceId(untrustedClaudeClaim.surfaceId)).toBe(true);
+    expect(
+      isAdapterDescriptorClaim(
+        validChatGptDescriptorInput,
+        untrustedClaudeClaim,
+      ),
+    ).toBe(false);
   });
 });
 

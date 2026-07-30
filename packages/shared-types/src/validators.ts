@@ -75,6 +75,21 @@ import type {
   ProtectionStatusSnapshot,
 } from "./status.js";
 import {
+  ADAPTER_CAPABILITY_KEYS,
+  ADAPTER_IDS,
+  ADAPTER_TRUST_LEVELS,
+  AI_SURFACE_IDS,
+  CAPABILITY_SUPPORT_LEVELS,
+} from "./surfaces.js";
+import type {
+  AdapterCapabilities,
+  AdapterDescriptor,
+  AdapterId,
+  AdapterTrust,
+  AiSurfaceId,
+  CapabilitySupport,
+} from "./surfaces.js";
+import {
   hasExactOwnKeys,
   INVALID_SNAPSHOT,
   isDenseExactArray,
@@ -89,6 +104,122 @@ function isOneOf<const Values extends readonly string[]>(
   values: Values,
 ): value is Values[number] {
   return typeof value === "string" && values.includes(value);
+}
+
+export function isAiSurfaceId(value: unknown): value is AiSurfaceId {
+  return isOneOf(value, AI_SURFACE_IDS);
+}
+
+export function isAdapterId(value: unknown): value is AdapterId {
+  return isOneOf(value, ADAPTER_IDS);
+}
+
+function isAdapterTrust(value: unknown): value is AdapterTrust {
+  return isOneOf(value, ADAPTER_TRUST_LEVELS);
+}
+
+function isCapabilitySupport(value: unknown): value is CapabilitySupport {
+  return isOneOf(value, CAPABILITY_SUPPORT_LEVELS);
+}
+
+function isAdapterCapabilitiesSnapshot(
+  value: unknown,
+): value is AdapterCapabilities {
+  return safelyValidate(
+    () =>
+      isPlainRecord(value) &&
+      hasExactOwnKeys(value, ADAPTER_CAPABILITY_KEYS) &&
+      ADAPTER_CAPABILITY_KEYS.every((key) => isCapabilitySupport(value[key])),
+  );
+}
+
+function hasTrustCapabilityCorrelation(
+  trust: AdapterTrust,
+  capabilities: AdapterCapabilities,
+): boolean {
+  return (
+    trust === "verified" ||
+    ADAPTER_CAPABILITY_KEYS.every((key) => capabilities[key] !== "verified")
+  );
+}
+
+function isCanonicalHttpsOrigin(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^https:\/\/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[1-9][0-9]{0,4})?$/u.test(
+      value,
+    )
+  );
+}
+
+function isAdapterDescriptorSnapshot(
+  value: unknown,
+): value is AdapterDescriptor {
+  return safelyValidate(() => {
+    if (
+      !isPlainRecord(value) ||
+      !hasExactOwnKeys(value, [
+        "adapterId",
+        "surfaceId",
+        "version",
+        "trust",
+        "origins",
+        "capabilities",
+        "entryPoint",
+      ]) ||
+      !isAdapterId(value.adapterId) ||
+      !isAiSurfaceId(value.surfaceId) ||
+      typeof value.version !== "string" ||
+      !/^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,63})$/u.test(value.version) ||
+      !isAdapterTrust(value.trust) ||
+      !isAdapterCapabilitiesSnapshot(value.capabilities) ||
+      typeof value.entryPoint !== "string" ||
+      !/^[a-z0-9][a-z0-9._-]{0,126}\.js$/u.test(value.entryPoint)
+    ) {
+      return false;
+    }
+
+    return (
+      isDenseExactArray(value.origins, 1, 1, (origin): origin is string =>
+        isCanonicalHttpsOrigin(origin),
+      ) && hasTrustCapabilityCorrelation(value.trust, value.capabilities)
+    );
+  });
+}
+
+function descriptorsEqual(
+  claim: AdapterDescriptor,
+  expected: AdapterDescriptor,
+): boolean {
+  return (
+    claim.adapterId === expected.adapterId &&
+    claim.surfaceId === expected.surfaceId &&
+    claim.version === expected.version &&
+    claim.trust === expected.trust &&
+    claim.entryPoint === expected.entryPoint &&
+    claim.origins.length === expected.origins.length &&
+    claim.origins.every(
+      (origin, index) => origin === expected.origins[index],
+    ) &&
+    ADAPTER_CAPABILITY_KEYS.every(
+      (key) => claim.capabilities[key] === expected.capabilities[key],
+    )
+  );
+}
+
+export function isAdapterDescriptorClaim(
+  expected: AdapterDescriptor,
+  value: unknown,
+): value is AdapterDescriptor {
+  const claimSnapshot = snapshotStructuredValue(value);
+  const expectedSnapshot = snapshotStructuredValue(expected);
+  return (
+    claimSnapshot !== INVALID_SNAPSHOT &&
+    expectedSnapshot !== INVALID_SNAPSHOT &&
+    isAdapterDescriptorSnapshot(claimSnapshot) &&
+    isAdapterDescriptorSnapshot(expectedSnapshot) &&
+    descriptorsEqual(claimSnapshot, expectedSnapshot)
+  );
 }
 
 function isSensitiveDataCategory(

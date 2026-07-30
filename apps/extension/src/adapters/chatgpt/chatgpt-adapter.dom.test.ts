@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AdapterHealthTransition,
   ConsumedSubmissionAuthorization,
   LiveSubmissionContext,
 } from "../chat-application-adapter.js";
 import {
+  CHATGPT_ADAPTER_DESCRIPTOR,
   ChatGptAdapter,
   ChatGptAdapterError,
-  type AdapterHealthTransition,
 } from "./chatgpt-adapter.js";
 import {
   AMBIGUOUS_SHARED_SEND_COMPOSER_FIXTURE,
@@ -80,6 +81,37 @@ afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   vi.useRealTimers();
+});
+
+describe("ChatGptAdapter descriptor", () => {
+  it("exposes only the deeply frozen packaged ChatGPT descriptor", () => {
+    expect(CHATGPT_ADAPTER_DESCRIPTOR).toEqual({
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
+      version: "3",
+      trust: "verified",
+      origins: ["https://chatgpt.com"],
+      capabilities: {
+        submissionDetection: "verified",
+        promptRead: "verified",
+        attachmentDetection: "verified",
+        attachmentInspection: "unsupported",
+        promptReplacement: "verified",
+        submissionResume: "verified",
+      },
+      entryPoint: "content-script.js",
+    });
+    expect(Object.isFrozen(CHATGPT_ADAPTER_DESCRIPTOR)).toBe(true);
+    expect(Object.isFrozen(CHATGPT_ADAPTER_DESCRIPTOR.origins)).toBe(true);
+    expect(Object.isFrozen(CHATGPT_ADAPTER_DESCRIPTOR.capabilities)).toBe(true);
+    expect(
+      Reflect.set(
+        CHATGPT_ADAPTER_DESCRIPTOR.capabilities,
+        "promptRead",
+        "unsupported",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("ChatGptAdapter prompt operations", () => {

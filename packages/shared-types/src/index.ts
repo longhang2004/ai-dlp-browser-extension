@@ -133,10 +133,28 @@ export type {
   ProtectionStatusSnapshot,
 } from "./status.js";
 export {
+  ADAPTER_CAPABILITY_KEYS,
+  ADAPTER_IDS,
+  ADAPTER_TRUST_LEVELS,
+  AI_SURFACE_IDS,
+  CAPABILITY_SUPPORT_LEVELS,
+} from "./surfaces.js";
+export type {
+  AdapterCapabilities,
+  AdapterDescriptor,
+  AdapterId,
+  AdapterTrust,
+  AiSurfaceId,
+  CapabilitySupport,
+} from "./surfaces.js";
+export {
   createPolicyDecision,
   createPolicyFinding,
   createPolicyInput,
   isAdapterHealthAuditEvent,
+  isAdapterDescriptorClaim,
+  isAdapterId,
+  isAiSurfaceId,
   isAuditEvent,
   isDecisionAuditEvent,
   isEnforcementErrorAuditEvent,

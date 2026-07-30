@@ -1,8 +1,4 @@
-import {
-  CHATGPT_ADAPTER_VERSION,
-  type AdapterHealthCode,
-  type AdapterDescriptor,
-} from "@ai-dlp/shared-types";
+import type { AdapterHealthCode } from "@ai-dlp/shared-types";
 
 import type {
   AdapterHealthTransition,
@@ -16,6 +12,7 @@ import type {
   SubmissionContentCapabilities,
   SubmitInterceptor,
 } from "../chat-application-adapter.js";
+import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapter-catalog.js";
 import {
   diagnoseSubmissionElements,
   isSubmissionContextUsable,
@@ -28,30 +25,7 @@ import { CHATGPT_SELECTORS } from "./selectors.js";
 
 export const DEFAULT_HEALTH_GRACE_PERIOD_MS = 10_000;
 
-function freezeChatGptDescriptor(
-  descriptor: AdapterDescriptor,
-): AdapterDescriptor {
-  const origins = Object.freeze([...descriptor.origins]);
-  const capabilities = Object.freeze({ ...descriptor.capabilities });
-  return Object.freeze({ ...descriptor, origins, capabilities });
-}
-
-export const CHATGPT_ADAPTER_DESCRIPTOR = freezeChatGptDescriptor({
-  adapterId: "chatgpt",
-  surfaceId: "chatgpt_web",
-  version: CHATGPT_ADAPTER_VERSION,
-  trust: "verified",
-  origins: ["https://chatgpt.com"],
-  capabilities: {
-    submissionDetection: "verified",
-    promptRead: "verified",
-    attachmentDetection: "verified",
-    attachmentInspection: "unsupported",
-    promptReplacement: "verified",
-    submissionResume: "verified",
-  },
-  entryPoint: "content-script.js",
-});
+export { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapter-catalog.js";
 
 export const CHATGPT_ADAPTER_ERROR_CODES = Object.freeze([
   "adapter_disposed",

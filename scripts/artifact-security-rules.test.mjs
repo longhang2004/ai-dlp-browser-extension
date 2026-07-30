@@ -52,6 +52,8 @@ test("rejects prompt-obscuring logs and dynamic or network-capable code", () => 
     'Function("return 1")',
     'setTimeout("run()", 1)',
     'chrome.runtime.sendNativeMessage("helper", {})',
+    'chrome["scripting"]["registerContentScripts"]([])',
+    'document.querySelector("[data-testid=chat-input]")',
   ]) {
     assert.notEqual(
       inspectProductionSource("apps/extension/src/example.ts", source).length,

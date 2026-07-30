@@ -1,7 +1,10 @@
 import type { AdapterDescriptor } from "@ai-dlp/shared-types";
 
 import type { ChatApplicationAdapter } from "./chat-application-adapter.js";
-import { findExecutableAdapterByOrigin } from "./adapter-catalog.js";
+import {
+  CHATGPT_ADAPTER_DESCRIPTOR,
+  findExecutableAdapterByOrigin,
+} from "./adapter-catalog.js";
 import {
   ChatGptAdapter,
   type ChatGptAdapterOptions,
@@ -23,12 +26,8 @@ function constructCatalogAdapter(
     "onAdapterError" | "onHealthTransition"
   >,
 ): ChatApplicationAdapter | null {
-  switch (descriptor.adapterId) {
-    case "chatgpt":
-      return new ChatGptAdapter({ document, ...adapterOptions });
-    case "claude":
-      return null;
-  }
+  if (descriptor !== CHATGPT_ADAPTER_DESCRIPTOR) return null;
+  return new ChatGptAdapter({ document, ...adapterOptions });
 }
 
 function createImmutableAdapterFacade(

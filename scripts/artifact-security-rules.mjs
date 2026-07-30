@@ -23,10 +23,7 @@ const APPROVED_SOURCE_URLS = new Map([
     "apps/extension/src/background/sender-validation.ts",
     new Set(["https://chatgpt.com"]),
   ],
-  [
-    "apps/extension/src/content/bootstrap.ts",
-    new Set(["https://chatgpt.com"]),
-  ],
+  ["apps/extension/src/content/bootstrap.ts", new Set(["https://chatgpt.com"])],
 ]);
 
 const SOURCE_FORBIDDEN_PATTERNS = [
@@ -45,6 +42,11 @@ const SOURCE_FORBIDDEN_PATTERNS = [
     /\bchrome\.(?:tabs|scripting|debugger|webRequest|declarativeNetRequest)\b/u,
     "network-capable Chrome API",
   ],
+  [
+    /\b(?:registerContentScripts|unregisterContentScripts|getRegisteredContentScripts)\b/u,
+    "dynamic content registration",
+  ],
+  [/\bchat-input\b/u, "Claude selector"],
   [
     /\bchrome\.runtime\.(?:connectNative|sendNativeMessage)\b/u,
     "native messaging",

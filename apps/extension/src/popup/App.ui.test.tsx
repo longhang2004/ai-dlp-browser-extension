@@ -121,4 +121,25 @@ describe("popup App", () => {
     expect(screen.queryByText(/Conversation title/u)).toBeNull();
     expect(screen.queryByText(/private-plan/u)).toBeNull();
   });
+
+  it("does not advertise ChatGPT prompt replacement support", async () => {
+    render(
+      <App
+        runtime={runtimeWith({
+          type: "status.result",
+          status: {
+            state: "active",
+            application: "chatgpt",
+            surfaceId: "chatgpt_web",
+            protectionEnabled: true,
+            recentEventCount: 0,
+          },
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("Protection is active")).not.toBeNull();
+    expect(screen.queryByText(/prompt replacement/iu)).toBeNull();
+    expect(screen.queryByText(/replace prompts?/iu)).toBeNull();
+  });
 });

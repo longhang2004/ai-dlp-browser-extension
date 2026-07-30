@@ -764,6 +764,62 @@ describe("settings ports", () => {
     expect(manager.readStatus(0).state).toBe("unavailable");
   });
 
+  it("rejects a handshake that upgrades prompt replacement to verified", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    manager.handleConnect(connected);
+
+    handshake(connected, {
+      ...CHATGPT_ADAPTER_DESCRIPTOR,
+      capabilities: {
+        ...CHATGPT_ADAPTER_DESCRIPTOR.capabilities,
+        promptReplacement: "verified",
+      },
+    });
+    await flush();
+
+    expect(connected.disconnect).toHaveBeenCalledOnce();
+    expect(connected.postMessage).not.toHaveBeenCalled();
+    expect(manager.readStatus(0).state).toBe("unavailable");
+  });
+
+  it("does not let status metadata upgrade prompt replacement support", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    connect(manager, connected);
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "chatgpt",
+        surfaceId: "chatgpt_web",
+        protectionEnabled: true,
+        capabilities: {
+          promptReplacement: "verified",
+        },
+      },
+    });
+
+    expect(manager.readStatus(0)).toEqual({
+      state: "initializing",
+      application: "chatgpt",
+      surfaceId: "chatgpt_web",
+      protectionEnabled: null,
+      recentEventCount: 0,
+    });
+  });
+
   it("rejects a malformed first message instead of accepting a content port", async () => {
     for (const message of [
       undefined,

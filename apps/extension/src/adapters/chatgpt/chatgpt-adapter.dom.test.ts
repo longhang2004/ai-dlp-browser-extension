@@ -96,7 +96,7 @@ describe("ChatGptAdapter descriptor", () => {
         promptRead: "verified",
         attachmentDetection: "verified",
         attachmentInspection: "unsupported",
-        promptReplacement: "verified",
+        promptReplacement: "unsupported",
         submissionResume: "verified",
       },
       entryPoint: "content-script.js",
@@ -166,7 +166,11 @@ describe("ChatGptAdapter prompt operations", () => {
     expect(adapter.readPrompt(context)).toBe(original);
   });
 
-  it("reports every current ChatGPT editor variant as replacement unsupported", () => {
+  it("unconditionally correlates the static replacement claim with every live context", () => {
+    expect(CHATGPT_ADAPTER_DESCRIPTOR.capabilities.promptReplacement).toBe(
+      "unsupported",
+    );
+
     for (const fixture of [
       NATIVE_TEXTAREA_COMPOSER_FIXTURE,
       CONTENTEDITABLE_COMPOSER_FIXTURE,
@@ -180,7 +184,43 @@ describe("ChatGptAdapter prompt operations", () => {
       expect(adapter.getPromptReplacementCapability(context)).toBe(
         "unsupported",
       );
+      expect(adapter.replacePrompt(context, "synthetic-safe-value")).toEqual({
+        ok: false,
+        reason: "unsupported_editor",
+      });
     }
+  });
+
+  it("does not let a page-controlled DOM claim upgrade prompt replacement", () => {
+    renderFixture(`
+      <div
+        id="page-capability-claim"
+        data-promptguard-prompt-replacement="verified"
+      ></div>
+      ${NATIVE_TEXTAREA_COMPOSER_FIXTURE}
+    `);
+    const pageClaim = document.querySelector("#page-capability-claim");
+    expect(pageClaim?.getAttribute("data-promptguard-prompt-replacement")).toBe(
+      "verified",
+    );
+
+    const adapter = createAdapter();
+    const context = adapter.resolveCurrentSubmissionContext();
+    expect(context).not.toBeNull();
+    if (context === null) throw new Error("Expected context.");
+
+    expect(CHATGPT_ADAPTER_DESCRIPTOR.capabilities.promptReplacement).toBe(
+      "unsupported",
+    );
+    expect(adapter.descriptor).toBe(CHATGPT_ADAPTER_DESCRIPTOR);
+    expect(adapter.getPromptReplacementCapability(context)).toBe("unsupported");
+    expect(adapter.replacePrompt(context, "synthetic-safe-value")).toEqual({
+      ok: false,
+      reason: "unsupported_editor",
+    });
+    expect(pageClaim?.getAttribute("data-promptguard-prompt-replacement")).toBe(
+      "verified",
+    );
   });
 
   it("detects only composer-scoped attachment evidence, not upload capability", () => {

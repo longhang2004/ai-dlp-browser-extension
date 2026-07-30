@@ -144,7 +144,7 @@ const descriptorWithPrompt = {
     promptRead: "verified" as const,
     attachmentDetection: "verified" as const,
     attachmentInspection: "unsupported" as const,
-    promptReplacement: "verified" as const,
+    promptReplacement: "unsupported" as const,
     submissionResume: "verified" as const,
   },
   entryPoint: "content-script.js",

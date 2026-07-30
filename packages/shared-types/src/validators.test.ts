@@ -91,7 +91,7 @@ const validChatGptDescriptorInput = {
     promptRead: "verified",
     attachmentDetection: "verified",
     attachmentInspection: "unsupported",
-    promptReplacement: "verified",
+    promptReplacement: "unsupported",
     submissionResume: "verified",
   },
   entryPoint: "content-script.js",
@@ -358,6 +358,13 @@ describe("closed adapter descriptor boundaries", () => {
       },
       {
         ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          promptReplacement: "verified",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
         entryPoint: "claude-content-script.js",
       },
     ]) {
@@ -425,6 +432,16 @@ describe("closed adapter descriptor boundaries", () => {
           capabilities: {
             ...validChatGptDescriptorInput.capabilities,
             submissionResume: "unsupported",
+          },
+        },
+      },
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          capabilities: {
+            ...validChatGptDescriptorInput.capabilities,
+            promptReplacement: "verified",
           },
         },
       },

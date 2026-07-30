@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -227,6 +227,29 @@ test("pnpm build creates and verifies a clean artifact", async () => {
     cwd: repositoryRoot,
   });
   assert.match(result.stdout, /Verified MV3 build topology \(12 files\)\./u);
+
+  const artifactRoot = new URL("./apps/extension/dist/", repositoryRoot);
+  const javascriptFiles = (
+    await readdir(artifactRoot, { recursive: true })
+  ).filter((relativePath) => relativePath.endsWith(".js"));
+  const generatedJavascript = (
+    await Promise.all(
+      javascriptFiles.map((relativePath) =>
+        readFile(new URL(relativePath, artifactRoot), "utf8"),
+      ),
+    )
+  ).join("\n");
+
+  assert.equal(
+    /promptReplacement:[`"]unsupported[`"]/u.test(generatedJavascript),
+    true,
+    "Generated JavaScript must package promptReplacement as unsupported.",
+  );
+  assert.equal(
+    /promptReplacement:[`"]verified[`"]/u.test(generatedJavascript),
+    false,
+    "Generated JavaScript must not package promptReplacement as verified.",
+  );
 });
 
 test("canonical digest runs only after reachability passes", async () => {

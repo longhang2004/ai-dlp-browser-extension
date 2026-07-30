@@ -46,7 +46,7 @@ describe("executable adapter catalog", () => {
           promptRead: "verified",
           attachmentDetection: "verified",
           attachmentInspection: "unsupported",
-          promptReplacement: "verified",
+          promptReplacement: "unsupported",
           submissionResume: "verified",
         },
         entryPoint: "content-script.js",
@@ -70,6 +70,10 @@ describe("executable adapter catalog", () => {
     expect(Object.isFrozen(CHATGPT_ADAPTER_DESCRIPTOR.origins)).toBe(true);
     expect(Object.isFrozen(capabilities)).toBe(true);
     expect(Reflect.set(capabilities, "promptRead", "unsupported")).toBe(false);
+    expect(Reflect.set(capabilities, "promptReplacement", "verified")).toBe(
+      false,
+    );
+    expect(capabilities.promptReplacement).toBe("unsupported");
     expect(
       Reflect.set(EXECUTABLE_ADAPTER_CATALOG, "1", descriptor() as never),
     ).toBe(false);
@@ -119,7 +123,7 @@ describe("executable adapter catalog", () => {
       descriptor({
         capabilities: {
           ...capabilities,
-          promptReplacement: "unsupported",
+          promptReplacement: "verified",
         },
       }),
     ],

@@ -52,7 +52,7 @@ describe("document adapter registry", () => {
     },
   );
 
-  it("does not let page or runtime metadata choose or strengthen identity", () => {
+  it("does not let runtime constructor metadata choose or strengthen identity", () => {
     const registry = createRegistry(
       "https://chatgpt.com",
       "content-script.js",
@@ -63,16 +63,21 @@ describe("document adapter registry", () => {
           trust: "verified",
           capabilities: {
             promptRead: "verified",
+            promptReplacement: "verified",
             submissionResume: "verified",
           },
         },
         origins: ["https://claude.ai"],
-        version: "page-controlled",
+        version: "runtime-controlled",
       },
     );
 
     expect(registry?.descriptor).toBe(CHATGPT_ADAPTER_DESCRIPTOR);
+    expect(registry?.adapter.descriptor).toBe(CHATGPT_ADAPTER_DESCRIPTOR);
     expect(registry?.descriptor.origins).toEqual(["https://chatgpt.com"]);
+    expect(registry?.adapter.descriptor.capabilities.promptReplacement).toBe(
+      "unsupported",
+    );
     registry?.dispose();
   });
 

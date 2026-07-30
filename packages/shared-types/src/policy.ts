@@ -9,6 +9,7 @@ import type {
   PromptFreeArray,
   PromptFreeBoundary,
 } from "./privacy.js";
+import type { AiSurfaceId } from "./surfaces.js";
 
 export const POLICY_ACTIONS = Object.freeze([
   "allow",
@@ -54,7 +55,7 @@ export type PolicyConfiguration = PromptFreeBoundary & {
 };
 
 export type PolicyInput = PromptDerivedBoundary & {
-  application: "chatgpt";
+  surfaceId: AiSurfaceId;
   attachmentPresent: boolean;
   findings: PromptFreeArray<PolicyFinding>;
   policy: PolicyConfiguration;

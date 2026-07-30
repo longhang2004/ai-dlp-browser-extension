@@ -426,6 +426,7 @@ describe("content bootstrap", () => {
       expect(content.getStatus()).toEqual({
         state: "unavailable",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: null,
       });
       expect(() => content.dispose()).not.toThrow();
@@ -524,6 +525,7 @@ describe("content bootstrap", () => {
     expect(h.content.getStatus()).toEqual({
       state: "initializing",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: null,
     });
     expect(h.controller.register).not.toHaveBeenCalled();
@@ -544,6 +546,7 @@ describe("content bootstrap", () => {
     expect(h.content.getStatus()).toEqual({
       state: "active",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: true,
     });
     expect(h.firstPort.postMessage).toHaveBeenLastCalledWith({
@@ -587,6 +590,7 @@ describe("content bootstrap", () => {
     expect(content.getStatus()).toEqual({
       state: "unavailable",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: null,
     });
 
@@ -681,6 +685,7 @@ describe("content bootstrap", () => {
     expect(h.content.getStatus()).toEqual({
       state: "unavailable",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: null,
     });
 
@@ -823,6 +828,7 @@ describe("content bootstrap", () => {
     expect(h.content.getStatus()).toEqual({
       state: "waiting_for_composer",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: true,
     });
     expect(h.runtime.sendMessage).not.toHaveBeenCalled();
@@ -893,6 +899,7 @@ describe("content bootstrap", () => {
       status: {
         state: "degraded",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });

@@ -451,12 +451,12 @@ function isPolicyInputSnapshot(value: unknown): value is PolicyInput {
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, [
-        "application",
+        "surfaceId",
         "attachmentPresent",
         "findings",
         "policy",
       ]) &&
-      value.application === "chatgpt" &&
+      isAiSurfaceId(value.surfaceId) &&
       typeof value.attachmentPresent === "boolean" &&
       isDenseExactArray(value.findings, 0, 700_000, isPolicyFindingSnapshot) &&
       isPolicyConfigurationSnapshot(value.policy),
@@ -474,7 +474,7 @@ export function createPolicyInput(value: PolicyInput): PolicyInput {
   }
 
   return {
-    application: "chatgpt",
+    surfaceId: snapshot.surfaceId,
     attachmentPresent: snapshot.attachmentPresent,
     findings: snapshot.findings,
     policy: snapshot.policy,
@@ -929,25 +929,34 @@ function isProtectionStatusSnapshotValue(
       !hasExactOwnKeys(value, [
         "state",
         "application",
+        "surfaceId",
         "protectionEnabled",
         "recentEventCount",
       ]) ||
-      value.application !== "chatgpt" ||
       !isNonNegativeSafeInteger(value.recentEventCount)
     ) {
       return false;
     }
 
+    const hasReportedIdentity =
+      value.application === "chatgpt" && value.surfaceId === "chatgpt_web";
+    const hasNoIdentity =
+      value.application === null && value.surfaceId === null;
+
     switch (value.state) {
       case "initializing":
+        return (
+          (hasReportedIdentity || hasNoIdentity) &&
+          value.protectionEnabled === null
+        );
       case "unavailable":
-        return value.protectionEnabled === null;
+        return hasNoIdentity && value.protectionEnabled === null;
       case "active":
       case "degraded":
       case "waiting_for_composer":
-        return value.protectionEnabled === true;
+        return hasReportedIdentity && value.protectionEnabled === true;
       case "disabled":
-        return value.protectionEnabled === false;
+        return hasReportedIdentity && value.protectionEnabled === false;
       default:
         return false;
     }
@@ -966,8 +975,13 @@ function isContentProtectionStatusValue(
   return safelyValidate(() => {
     if (
       !isPlainRecord(value) ||
-      !hasExactOwnKeys(value, ["state", "application", "protectionEnabled"]) ||
-      value.application !== "chatgpt"
+      !hasExactOwnKeys(value, [
+        "state",
+        "application",
+        "surfaceId",
+        "protectionEnabled",
+      ]) ||
+      !(value.application === "chatgpt" && value.surfaceId === "chatgpt_web")
     ) {
       return false;
     }

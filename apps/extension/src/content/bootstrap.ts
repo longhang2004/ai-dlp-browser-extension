@@ -50,6 +50,7 @@ export type ContentBootstrap = {
     | {
         state: "unavailable";
         application: typeof CHATGPT_ADAPTER_DESCRIPTOR.adapterId;
+        surfaceId: typeof CHATGPT_ADAPTER_DESCRIPTOR.surfaceId;
         protectionEnabled: null;
       };
   getSettings(): ProtectionSettings | null;
@@ -76,6 +77,7 @@ function unavailableStatus() {
   return {
     state: "unavailable" as const,
     application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+    surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
     protectionEnabled: null,
   };
 }
@@ -84,6 +86,7 @@ function initializingStatus(): ContentProtectionStatus {
   return {
     state: "initializing",
     application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+    surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
     protectionEnabled: null,
   };
 }
@@ -153,6 +156,7 @@ export function bootstrapContent(options: {
       publish({
         state: "disabled",
         application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+        surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
         protectionEnabled: false,
       });
       return;
@@ -164,6 +168,7 @@ export function bootstrapContent(options: {
           ? "waiting_for_composer"
           : "active",
       application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+      surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
       protectionEnabled: true,
     });
   }
@@ -384,6 +389,7 @@ export function bootstrapContent(options: {
         publish({
           state: "disabled",
           application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+          surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
           protectionEnabled: false,
         });
         return;
@@ -400,6 +406,7 @@ export function bootstrapContent(options: {
         publish({
           state: "degraded",
           application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+          surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
           protectionEnabled: true,
         });
         return;

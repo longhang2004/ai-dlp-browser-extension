@@ -276,6 +276,7 @@ describe("background bootstrap", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
       });

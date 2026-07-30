@@ -309,6 +309,7 @@ describe("settings ports", () => {
     expect(manager.readStatus(3)).toEqual({
       state: "initializing",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: null,
       recentEventCount: 3,
     });
@@ -318,6 +319,7 @@ describe("settings ports", () => {
       status: {
         state: "disabled",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: false,
       },
     });
@@ -329,6 +331,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
       prompt: "reject this whole message",
@@ -341,12 +344,14 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
     expect(manager.readStatus(3)).toEqual({
       state: "active",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: true,
       recentEventCount: 3,
     });
@@ -367,6 +372,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -375,7 +381,38 @@ describe("settings ports", () => {
     connected.fireDisconnect();
     expect(manager.readStatus(0)).toEqual({
       state: "unavailable",
+      application: null,
+      surfaceId: null,
+      protectionEnabled: null,
+      recentEventCount: 0,
+    });
+  });
+
+  it("ignores a status identity that does not match the handshaken catalog descriptor", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port();
+    connect(manager, connected);
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "active",
+        application: "claude",
+        surfaceId: "claude_web",
+        protectionEnabled: true,
+      },
+    });
+
+    expect(manager.readStatus(0)).toEqual({
+      state: "initializing",
       application: "chatgpt",
+      surfaceId: "chatgpt_web",
       protectionEnabled: null,
       recentEventCount: 0,
     });
@@ -401,6 +438,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -411,6 +449,7 @@ describe("settings ports", () => {
       status: {
         state: "degraded",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -422,6 +461,7 @@ describe("settings ports", () => {
       status: {
         state: "disabled",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: false,
       },
     });
@@ -443,6 +483,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -454,6 +495,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -470,6 +512,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -485,6 +528,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -495,6 +539,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -505,6 +550,7 @@ describe("settings ports", () => {
       status: {
         state: "disabled",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: false,
       },
     });
@@ -532,6 +578,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -553,7 +600,8 @@ describe("settings ports", () => {
     expect(connected.postMessage).not.toHaveBeenCalled();
     expect(manager.readStatus(0)).toEqual({
       state: "unavailable",
-      application: "chatgpt",
+      application: null,
+      surfaceId: null,
       protectionEnabled: null,
       recentEventCount: 0,
     });
@@ -603,7 +651,8 @@ describe("settings ports", () => {
     expect(read).not.toHaveBeenCalled();
     expect(manager.readStatus(0)).toEqual({
       state: "unavailable",
-      application: "chatgpt",
+      application: null,
+      surfaceId: null,
       protectionEnabled: null,
       recentEventCount: 0,
     });
@@ -658,6 +707,7 @@ describe("settings ports", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });
@@ -725,6 +775,7 @@ describe("settings ports", () => {
         status: {
           state: "initializing",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
         },
       },
@@ -779,7 +830,8 @@ describe("settings ports", () => {
     }
     expect(manager.readStatus(0)).toEqual({
       state: "unavailable",
-      application: "chatgpt",
+      application: null,
+      surfaceId: null,
       protectionEnabled: null,
       recentEventCount: 0,
     });

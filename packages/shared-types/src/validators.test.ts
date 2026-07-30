@@ -449,7 +449,7 @@ describe("policy runtime boundaries", () => {
     expect(isPolicyConfiguration(validPolicy)).toBe(true);
     expect(
       isPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
@@ -459,13 +459,13 @@ describe("policy runtime boundaries", () => {
     expect(createPolicyFinding(validPolicyFinding)).toEqual(validPolicyFinding);
     expect(
       createPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
       }),
     ).toEqual({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
@@ -473,6 +473,19 @@ describe("policy runtime boundaries", () => {
     expect(createPolicyDecision(validPolicyDecision)).toEqual(
       validPolicyDecision,
     );
+  });
+
+  it("accepts every closed surface ID without application-specific policy exceptions", () => {
+    for (const surfaceId of AI_SURFACE_IDS) {
+      expect(
+        isPolicyInput({
+          surfaceId,
+          attachmentPresent: false,
+          findings: [validPolicyFinding],
+          policy: validPolicy,
+        }),
+      ).toBe(true);
+    }
   });
 
   it.each([
@@ -602,6 +615,15 @@ describe("policy runtime boundaries", () => {
     expect(
       isPolicyInput({
         application: "chatgpt",
+        attachmentPresent: false,
+        findings: [validPolicyFinding],
+        policy: validPolicy,
+      }),
+    ).toBe(false);
+    expect(
+      isPolicyInput({
+        surfaceId: "chatgpt_web",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
         renamedSecret: "secret",
@@ -609,7 +631,8 @@ describe("policy runtime boundaries", () => {
     ).toBe(false);
     expect(
       isPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
         offsets: [0, 16],
@@ -617,7 +640,8 @@ describe("policy runtime boundaries", () => {
     ).toBe(false);
     expect(
       isPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
         sanitizedPrompt: "[EMAIL]",
@@ -1746,6 +1770,7 @@ describe("runtime message validation", () => {
         status: {
           state: "initializing",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
           recentEventCount: 0,
         },
@@ -1757,11 +1782,37 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
           recentEventCount: 0,
         },
       }),
     ).toBe(false);
+    expect(
+      isProtectionStatusSnapshot({
+        state: "unavailable",
+        application: null,
+        surfaceId: null,
+        protectionEnabled: null,
+        recentEventCount: 0,
+      }),
+    ).toBe(true);
+    for (const [application, surfaceId] of [
+      ["unknown", "chatgpt_web"],
+      ["chatgpt", "claude_web"],
+      [null, "chatgpt_web"],
+      ["chatgpt", null],
+    ]) {
+      expect(
+        isProtectionStatusSnapshot({
+          state: "active",
+          application,
+          surfaceId,
+          protectionEnabled: true,
+          recentEventCount: 0,
+        }),
+      ).toBe(false);
+    }
     expect(
       isSettingsPortMessage({
         type: "settings.snapshot",
@@ -1790,6 +1841,7 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
       }),
@@ -1800,6 +1852,7 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
       }),
@@ -1811,6 +1864,7 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
         prompt: "secret",
@@ -1830,6 +1884,7 @@ describe("runtime message validation", () => {
         status: {
           state: "initializing",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
         },
       }),
@@ -1931,7 +1986,7 @@ describe("factory snapshot and TOCTOU safety", () => {
     expect(policyFinding).not.toBe(policyFindingInput);
 
     const policyInputSource: PolicyInput = {
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
@@ -1996,7 +2051,7 @@ describe("factory snapshot and TOCTOU safety", () => {
     expect(finding.getReadCount()).toBe(0);
 
     const input = poisonAfterFirstRead({
-      application: "chatgpt" as const,
+      surfaceId: "chatgpt_web" as const,
       attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
@@ -2218,6 +2273,7 @@ describe("hostile object containment", () => {
         value: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
           recentEventCount: 0,
         },
@@ -2255,6 +2311,7 @@ describe("hostile object containment", () => {
           status: {
             state: "initializing",
             application: "chatgpt",
+            surfaceId: "chatgpt_web",
             protectionEnabled: null,
           },
         },

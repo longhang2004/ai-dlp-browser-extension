@@ -1,4 +1,5 @@
 import type { PromptFreeBoundary } from "./privacy.js";
+import type { AdapterId, AiSurfaceId } from "./surfaces.js";
 
 export const PROTECTION_STATUSES = Object.freeze([
   "initializing",
@@ -11,38 +12,54 @@ export const PROTECTION_STATUSES = Object.freeze([
 
 export type ProtectionStatus = (typeof PROTECTION_STATUSES)[number];
 
+type ReportedSurfaceIdentity = PromptFreeBoundary & {
+  application: AdapterId;
+  surfaceId: AiSurfaceId;
+};
+
+type UnreportedSurfaceIdentity = PromptFreeBoundary & {
+  application: null;
+  surfaceId: null;
+};
+
 type StatusSnapshotBase = PromptFreeBoundary & {
-  application: "chatgpt";
   recentEventCount: number;
 };
 
 export type ProtectionStatusSnapshot =
-  | (StatusSnapshotBase & {
-      state: "initializing" | "unavailable";
-      protectionEnabled: null;
-    })
-  | (StatusSnapshotBase & {
-      state: "waiting_for_composer" | "active" | "degraded";
-      protectionEnabled: true;
-    })
-  | (StatusSnapshotBase & {
-      state: "disabled";
-      protectionEnabled: false;
-    });
+  | (StatusSnapshotBase &
+      (ReportedSurfaceIdentity | UnreportedSurfaceIdentity) & {
+        state: "initializing";
+        protectionEnabled: null;
+      })
+  | (StatusSnapshotBase &
+      UnreportedSurfaceIdentity & {
+        state: "unavailable";
+        protectionEnabled: null;
+      })
+  | (StatusSnapshotBase &
+      ReportedSurfaceIdentity & {
+        state: "waiting_for_composer" | "active" | "degraded";
+        protectionEnabled: true;
+      })
+  | (StatusSnapshotBase &
+      ReportedSurfaceIdentity & {
+        state: "disabled";
+        protectionEnabled: false;
+      });
+
+type ContentStatusBase = PromptFreeBoundary & ReportedSurfaceIdentity;
 
 export type ContentProtectionStatus =
-  | (PromptFreeBoundary & {
+  | (ContentStatusBase & {
       state: "initializing";
-      application: "chatgpt";
       protectionEnabled: null;
     })
-  | (PromptFreeBoundary & {
+  | (ContentStatusBase & {
       state: "waiting_for_composer" | "active" | "degraded";
-      application: "chatgpt";
       protectionEnabled: true;
     })
-  | (PromptFreeBoundary & {
+  | (ContentStatusBase & {
       state: "disabled";
-      application: "chatgpt";
       protectionEnabled: false;
     });

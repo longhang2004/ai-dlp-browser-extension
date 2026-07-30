@@ -555,7 +555,8 @@ describe("message router", () => {
         type: "status.result",
         status: {
           state: "initializing",
-          application: "chatgpt",
+          application: null,
+          surfaceId: null,
           protectionEnabled: null,
           recentEventCount: 0,
         },
@@ -575,6 +576,7 @@ describe("message router", () => {
       readStatus: async () => ({
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
         recentEventCount: 0,
       }),

@@ -25,7 +25,8 @@ describe("popup App", () => {
           type: "status.result",
           status: {
             state,
-            application: "chatgpt",
+            application: state === "unavailable" ? null : "chatgpt",
+            surfaceId: state === "unavailable" ? null : "chatgpt_web",
             protectionEnabled:
               state === "active" ||
               state === "degraded" ||
@@ -59,11 +60,65 @@ describe("popup App", () => {
 
     expect(screen.getByText("Protection is initializing")).not.toBeNull();
     expect(screen.queryByText("Protection is active")).toBeNull();
+    expect(screen.queryByText(/ChatGPT/u)).toBeNull();
 
     resolveResponse({ type: "status.result", status: { state: "active" } });
     await waitFor(() => {
       expect(screen.getByText("Protection is unavailable")).not.toBeNull();
     });
     expect(screen.queryByText("Protection is active")).toBeNull();
+    expect(screen.queryByText(/ChatGPT/u)).toBeNull();
+  });
+
+  it.each([
+    ["unknown identity", "unknown", "chatgpt_web"],
+    ["mismatched identity", "chatgpt", "claude_web"],
+  ])(
+    "does not name an application for %s",
+    async (_label, application, surfaceId) => {
+      const runtime = runtimeWith({
+        type: "status.result",
+        status: {
+          state: "active",
+          application,
+          surfaceId,
+          protectionEnabled: true,
+          recentEventCount: 0,
+        },
+      });
+
+      render(<App runtime={runtime} />);
+
+      expect(
+        await screen.findByText("Protection is unavailable"),
+      ).not.toBeNull();
+      expect(screen.queryByText(/ChatGPT/u)).toBeNull();
+      expect(runtime.sendMessage).toHaveBeenCalledOnce();
+      expect(runtime.sendMessage).toHaveBeenCalledWith({ type: "status.read" });
+    },
+  );
+
+  it("rejects page-derived copy instead of displaying it", async () => {
+    render(
+      <App
+        runtime={runtimeWith({
+          type: "status.result",
+          status: {
+            state: "active",
+            application: "chatgpt",
+            surfaceId: "chatgpt_web",
+            protectionEnabled: true,
+            recentEventCount: 0,
+            title: "Conversation title must not render",
+            url: "https://chatgpt.com/c/private",
+            filename: "private-plan.pdf",
+          },
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("Protection is unavailable")).not.toBeNull();
+    expect(screen.queryByText(/Conversation title/u)).toBeNull();
+    expect(screen.queryByText(/private-plan/u)).toBeNull();
   });
 });

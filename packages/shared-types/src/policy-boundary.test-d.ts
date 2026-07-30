@@ -190,11 +190,21 @@ const rejectedMismatchedDetectorCategoryFinding: PolicyFinding =
 void rejectedMismatchedDetectorCategoryFinding;
 
 const input = {
-  application: "chatgpt",
+  surfaceId: "chatgpt_web",
   attachmentPresent: false,
   findings: [finding],
   policy,
 } satisfies PolicyInput;
+
+const legacyApplicationInput = {
+  application: "chatgpt",
+  attachmentPresent: false,
+  findings: [finding],
+  policy,
+};
+// @ts-expect-error Policy input identity is a closed surface ID, not an application string.
+const rejectedLegacyApplicationInput: PolicyInput = legacyApplicationInput;
+void rejectedLegacyApplicationInput;
 
 const augmentedPolicyFindings = Object.assign([finding], {
   rawPrompt: "secret",

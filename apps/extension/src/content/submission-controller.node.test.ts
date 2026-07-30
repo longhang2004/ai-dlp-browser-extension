@@ -945,7 +945,7 @@ describe("submission controller", () => {
 
     const input = evaluate.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(input).toEqual({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [
         {

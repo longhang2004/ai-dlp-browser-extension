@@ -40,7 +40,7 @@ describe("policy validation", () => {
     const findings = [validFinding];
     const configuration = validatePolicyConfiguration(validPolicy);
     const input = validatePolicyInput({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings,
       policy: validPolicy,
@@ -56,7 +56,7 @@ describe("policy validation", () => {
     expect(configuration).toEqual(validPolicy);
     expect(configuration).not.toBe(validPolicy);
     expect(input).toEqual({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [validFinding],
       policy: validPolicy,
@@ -192,7 +192,7 @@ describe("policy validation", () => {
   ])("rejects forbidden finding metadata %# before evaluation", (extra) => {
     expect(() =>
       validatePolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [{ ...validFinding, ...extra }],
         policy: validPolicy,
@@ -207,21 +207,21 @@ describe("policy validation", () => {
 
   it.each([
     {
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       findings: [validFinding],
     },
     {
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       policy: validPolicy,
     },
     {
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       findings: [validFinding],
       policy: validPolicy,
       prompt: "do not inspect",
     },
     {
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       findings: [validFinding],
       policy: validPolicy,
       unknown: true,
@@ -237,7 +237,7 @@ describe("policy validation", () => {
   it("rejects low-confidence API-secret findings", () => {
     expect(() =>
       validatePolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         findings: [
           {
             id: createFindingId("api-secret", 0, 1),

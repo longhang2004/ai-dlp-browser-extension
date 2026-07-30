@@ -156,7 +156,8 @@ export function createSettingsPortManager(options: {
           expectedGeneration.set(port, initialGeneration);
           statuses.set(port, {
             state: "initializing",
-            application: "chatgpt",
+            application: expectedDescriptor.adapterId,
+            surfaceId: expectedDescriptor.surfaceId,
             protectionEnabled: null,
           });
           void options.storageReady
@@ -176,6 +177,8 @@ export function createSettingsPortManager(options: {
         const protectionEnabled = expectedProtectionEnabled.get(port);
         if (
           !isContentStatusPortMessage(message) ||
+          message.status.application !== expectedDescriptor.adapterId ||
+          message.status.surfaceId !== expectedDescriptor.surfaceId ||
           expectedGeneration.get(port) !== message.generation ||
           lastSentGeneration.get(port) !== message.generation ||
           protectionEnabled === undefined ||
@@ -221,9 +224,12 @@ export function createSettingsPortManager(options: {
       const broadcastGeneration = ++generation;
       for (const port of ports) {
         expectedGeneration.set(port, broadcastGeneration);
+        const currentStatus = statuses.get(port);
+        if (currentStatus === undefined) continue;
         statuses.set(port, {
           state: "initializing",
-          application: "chatgpt",
+          application: currentStatus.application,
+          surfaceId: currentStatus.surfaceId,
           protectionEnabled: null,
         });
       }
@@ -244,15 +250,37 @@ export function createSettingsPortManager(options: {
       if (current.length === 0) {
         return {
           state: "unavailable",
-          application: "chatgpt",
+          application: null,
+          surfaceId: null,
           protectionEnabled: null,
           recentEventCount: count,
         };
       }
+      const first = current[0];
+      if (
+        first === undefined ||
+        current.some(
+          (status) =>
+            status.application !== first.application ||
+            status.surfaceId !== first.surfaceId,
+        )
+      ) {
+        return {
+          state: "initializing",
+          application: null,
+          surfaceId: null,
+          protectionEnabled: null,
+          recentEventCount: count,
+        };
+      }
+      const identity = {
+        application: first.application,
+        surfaceId: first.surfaceId,
+      } as const;
       if (current.some((status) => status.state === "initializing")) {
         return {
           state: "initializing",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: null,
           recentEventCount: count,
         };
@@ -260,7 +288,7 @@ export function createSettingsPortManager(options: {
       if (current.every((status) => status.state === "disabled")) {
         return {
           state: "disabled",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: false,
           recentEventCount: count,
         };
@@ -268,7 +296,7 @@ export function createSettingsPortManager(options: {
       if (current.some((status) => status.state === "disabled")) {
         return {
           state: "initializing",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: null,
           recentEventCount: count,
         };
@@ -276,7 +304,7 @@ export function createSettingsPortManager(options: {
       if (current.some((status) => status.state === "degraded")) {
         return {
           state: "degraded",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: true,
           recentEventCount: count,
         };
@@ -284,14 +312,14 @@ export function createSettingsPortManager(options: {
       if (current.some((status) => status.state === "waiting_for_composer")) {
         return {
           state: "waiting_for_composer",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: true,
           recentEventCount: count,
         };
       }
       return {
         state: "active",
-        application: "chatgpt",
+        ...identity,
         protectionEnabled: true,
         recentEventCount: count,
       };

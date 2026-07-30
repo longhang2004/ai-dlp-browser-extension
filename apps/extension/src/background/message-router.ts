@@ -129,7 +129,8 @@ export function createMessageListener(options: {
             const audit = await options.auditStore.read();
             const status: ProtectionStatusSnapshot = {
               state: "initializing",
-              application: "chatgpt",
+              application: null,
+              surfaceId: null,
               protectionEnabled: null,
               recentEventCount: audit.events.length,
             };

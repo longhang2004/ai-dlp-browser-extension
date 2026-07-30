@@ -70,7 +70,7 @@ export const CHATGPT_ADAPTER_DESCRIPTOR = freezeDescriptor({
     promptRead: "verified",
     attachmentDetection: "verified",
     attachmentInspection: "unsupported",
-    promptReplacement: "verified",
+    promptReplacement: "unsupported",
     submissionResume: "verified",
   },
   entryPoint: "content-script.js",

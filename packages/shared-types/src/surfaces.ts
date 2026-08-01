@@ -11,6 +11,13 @@ export const AI_SURFACE_IDS = Object.freeze([
 
 export type AiSurfaceId = (typeof AI_SURFACE_IDS)[number];
 
+export const CONFIGURABLE_SURFACE_IDS = Object.freeze([
+  "chatgpt_web",
+  "claude_web",
+] as const);
+
+export type ConfigurableSurfaceId = (typeof CONFIGURABLE_SURFACE_IDS)[number];
+
 export const ADAPTER_IDS = Object.freeze(["chatgpt", "claude"] as const);
 
 export type AdapterId = (typeof ADAPTER_IDS)[number];

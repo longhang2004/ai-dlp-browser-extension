@@ -174,7 +174,7 @@ describe("settings ports", () => {
       expect(connected.postMessage).toHaveBeenCalledWith({
         type: "settings.snapshot",
         generation: 0,
-        envelope: expect.objectContaining({ schemaVersion: 2 }),
+        envelope: expect.objectContaining({ schemaVersion: 3 }),
       });
     });
   });
@@ -208,9 +208,13 @@ describe("settings ports", () => {
       type: "settings.snapshot",
       generation: 0,
       envelope: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         settings: {
           protectionEnabled: true,
+          surfaces: [
+            { surfaceId: "chatgpt_web", enabled: true },
+            { surfaceId: "claude_web", enabled: false },
+          ],
           emailAction: "warn",
           phoneAction: "warn",
           attachmentAction: "warn",

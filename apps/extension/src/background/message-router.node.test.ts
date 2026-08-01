@@ -226,6 +226,7 @@ describe("message router", () => {
         type: "error",
         errorCode: "validation_failure",
         fieldErrors: [
+          { field: "surfaces", code: "required" },
           { field: "emailAction", code: "required" },
           { field: "phoneAction", code: "required" },
           { field: "attachmentAction", code: "required" },
@@ -263,7 +264,8 @@ describe("message router", () => {
           `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
         ),
         timestamp: createAuditTimestamp(`2026-07-26T12:00:0${sequence}.000Z`),
-        application: "chatgpt",
+        adapterId: "chatgpt",
+        surfaceId: "chatgpt_web",
         errorCode: "detector_failure",
         adapterVersion: CHATGPT_ADAPTER_VERSION,
       });
@@ -344,7 +346,8 @@ describe("message router", () => {
           `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
         ),
         timestamp: createAuditTimestamp(`2026-07-26T12:00:0${sequence}.000Z`),
-        application: "chatgpt",
+        adapterId: "chatgpt",
+        surfaceId: "chatgpt_web",
         errorCode: "detector_failure",
         adapterVersion: CHATGPT_ADAPTER_VERSION,
       });
@@ -436,6 +439,10 @@ describe("message router", () => {
         type: "settings.save",
         settings: {
           protectionEnabled: true,
+          surfaces: [
+            { surfaceId: "chatgpt_web", enabled: true },
+            { surfaceId: "claude_web", enabled: false },
+          ],
           emailAction: "warn",
           phoneAction: "warn",
           attachmentAction: "warn",
@@ -454,6 +461,10 @@ describe("message router", () => {
         type: "settings.save",
         settings: {
           protectionEnabled: true,
+          surfaces: [
+            { surfaceId: "chatgpt_web", enabled: true },
+            { surfaceId: "claude_web", enabled: false },
+          ],
           emailAction: "block",
           phoneAction: "warn",
           attachmentAction: "warn",
@@ -476,7 +487,8 @@ describe("message router", () => {
       kind: "enforcement_error",
       id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       errorCode: "detector_failure",
       adapterVersion: CHATGPT_ADAPTER_VERSION,
     };
@@ -501,7 +513,8 @@ describe("message router", () => {
       kind: "enforcement_error",
       id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       errorCode: "detector_failure",
       adapterVersion: "2",
     };
@@ -523,7 +536,8 @@ describe("message router", () => {
       kind: "enforcement_error",
       id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       errorCode: "detector_failure",
       adapterVersion: CHATGPT_ADAPTER_VERSION,
     };

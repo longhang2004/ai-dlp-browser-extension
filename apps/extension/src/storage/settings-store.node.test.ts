@@ -14,7 +14,7 @@ describe("settings store", () => {
     auditRetentionLimit: 250,
   } as const;
 
-  it("strictly migrates valid v1 settings to v2, preserves choices, defaults attachments to warn, and persists once", async () => {
+  it("strictly migrates valid v1 settings to v3, preserves choices, defaults attachments to warn, and persists once", async () => {
     const durable = createMemoryStoragePort({
       [SETTINGS_STORAGE_KEY]: {
         schemaVersion: 1,
@@ -30,14 +30,14 @@ describe("settings store", () => {
     });
 
     await expect(store.read()).resolves.toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       settings: {
+        ...createDefaultProtectionSettings(),
         ...validV1Settings,
-        protectedKeywords: ["Project Atlas"],
         attachmentAction: "warn",
       },
     });
-    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 2 });
+    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 3 });
     expect(write).toHaveBeenCalledOnce();
   });
 
@@ -79,7 +79,7 @@ describe("settings store", () => {
       expect(second).toEqual(first);
       expect(write).toHaveBeenCalledOnce();
       expect(write).toHaveBeenCalledWith(SETTINGS_STORAGE_KEY, {
-        schemaVersion: 2,
+        schemaVersion: 3,
         settings: {
           ...createDefaultProtectionSettings(),
           emailAction: "warn",
@@ -103,6 +103,76 @@ describe("settings store", () => {
       fieldErrors: [{ field: "emailAction", code: "invalid_action" }],
     });
     await expect(storage.read(SETTINGS_STORAGE_KEY)).resolves.toBeUndefined();
+  });
+
+  it.each([
+    [
+      [
+        { surfaceId: "chatgpt_web", enabled: true },
+        { surfaceId: "unknown_web", enabled: false },
+      ],
+      "invalid_surface",
+    ],
+    [
+      [
+        { surfaceId: "chatgpt_web", enabled: true },
+        { surfaceId: "chatgpt_web", enabled: true },
+      ],
+      "duplicate_surface",
+    ],
+    [
+      [
+        { surfaceId: "chatgpt_web", enabled: true },
+        { surfaceId: "claude_web", enabled: true },
+      ],
+      "surface_disabled",
+    ],
+  ] as const)("rejects unsafe surface state: %s", async (surfaces, code) => {
+    const store = createSettingsStore(createMemoryStoragePort());
+    await expect(
+      store.save({ ...createDefaultProtectionSettings(), surfaces }),
+    ).resolves.toEqual({
+      ok: false,
+      fieldErrors: [{ field: "surfaces", code }],
+    });
+  });
+
+  it("migrates an exact V2 envelope to V3 once with the reserved surface disabled", async () => {
+    const storage = createMemoryStoragePort({
+      [SETTINGS_STORAGE_KEY]: {
+        schemaVersion: 2,
+        settings: {
+          protectionEnabled: false,
+          emailAction: "allow",
+          phoneAction: "block",
+          attachmentAction: "warn",
+          protectedKeywords: ["Project Atlas"],
+          auditRetentionLimit: 250,
+        },
+      },
+    });
+    const store = createSettingsStore(storage);
+
+    const expected = {
+      ...createDefaultProtectionSettings(),
+      protectionEnabled: false,
+      emailAction: "allow" as const,
+      phoneAction: "block" as const,
+      protectedKeywords: ["Project Atlas"],
+      auditRetentionLimit: 250,
+    };
+    await expect(store.read()).resolves.toEqual({
+      schemaVersion: 3,
+      settings: expected,
+    });
+    await expect(storage.read(SETTINGS_STORAGE_KEY)).resolves.toEqual({
+      schemaVersion: 3,
+      settings: expected,
+    });
+    await expect(store.read()).resolves.toEqual({
+      schemaVersion: 3,
+      settings: expected,
+    });
   });
 
   it("does not touch local storage before trusted-context restriction succeeds", async () => {
@@ -130,16 +200,20 @@ describe("settings store", () => {
     expect(reads).toBe(1);
   });
 
-  it("falls back to independent safe defaults for missing, corrupt, unsupported, and invalid-v2 envelopes", async () => {
+  it("falls back to independent safe defaults for missing, corrupt, unsupported, and invalid legacy envelopes", async () => {
     for (const stored of [
       undefined,
       "corrupt",
-      { schemaVersion: 3, settings: createDefaultProtectionSettings() },
+      { schemaVersion: 4, settings: createDefaultProtectionSettings() },
       {
         schemaVersion: 2,
         settings: {
-          ...createDefaultProtectionSettings(),
+          protectionEnabled: true,
+          emailAction: "warn",
+          phoneAction: "warn",
           attachmentAction: "unsafe",
+          protectedKeywords: [],
+          auditRetentionLimit: 100,
         },
       },
       {
@@ -161,7 +235,7 @@ describe("settings store", () => {
       first.settings.protectedKeywords.push("mutated");
 
       expect(await store.read()).toEqual({
-        schemaVersion: 2,
+        schemaVersion: 3,
         settings: createDefaultProtectionSettings(),
       });
     }
@@ -188,6 +262,10 @@ describe("settings store", () => {
     const store = createSettingsStore(storage);
     const result = await store.save({
       protectionEnabled: true,
+      surfaces: [
+        { surfaceId: "chatgpt_web", enabled: true },
+        { surfaceId: "claude_web", enabled: false },
+      ],
       emailAction: "warn",
       phoneAction: "block",
       attachmentAction: "allow",
@@ -198,8 +276,9 @@ describe("settings store", () => {
     expect(result).toEqual({
       ok: true,
       envelope: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         settings: {
+          ...createDefaultProtectionSettings(),
           protectionEnabled: true,
           emailAction: "warn",
           phoneAction: "block",
@@ -325,7 +404,7 @@ describe("settings store", () => {
     });
 
     await expect(store.read()).rejects.toThrow("fixed read failure");
-    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 2 });
+    await expect(store.read()).resolves.toMatchObject({ schemaVersion: 3 });
     await expect(store.save(createDefaultProtectionSettings())).rejects.toThrow(
       "fixed write failure",
     );

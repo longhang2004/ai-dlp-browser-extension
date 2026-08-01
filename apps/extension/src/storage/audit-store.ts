@@ -27,7 +27,7 @@ export interface AuditStore {
 }
 
 function emptyEnvelope(): StoredAuditEnvelope {
-  return { schemaVersion: 3, events: [] };
+  return { schemaVersion: 4, events: [] };
 }
 
 function isPersistable(event: AuditEvent): boolean {
@@ -76,6 +76,14 @@ function hasExactKeys(
         (required.includes(key) || optional.includes(key)),
     )
   );
+}
+
+function withoutLegacyApplication(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...value };
+  delete result.application;
+  return result;
 }
 
 function isPlainDenseDataArray(
@@ -138,7 +146,7 @@ function sameStrings(left: unknown, right: readonly string[]): boolean {
 
 function migrateLegacyDecision(
   value: Record<string, unknown>,
-  schemaVersion: 1 | 2,
+  schemaVersion: 1 | 2 | 3,
 ): AuditEvent | null {
   const v1Keys = [
     "kind",
@@ -181,7 +189,9 @@ function migrateLegacyDecision(
 
   if (reasonCode === "no_findings") {
     const migrated = {
-      ...value,
+      ...withoutLegacyApplication(value),
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       ...(schemaVersion === 1 ? { reasonCode, attachmentPresent } : {}),
     };
     return isAuditEvent(migrated) ? structuredClone(migrated) : null;
@@ -291,7 +301,9 @@ function migrateLegacyDecision(
     resolution = attachmentContributed ? "attachment_bypassed" : "bypassed";
   }
   const migrated = {
-    ...value,
+    ...withoutLegacyApplication(value),
+    adapterId: "chatgpt",
+    surfaceId: "chatgpt_web",
     detectorCategories: contributingCategories,
     matchedRuleIds,
     findingCount,
@@ -303,13 +315,17 @@ function migrateLegacyDecision(
 
 function migrateLegacyEvent(
   value: unknown,
-  schemaVersion: 1 | 2,
+  schemaVersion: 1 | 2 | 3,
 ): AuditEvent | null {
   if (
     !isPlainDataRecord(value) ||
     (schemaVersion === 1
       ? value.adapterVersion !== "1"
-      : value.adapterVersion !== "1" && value.adapterVersion !== "2") ||
+      : schemaVersion === 2
+        ? value.adapterVersion !== "1" && value.adapterVersion !== "2"
+        : value.adapterVersion !== "1" &&
+          value.adapterVersion !== "2" &&
+          value.adapterVersion !== "3") ||
     value.application !== "chatgpt"
   ) {
     return null;
@@ -324,14 +340,21 @@ function migrateLegacyEvent(
   ) {
     return null;
   }
-  return isAuditEvent(value) ? structuredClone(value) : null;
+  const migrated = {
+    ...withoutLegacyApplication(value),
+    adapterId: "chatgpt",
+    surfaceId: "chatgpt_web",
+  };
+  return isAuditEvent(migrated) ? structuredClone(migrated) : null;
 }
 
 function migrateLegacyEnvelope(value: unknown): StoredAuditEnvelope | null {
   if (
     !isPlainDataRecord(value) ||
     !hasExactKeys(value, ["schemaVersion", "events"]) ||
-    (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
+    (value.schemaVersion !== 1 &&
+      value.schemaVersion !== 2 &&
+      value.schemaVersion !== 3) ||
     !isPlainDenseDataArray(value.events, 1_000)
   ) {
     return null;
@@ -343,7 +366,7 @@ function migrateLegacyEnvelope(value: unknown): StoredAuditEnvelope | null {
       events.push(migrated);
     }
   }
-  return { schemaVersion: 3, events };
+  return { schemaVersion: 4, events };
 }
 
 function sanitizeEnvelope(value: unknown): {
@@ -371,7 +394,7 @@ function sanitizeEnvelope(value: unknown): {
     events.push(structuredClone(candidate));
   }
   return {
-    envelope: { schemaVersion: 3, events },
+    envelope: { schemaVersion: 4, events },
     migrated: migratedEnvelope !== null,
   };
 }
@@ -396,7 +419,7 @@ export function createAuditStore(
         (stored.events.length !== retainedEvents.length ||
           envelope.events.length !== retainedEvents.length));
     const retained: StoredAuditEnvelope = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       events: retainedEvents,
     };
     if (shouldRewrite) {

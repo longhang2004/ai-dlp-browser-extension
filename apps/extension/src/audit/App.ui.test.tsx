@@ -18,7 +18,8 @@ describe("audit App", () => {
       kind: "decision",
       id: createAuditEventId("00000000-0000-4000-8000-000000000010"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:10.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       policyAction: "warn",
       resolution: "bypassed",
       detectorCategories: ["email"],
@@ -32,7 +33,8 @@ describe("audit App", () => {
       kind: "decision",
       id: createAuditEventId("00000000-0000-4000-8000-000000000011"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:11.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       policyAction: "warn",
       resolution: "attachment_bypassed",
       detectorCategories: [],
@@ -45,7 +47,7 @@ describe("audit App", () => {
     const sendMessage = vi.fn().mockResolvedValue({
       type: "audit.result",
       envelope: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         events: [promptBypass, attachmentBypass],
       },
     });
@@ -63,13 +65,14 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 3,
+          schemaVersion: 4,
           events: [
             {
               kind: "enforcement_error",
               id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
               timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-              application: "chatgpt",
+              adapterId: "chatgpt",
+              surfaceId: "chatgpt_web",
               errorCode: "prompt_too_large",
               adapterVersion: CHATGPT_ADAPTER_VERSION,
             },
@@ -114,13 +117,14 @@ describe("audit App", () => {
     const sendMessage = vi.fn().mockResolvedValue({
       type: "audit.result",
       envelope: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         events: [
           {
             kind: "enforcement_error",
             id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
             timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-            application: "chatgpt",
+            adapterId: "chatgpt",
+            surfaceId: "chatgpt_web",
             errorCode: "detector_failure",
             adapterVersion: CHATGPT_ADAPTER_VERSION,
           },
@@ -150,13 +154,14 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 3,
+          schemaVersion: 4,
           events: [
             {
               kind: "enforcement_error",
               id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
               timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-              application: "chatgpt",
+              adapterId: "chatgpt",
+              surfaceId: "chatgpt_web",
               errorCode: "ui_failure",
               adapterVersion: CHATGPT_ADAPTER_VERSION,
             },
@@ -184,13 +189,14 @@ describe("audit App", () => {
       .mockResolvedValueOnce({
         type: "audit.result",
         envelope: {
-          schemaVersion: 3,
+          schemaVersion: 4,
           events: [
             {
               kind: "enforcement_error",
               id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
               timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-              application: "chatgpt",
+              adapterId: "chatgpt",
+              surfaceId: "chatgpt_web",
               errorCode: "policy_failure",
               adapterVersion: CHATGPT_ADAPTER_VERSION,
             },
@@ -236,13 +242,14 @@ describe("audit App", () => {
     const sendMessage = vi.fn().mockResolvedValue({
       type: "audit.result",
       envelope: {
-        schemaVersion: 3,
+        schemaVersion: 4,
         events: [
           {
             kind: "decision",
             id: createAuditEventId("00000000-0000-4000-8000-000000000002"),
             timestamp: createAuditTimestamp("2026-07-26T12:00:01.000Z"),
-            application: "chatgpt",
+            adapterId: "chatgpt",
+            surfaceId: "chatgpt_web",
             policyAction: "warn",
             resolution: "attachment_bypassed",
             detectorCategories: [],

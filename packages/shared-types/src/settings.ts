@@ -16,6 +16,10 @@ import {
   safelyValidate,
   snapshotStructuredValue,
 } from "./validation-helpers.js";
+import {
+  CONFIGURABLE_SURFACE_IDS,
+  type ConfigurableSurfaceId,
+} from "./surfaces.js";
 
 export const CONFIGURABLE_PROTECTION_ACTIONS = Object.freeze([
   "allow",
@@ -26,8 +30,14 @@ export const CONFIGURABLE_PROTECTION_ACTIONS = Object.freeze([
 export type ConfigurableProtectionAction =
   (typeof CONFIGURABLE_PROTECTION_ACTIONS)[number];
 
+export type SurfaceSettings = PromptFreeBoundary & {
+  readonly surfaceId: ConfigurableSurfaceId;
+  readonly enabled: boolean;
+};
+
 export type ProtectionSettings = PromptFreeBoundary & {
   protectionEnabled: boolean;
+  surfaces: PromptFreeArray<SurfaceSettings>;
   emailAction: ConfigurableProtectionAction;
   phoneAction: ConfigurableProtectionAction;
   attachmentAction: ConfigurableProtectionAction;
@@ -36,12 +46,13 @@ export type ProtectionSettings = PromptFreeBoundary & {
 };
 
 export type StoredSettingsEnvelope = PromptFreeBoundary & {
-  schemaVersion: 2;
+  schemaVersion: 3;
   settings: ProtectionSettings;
 };
 
 export type ReadonlyProtectionSettings = PromptFreeBoundary & {
   readonly protectionEnabled: boolean;
+  readonly surfaces: ReadonlyPromptFreeArray<SurfaceSettings>;
   readonly emailAction: ConfigurableProtectionAction;
   readonly phoneAction: ConfigurableProtectionAction;
   readonly attachmentAction: ConfigurableProtectionAction;
@@ -52,6 +63,7 @@ export type ReadonlyProtectionSettings = PromptFreeBoundary & {
 export const SETTINGS_VALIDATION_FIELDS = Object.freeze([
   "settings",
   "protectionEnabled",
+  "surfaces",
   "emailAction",
   "phoneAction",
   "attachmentAction",
@@ -66,6 +78,9 @@ export const SETTINGS_VALIDATION_ERROR_CODES = Object.freeze([
   "required",
   "unknown_field",
   "invalid_type",
+  "invalid_surface",
+  "duplicate_surface",
+  "surface_disabled",
   "invalid_action",
   "invalid_keyword",
   "too_many_keywords",
@@ -85,6 +100,15 @@ export type SettingsValidationError = PromptFreeBoundary &
     | {
         field: "protectionEnabled";
         code: "required" | "invalid_type";
+      }
+    | {
+        field: "surfaces";
+        code:
+          | "required"
+          | "invalid_type"
+          | "invalid_surface"
+          | "duplicate_surface"
+          | "surface_disabled";
       }
     | {
         field: "emailAction" | "phoneAction" | "attachmentAction";
@@ -108,6 +132,10 @@ export type SettingsValidationError = PromptFreeBoundary &
 export const DEFAULT_PROTECTION_SETTINGS: ReadonlyProtectionSettings =
   Object.freeze({
     protectionEnabled: true,
+    surfaces: Object.freeze([
+      Object.freeze({ surfaceId: "chatgpt_web", enabled: true }),
+      Object.freeze({ surfaceId: "claude_web", enabled: false }),
+    ]),
     emailAction: "warn",
     phoneAction: "warn",
     attachmentAction: "warn",
@@ -136,6 +164,41 @@ function hasUniqueProtectedKeywords(keywords: readonly string[]): boolean {
   return true;
 }
 
+function isSurfaceSettingSnapshot(value: unknown): value is SurfaceSettings {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactOwnKeys(value, ["surfaceId", "enabled"]) ||
+    typeof value.surfaceId !== "string" ||
+    !CONFIGURABLE_SURFACE_IDS.includes(
+      value.surfaceId as ConfigurableSurfaceId,
+    ) ||
+    typeof value.enabled !== "boolean"
+  ) {
+    return false;
+  }
+  return value.surfaceId !== "claude_web" || value.enabled === false;
+}
+
+export function isSurfaceSettingsSnapshot(
+  value: unknown,
+): value is SurfaceSettings[] {
+  if (
+    !isDenseExactArray(
+      value,
+      CONFIGURABLE_SURFACE_IDS.length,
+      CONFIGURABLE_SURFACE_IDS.length,
+      isSurfaceSettingSnapshot,
+    )
+  ) {
+    return false;
+  }
+  return value.every(
+    (surface, index) =>
+      surface.surfaceId === CONFIGURABLE_SURFACE_IDS[index] &&
+      (surface.surfaceId !== "claude_web" || surface.enabled === false),
+  );
+}
+
 export function isProtectionSettingsSnapshot(
   value: unknown,
 ): value is ProtectionSettings {
@@ -144,6 +207,7 @@ export function isProtectionSettingsSnapshot(
       !isPlainRecord(value) ||
       !hasExactOwnKeys(value, [
         "protectionEnabled",
+        "surfaces",
         "emailAction",
         "phoneAction",
         "attachmentAction",
@@ -151,6 +215,7 @@ export function isProtectionSettingsSnapshot(
         "auditRetentionLimit",
       ]) ||
       typeof value.protectionEnabled !== "boolean" ||
+      !isSurfaceSettingsSnapshot(value.surfaces) ||
       typeof value.emailAction !== "string" ||
       !CONFIGURABLE_PROTECTION_ACTIONS.includes(
         value.emailAction as ConfigurableProtectionAction,
@@ -193,12 +258,23 @@ export function cloneProtectionSettings(
 
   return {
     protectionEnabled: snapshot.protectionEnabled,
+    surfaces: snapshot.surfaces.map((surface) => ({
+      surfaceId: surface.surfaceId,
+      enabled: surface.enabled,
+    })),
     emailAction: snapshot.emailAction,
     phoneAction: snapshot.phoneAction,
     attachmentAction: snapshot.attachmentAction,
     protectedKeywords: [...snapshot.protectedKeywords],
     auditRetentionLimit: snapshot.auditRetentionLimit,
   };
+}
+
+export function createDefaultSurfaceSettings(): SurfaceSettings[] {
+  return DEFAULT_PROTECTION_SETTINGS.surfaces.map((surface) => ({
+    surfaceId: surface.surfaceId,
+    enabled: surface.enabled,
+  }));
 }
 
 export function createDefaultProtectionSettings(): ProtectionSettings {

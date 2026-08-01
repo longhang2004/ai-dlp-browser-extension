@@ -339,14 +339,16 @@ test("policy revision invalidates stale bypass and preserves catalog-correlated 
     type: string;
     envelope: {
       events: Array<{
-        application?: unknown;
+        adapterId?: unknown;
+        surfaceId?: unknown;
         adapterVersion?: unknown;
       }>;
     };
   };
   expect(audit.envelope.events.length).toBeGreaterThan(0);
   for (const event of audit.envelope.events) {
-    expect(event.application).toBe("chatgpt");
+    expect(event.adapterId).toBe("chatgpt");
+    expect(event.surfaceId).toBe("chatgpt_web");
     expect(event.adapterVersion).toBe("3");
   }
   expect(JSON.stringify(audit.envelope.events)).not.toContain(

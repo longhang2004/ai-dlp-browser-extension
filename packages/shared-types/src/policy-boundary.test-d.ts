@@ -743,7 +743,8 @@ const rejectedValidationErrorWithAugmentedErrors: RuntimeErrorResponse =
 const auditBase = {
   id: createAuditEventId("00000000-0000-4000-8000-000000000010"),
   timestamp: createAuditTimestamp("2026-07-26T12:00:10.000Z"),
-  application: "chatgpt" as const,
+  adapterId: "chatgpt" as const,
+  surfaceId: "chatgpt_web" as const,
   adapterVersion: CHATGPT_ADAPTER_VERSION,
 };
 

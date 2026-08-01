@@ -4,6 +4,7 @@ import {
   type ConfigurableProtectionAction,
   type ProtectionSettings,
   type SettingsValidationError,
+  type SurfaceSettings,
 } from "@ai-dlp/shared-types";
 import { useEffect, useState, type FormEvent } from "react";
 
@@ -15,6 +16,7 @@ import {
 
 type FormState = {
   protectionEnabled: boolean;
+  surfaces: SurfaceSettings[];
   emailAction: ConfigurableProtectionAction;
   phoneAction: ConfigurableProtectionAction;
   attachmentAction: ConfigurableProtectionAction;
@@ -25,6 +27,7 @@ type FormState = {
 const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
   settings: "Settings could not be validated.",
   protectionEnabled: "Protection state is invalid.",
+  surfaces: "Surface settings are invalid.",
   emailAction: "Email action is invalid.",
   phoneAction: "Phone action is invalid.",
   attachmentAction: "Attachment action is invalid.",
@@ -35,6 +38,7 @@ const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
 function toFormState(settings: ProtectionSettings): FormState {
   return {
     protectionEnabled: settings.protectionEnabled,
+    surfaces: settings.surfaces.map((surface) => ({ ...surface })),
     emailAction: settings.emailAction,
     phoneAction: settings.phoneAction,
     attachmentAction: settings.attachmentAction,
@@ -55,6 +59,7 @@ function createSettings(form: FormState): ProtectionSettings | undefined {
   if (!Number.isSafeInteger(auditRetentionLimit)) return undefined;
   return {
     protectionEnabled: form.protectionEnabled,
+    surfaces: form.surfaces.map((surface) => ({ ...surface })),
     emailAction: form.emailAction,
     phoneAction: form.phoneAction,
     attachmentAction: form.attachmentAction,
@@ -250,6 +255,10 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
                 }
               />
             </label>
+          </section>
+          <section className="card">
+            <h2>Claude web</h2>
+            <p>Claude support is not installed in this release.</p>
           </section>
           <div className="form-footer">
             <button className="button primary" type="submit" disabled={saving}>

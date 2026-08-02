@@ -34,18 +34,22 @@ browser storage exports.
    digest command must first accept the downloaded artifact's reachability
    graph. Keep all three artifacts bound to the same reviewed commit. Do not use
    a later local build for authenticated QA.
-4. Load the downloaded artifact unpacked in Microsoft Edge 102+.
+4. For Milestone 1 ChatGPT checks, load the downloaded artifact unpacked in
+   Microsoft Edge 102+; the static ChatGPT entry requires no optional grant.
+   M2.2 Claude checks require the exact optional `scripting` plus
+   `https://claude.ai:443/*` pair from an explicit options-page action.
 5. Open the popup on `https://chatgpt.com`. Do not rely on enforcement unless it
    says **Protection is active** for the composer and semantic Send control
    being tested. `initializing`, `waiting_for_composer`, `degraded`, and
-   `unavailable` are not active.
+   `unavailable` are not active. This checklist records no authenticated Claude
+   acceptance; that evidence belongs to the exact CI artifact and PR metadata.
 6. Use a dedicated test conversation with no production or customer data.
 7. Record no prompt content, uploaded-file names, preview text, page HTML,
    storage dumps, or sensitive screenshots.
 
-## Automated production-build checks — reviewed on 2026-07-29
+## Historical Milestone 1 automated checks — Audit V3 era, reviewed on 2026-07-29
 
-The hardening verification completed against reviewed commit
+The Milestone 1 hardening verification completed against reviewed commit
 `806cdf0d7d95d07592e0b51415d7cf96fc800f07`.
 
 - 745 Vitest unit, DOM, type-boundary, storage-migration, policy, controller,
@@ -57,6 +61,10 @@ The hardening verification completed against reviewed commit
   `e72b6385d20f1afe626c60084d93902f4c6ff1af873dd2483cfe5144231368a7`.
 - Artifact verification classified 43 reviewed URL literals with no fetching or
   unreviewed URL.
+
+These 12-file results belong to the ChatGPT-only M1/Audit V3 history. M2.1
+introduced the current Audit V4 envelope and is documented as the historical
+12-file rollback baseline; they are not M2.2 Claude-candidate evidence.
 
 The Playwright suite routes ChatGPT to local fixture HTML and blocks every other
 HTTP(S) request.
@@ -79,11 +87,42 @@ behavior, DOM order and selector-priority reversal, stale and hidden candidates,
 separate composer roots, immediate `ambiguous_submission_context` health, and
 prompt-free transitions, messages, errors, audit, and logs.
 
-## Current Part A authenticated Edge attempt — 2026-07-29
+## Provisional M2.2 automated candidate evidence — post-P4-08 local run (2026-08-03)
 
-This attempt used the exact reviewed Part A artifact and privacy-safe synthetic
-fixtures. It recorded no screenshots, prompt excerpts, matched values,
-filenames, page HTML, storage dumps, or page-derived metadata.
+The latest local corrective-candidate gate is provisional and is not bound to a
+final commit or CI artifact. Format, lint, typecheck, and performance checks
+passed. The unit/node/dom suites reported 932 Vitest tests, and the artifact
+scripts reported 21 TAP tests. The generated candidate artifact contained 13
+manifest/registration-reachable files and 76 reviewed URL literals; its
+provisional canonical digest was
+`7964a320c28b275eb16fa99926cda6078639592d155f3eaedbb647a956decede`.
+
+Workspace snapshot: 2026-08-03 (Asia/Ho_Chi_Minh), source SHA
+`f7cf16a73613f3a7e15250c29e8025e2b75f479a` (local HEAD before documentation
+edits). This identifies the workspace snapshot only, not an asserted artifact
+build timestamp or a post-edit source tree.
+
+The local evidence date is based on the filesystem and report metadata: the
+Playwright `trace.zip`/`error-context.md` artifacts have 2026-08-03
+Asia/Ho_Chi_Minh timestamps, and `artifacts/verification/url-report.json`
+reports `generatedAt` `2026-08-02T18:00:06.386Z` (2026-08-03 01:00:06.386
+Asia/Ho_Chi_Minh). These timestamps date the local evidence only; they do not
+bind it to a CI artifact or authenticated acceptance.
+
+The 16 Playwright E2E launches failed only because the restricted sandbox could
+not launch Chromium (`EPERM`/`SIGABRT`); they are not scenario passes. The
+artifact-independent permission proof remains limited to the exact browser
+versions and pattern recorded in
+[the browser proof](milestone-2/browser-permission-proof.md). No authenticated
+Claude submission, prompt read, attachment-presence, or resume acceptance has
+been recorded. Use the exact post-E2E CI artifact, digest, and source archive
+from PR metadata for any later authenticated QA.
+
+## Historical M1 Audit V3 authenticated Edge attempt — 2026-07-29
+
+This M1 Audit V3 attempt used the exact reviewed Part A artifact and
+privacy-safe synthetic fixtures. It recorded no screenshots, prompt excerpts,
+matched values, filenames, page HTML, storage dumps, or page-derived metadata.
 
 | Field                                      | Recorded value                                                                                                                       |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -123,6 +162,10 @@ All unavailable authenticated items passed their corresponding automated
 production-build, unit, or DOM tests. They remain limitations rather than being
 reported as live passes.
 
+No authenticated Claude submission or resume has been performed. Claude's
+synthetic DOM tests, artifact-independent permission proof, and fail-safe E2E
+fixture do not establish authenticated application-state acceptance.
+
 ## Interactive current-ChatGPT checklist
 
 Record each item as `pass`, `fail`, or `unavailable`, with the exact Edge and
@@ -159,8 +202,9 @@ extension versions and the execution date/timezone.
   not `attachment_bypassed`.
 - A strict text block combined with an attachment remains blocked and exposes no
   bypass.
-- Adding, removing, replacing, or mutating attachment evidence while approval is
-  pending invalidates that approval.
+- Adding, removing, replacing, changing attributes on, or changing direct or
+  nested text inside attachment evidence while approval is pending invalidates
+  that approval; unrelated and out-of-region text does not.
 - Replacing the composer, region, or Send control; SPA navigation; dialog
   replacement; expiry; duplicate consumption; or resume failure cannot reuse
   approval.
@@ -173,12 +217,12 @@ extension versions and the execution date/timezone.
 - The dialog's open Shadow root is inspectable and keyboard focus remains
   contained.
 
-## Historical reviewed-build authenticated Edge result — 2026-07-29
+## Historical pre-M1 Audit V3 authenticated Edge result — 2026-07-29
 
-This record predates the enforcement-revision, contributor-only audit V3, and
+This record predates the M1 Audit V3 enforcement revision, M2.1 Audit V4, and
 artifact-source-archive hardening. It is retained as historical live-DOM
 evidence only; use the preconditions and current interactive checklist for
-authenticated QA of the current build.
+authenticated QA of a reviewed artifact.
 
 ### Build and environment identity
 

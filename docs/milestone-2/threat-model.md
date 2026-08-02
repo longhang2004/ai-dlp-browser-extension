@@ -4,6 +4,8 @@ This document extends the base [PromptGuard threat model](../threat-model.md)
 for exact-origin optional permissions, a packaged adapter catalog, and one
 candidate Claude adapter. The browser page and DOM remain untrusted. Trust and
 capabilities come only from reviewed packaged descriptors and current evidence.
+The design package remains proposed; this repository records no approved-design
+provenance or authenticated production-acceptance decision.
 
 ## Security invariants
 
@@ -11,8 +13,10 @@ capabilities come only from reviewed packaged descriptors and current evidence.
   adapter are active per document.
 - Adapter ID, surface ID, version, origin, trust, capabilities, and sender are
   validated as one immutable catalog relationship.
-- Only an enabled surface with both effective optional grants and a valid
-  verified content port can be waiting, active, or degraded.
+- The static ChatGPT entry can be enabled and active without optional grants.
+  The dynamic Claude candidate requires both effective optional grants and a
+  valid catalog-correlated content port before it can be waiting, active, or
+  degraded.
 - Unknown, ambiguous, stale, unpermitted, or drifted state stops captured
   attempts and never claims active protection.
 - Selectors and resume behavior remain application-owned; no remote or managed
@@ -22,9 +26,9 @@ capabilities come only from reviewed packaged descriptors and current evidence.
 
 Chrome's official
 [match-pattern documentation](https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns)
-documents explicit ports and wildcard behavior when omitted. M2.2 proposes
-`https://claude.ai:443/*`, subject to supported-browser proof across the MV3
-declaration, permission APIs, registration, and port-matching fixtures. A
+documents explicit ports and wildcard behavior when omitted. The M2.2 candidate
+uses `https://claude.ai:443/*`, subject to supported-browser proof across the
+MV3 declaration, permission APIs, registration, and port-matching fixtures. A
 recorded concrete rejection is required before explicitly proposing the
 exact-host/wildcard-port `https://claude.ai/*` fallback. The bootstrap's first
 executable guard still checks serialized
@@ -311,14 +315,18 @@ access and exits otherwise; background sender validation repeats the check.
 - **Required invariant:** presence derives only from approved structural
   evidence in the exact submission region; fingerprint contains no content or
   metadata.
-- **Detection:** scoped collectors, identity/mutation versioning, and pre-resume
-  presence/fingerprint comparison.
+- **Detection:** target-anchored scoped collectors, identity/mutation
+  versioning, and pre-resume presence/fingerprint comparison. The observer
+  covers five mutation classes: evidence add, evidence removal, evidence
+  replacement, attribute changes, and direct or nested evidence-text changes;
+  unrelated or out-of-region text does not rotate the fingerprint.
 - **Fail-safe behavior:** descriptor capability support remains immutable;
   ambiguity invalidates bypass and stops the captured attempt. Only a
   still-connected, catalog-validated verified runtime transitions to
   `adapter_degraded` with a fixed health code; otherwise report
   `adapter_unsupported` or transport `unavailable`.
-- **Tests:** inside/outside nested form, dormant file input, add/remove/replace,
+- **Tests:** target-anchored ownership inside/outside a nested form, dormant
+  file input, add/remove/replace evidence, attribute and direct/nested
   character-data mutation, preview-like external node, and metadata non-reading.
 - **Residual risk:** vendor-managed attachment state not represented in
   observable DOM remains uninspectable; attachment inspection is explicitly
@@ -331,12 +339,13 @@ access and exits otherwise; background sender validation repeats the check.
 - **Security boundary:** DOM context resolution to the user's intended attempt.
 - **Required invariant:** one visible connected composer, one owned Send
   control, one region, and one stable context identity/version bind the attempt.
-- **Detection:** shared owner collector, focus/event path,
-  connection/visibility, and synchronous exact-context re-resolution.
+- **Detection:** submit-target-anchored shared owner collector, semantic-region
+  ancestor walk, focus/event path, connection/visibility, and synchronous
+  exact-context re-resolution.
 - **Fail-safe behavior:** capture no ambiguous context or stop an already
   captured attempt; never choose by DOM order, selector priority, or element ID.
-- **Tests:** two roots, hidden/stale composer, replaced composer, cross-region
-  Send, focus change, and wrong identity/version.
+- **Tests:** two roots, nested-region ownership, hidden/stale composer, replaced
+  composer, cross-region Send, focus change, and wrong identity/version.
 - **Residual risk:** vendor semantics can hide ownership not expressible in the
   DOM; such variants remain unsupported.
 
@@ -345,8 +354,8 @@ access and exits otherwise; background sender validation repeats the check.
 - **Entry point:** one Send candidate associated with multiple usable composers.
 - **Security boundary:** Send-control resolution to context ownership.
 - **Required invariant:** a Send control has exactly one usable composer owner.
-- **Detection:** one deduplicating collector classifies ownership as none,
-  unique, or ambiguous.
+- **Detection:** one submit-target-anchored, deduplicating collector classifies
+  ownership as none, unique, or ambiguous without choosing by DOM order.
 - **Fail-safe behavior:** synchronously stop the candidate attempt, emit one
   fixed health transition, and expose no bypass.
 - **Tests:** shared Send/two composers, duplicate selector matches for one
@@ -360,12 +369,14 @@ access and exits otherwise; background sender validation repeats the check.
 - **Security boundary:** content runtime/storage to trusted audit store/UI.
 - **Required invariant:** audit identity is derived from the validated port's
   catalog descriptor, not accepted as an independent page claim.
-- **Detection:** exact V4 event validation and sender/descriptor correlation;
-  conservative V3 migration.
+- **Detection:** exact V4 event validation and sender/descriptor correlation; M1
+  Audit V3 records migrate conservatively to M2.1's V4 envelope only when
+  catalog-owned ChatGPT identity and contributors are provable.
 - **Fail-safe behavior:** reject append or discard unprovable migrated record
   without inventing identity.
 - **Tests:** claimed Claude from ChatGPT, wrong version/surface, unknown ID,
-  mismatched port, extra fields, and valid ChatGPT V3 migration.
+  mismatched port, extra fields, valid M1 ChatGPT V3 migration, and current
+  Claude-candidate V4 identity.
 - **Residual risk:** a compromised trusted extension context remains trusted by
   the browser security model.
 
@@ -393,11 +404,13 @@ access and exits otherwise; background sender validation repeats the check.
 - **Required invariant:** every executable file is manifest/registration
   reachable and each per-origin entry contains only its adapter selectors.
 - **Detection:** manifest-rooted reachability, orphan rejection, URL allowlist,
-  import/literal scan, exact IIFE roots, and selector-isolation checks.
+  import/literal scan, exact IIFE roots, selector-isolation checks, and CI
+  ordering that runs browser tests before the final artifact verification and
+  canonical digest.
 - **Fail-safe behavior:** fail build verification and digest generation.
 - **Tests:** orphan adapter bundle, cross-adapter import, extra content entry,
-  unapproved URL literal, source map, dynamic import, and missing registered
-  file.
+  unapproved URL literal, source map, dynamic import, missing registered file,
+  and post-E2E upload/digest identity.
 - **Residual risk:** minified semantic equivalence cannot be perfectly
   classified; source review and entry-specific fixture tests supplement scans.
 

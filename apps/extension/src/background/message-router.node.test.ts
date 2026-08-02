@@ -59,6 +59,47 @@ function setup(storageReady: Promise<void> = Promise.resolve()) {
 }
 
 describe("message router", () => {
+  it("allows Claude removal only from extension pages and delegates to background ownership", async () => {
+    const storage = createMemoryStoragePort();
+    const settingsStore = createSettingsStore(storage);
+    const auditStore = createAuditStore(storage, settingsStore);
+    const removeClaudeAccess = vi.fn().mockResolvedValue(true);
+    const listener = createMessageListener({
+      runtimeId,
+      storageReady: Promise.resolve(),
+      settingsStore,
+      auditStore,
+      broadcastSettings: vi.fn(),
+      removeClaudeAccess,
+    });
+
+    await expect(
+      invoke(listener, { type: "permissions.claude.remove" }),
+    ).resolves.toEqual({
+      returned: true,
+      response: { type: "permissions.claude.removed", removed: true },
+    });
+    expect(removeClaudeAccess).toHaveBeenCalledOnce();
+
+    await expect(
+      invoke(listener, { type: "permissions.claude.remove" }, contentSender),
+    ).resolves.toEqual({
+      returned: true,
+      response: { type: "error", errorCode: "invalid_sender" },
+    });
+    expect(removeClaudeAccess).toHaveBeenCalledOnce();
+  });
+
+  it("returns a fixed negative result when Claude permission ownership is unavailable", async () => {
+    const { listener } = setup();
+    await expect(
+      invoke(listener, { type: "permissions.claude.remove" }),
+    ).resolves.toEqual({
+      returned: true,
+      response: { type: "permissions.claude.removed", removed: false },
+    });
+  });
+
   it("is non-async, returns literal true, and waits for trusted storage", async () => {
     let release = (): void => undefined;
     const ready = new Promise<void>((resolve) => {

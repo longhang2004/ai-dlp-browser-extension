@@ -12,7 +12,7 @@ import {
   type PermissionApi,
   type PermissionScope,
 } from "@ai-dlp/shared-types/permissions";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
   getInstalledPageRuntime,
@@ -30,6 +30,12 @@ type FormState = {
   auditRetentionLimit: string;
 };
 
+type ClaudePermissionState = {
+  host: boolean;
+  named: boolean;
+  joint: boolean;
+};
+
 const CLAUDE_HOST_SCOPE: PermissionScope = {
   permissions: [],
   origins: [CLAUDE_HOST_PERMISSION_PATTERN],
@@ -38,6 +44,43 @@ const CLAUDE_NAMED_SCOPE: PermissionScope = {
   permissions: ["scripting"],
   origins: [],
 };
+
+async function readClaudePermissionState(
+  permissions: PermissionApi,
+): Promise<ClaudePermissionState> {
+  const [host, named, joint] = await Promise.all([
+    permissions.contains(CLAUDE_HOST_SCOPE),
+    permissions.contains(CLAUDE_NAMED_SCOPE),
+    permissions.contains(CLAUDE_PERMISSION_SCOPE),
+  ]);
+  return { host, named, joint };
+}
+
+function mergePermissionDerivedFields(
+  persisted: FormState,
+  current: FormState,
+  permissions: ClaudePermissionState | null,
+): FormState {
+  const currentClaudeEnabled =
+    current.surfaces.find((surface) => surface.surfaceId === "claude_web")
+      ?.enabled ?? false;
+  const accessIsGranted =
+    permissions !== null &&
+    permissions.joint &&
+    permissions.host &&
+    permissions.named;
+  return {
+    ...persisted,
+    surfaces: persisted.surfaces.map((surface) =>
+      surface.surfaceId === "claude_web"
+        ? {
+            ...surface,
+            enabled: accessIsGranted ? currentClaudeEnabled : false,
+          }
+        : surface,
+    ),
+  };
+}
 
 const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
   settings: "Settings could not be validated.",
@@ -88,12 +131,32 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
   const [claudePermissions, setClaudePermissions] = useState<{
     host: boolean;
     named: boolean;
+    joint: boolean;
   } | null>(null);
   const [notice, setNotice] = useState("Loading validated settings…");
   const [saving, setSaving] = useState(false);
+  const mountedRef = useRef(false);
+  const permissionEpochRef = useRef(0);
+  const claudePermissionsRef = useRef<ClaudePermissionState | null>(null);
+
+  function commitClaudePermissions(next: ClaudePermissionState | null): void {
+    claudePermissionsRef.current = next;
+    setClaudePermissions(next);
+  }
+
+  function beginPermissionEpoch(): number {
+    permissionEpochRef.current += 1;
+    return permissionEpochRef.current;
+  }
+
+  function canCommitPermissionEpoch(epoch: number): boolean {
+    return mountedRef.current && permissionEpochRef.current === epoch;
+  }
 
   useEffect(() => {
     let current = true;
+    mountedRef.current = true;
+    beginPermissionEpoch();
     const pageRuntime = runtime ?? getInstalledPageRuntime();
     void Promise.resolve()
       .then(() =>
@@ -116,25 +179,50 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
         },
       );
     const permissions = pageRuntime.permissions;
-    if (permissions === undefined) {
-      void Promise.resolve().then(() => {
-        if (current) setClaudePermissions(null);
-      });
-    } else {
-      void Promise.all([
-        permissions.contains(CLAUDE_HOST_SCOPE),
-        permissions.contains(CLAUDE_NAMED_SCOPE),
-      ]).then(
-        ([host, named]) => {
-          if (current) setClaudePermissions({ host, named });
+    const refreshPermissions = (): void => {
+      const epoch = beginPermissionEpoch();
+      // Close the gate synchronously while the live permission read is in
+      // flight. A stale save completion must not re-enable Claude in this
+      // interval.
+      commitClaudePermissions(null);
+      if (permissions === undefined) {
+        if (current && canCommitPermissionEpoch(epoch)) {
+          commitClaudePermissions(null);
+        }
+        return;
+      }
+      void readClaudePermissionState(permissions).then(
+        (state) => {
+          if (current && canCommitPermissionEpoch(epoch)) {
+            commitClaudePermissions(state);
+          }
         },
         () => {
-          if (current) setClaudePermissions({ host: false, named: false });
+          if (current && canCommitPermissionEpoch(epoch)) {
+            commitClaudePermissions(null);
+          }
         },
       );
+    };
+    refreshPermissions();
+    if (permissions !== undefined) {
+      const handlePermissionChange = (): void => {
+        refreshPermissions();
+      };
+      permissions.onAdded.addListener(handlePermissionChange);
+      permissions.onRemoved.addListener(handlePermissionChange);
+      return () => {
+        current = false;
+        mountedRef.current = false;
+        beginPermissionEpoch();
+        permissions.onAdded.removeListener(handlePermissionChange);
+        permissions.onRemoved.removeListener(handlePermissionChange);
+      };
     }
     return () => {
       current = false;
+      mountedRef.current = false;
+      beginPermissionEpoch();
     };
   }, [runtime]);
 
@@ -145,36 +233,70 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
     );
   }
 
-  function setClaudeEnabled(enabled: boolean): void {
-    if (form === null) return;
-    setForm({
-      ...form,
-      surfaces: form.surfaces.map((surface) =>
-        surface.surfaceId === "claude_web" ? { ...surface, enabled } : surface,
-      ),
+  function setClaudeEnabled(enabled: boolean, epoch?: number): void {
+    setForm((current) => {
+      if (
+        current === null ||
+        (epoch !== undefined && !canCommitPermissionEpoch(epoch))
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        surfaces: current.surfaces.map((surface) =>
+          surface.surfaceId === "claude_web"
+            ? { ...surface, enabled }
+            : surface,
+        ),
+      };
     });
   }
 
   async function requestClaudeAccess(): Promise<void> {
+    const epoch = beginPermissionEpoch();
+    commitClaudePermissions(null);
     const pageRuntime = runtime ?? getInstalledPageRuntime();
     const permissions: PermissionApi | undefined = pageRuntime.permissions;
     if (permissions === undefined) return;
-    const granted = await permissions.request(CLAUDE_PERMISSION_SCOPE);
-    if (granted) {
-      setClaudePermissions({ host: true, named: true });
-    } else {
-      setClaudePermissions({ host: false, named: false });
+    try {
+      await permissions.request(CLAUDE_PERMISSION_SCOPE);
+    } catch {
+      // The follow-up live query below is authoritative after a denied/error.
+    }
+    try {
+      const state = await readClaudePermissionState(permissions);
+      if (canCommitPermissionEpoch(epoch)) commitClaudePermissions(state);
+    } catch {
+      if (canCommitPermissionEpoch(epoch)) commitClaudePermissions(null);
     }
   }
 
   async function removeClaudeAccess(): Promise<void> {
+    const epoch = beginPermissionEpoch();
+    commitClaudePermissions(null);
     const pageRuntime = runtime ?? getInstalledPageRuntime();
     const permissions = pageRuntime.permissions;
     if (permissions === undefined) return;
-    await permissions.remove(CLAUDE_HOST_SCOPE);
-    await permissions.remove(CLAUDE_NAMED_SCOPE);
-    setClaudePermissions({ host: false, named: false });
-    setClaudeEnabled(false);
+    let responseRemoved = false;
+    try {
+      const response = await sendPageRequest(pageRuntime, {
+        type: "permissions.claude.remove",
+      });
+      responseRemoved =
+        response.type === "permissions.claude.removed" && response.removed;
+    } catch {
+      // Keep showing the live permission state when transport/validation fails.
+    }
+    try {
+      const state = await readClaudePermissionState(permissions);
+      if (!canCommitPermissionEpoch(epoch)) return;
+      commitClaudePermissions(state);
+      if (responseRemoved && !state.host && !state.named) {
+        setClaudeEnabled(false, epoch);
+      }
+    } catch {
+      if (canCommitPermissionEpoch(epoch)) commitClaudePermissions(null);
+    }
   }
 
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -185,6 +307,7 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
       setNotice("Settings could not be validated.");
       return;
     }
+    const savePermissionEpoch = permissionEpochRef.current;
     setSaving(true);
     setNotice("");
     try {
@@ -192,8 +315,18 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
         runtime ?? getInstalledPageRuntime(),
         { type: "settings.save", settings },
       );
+      if (!mountedRef.current) return;
       if (response.type === "settings.saved") {
-        setForm(toFormState(response.envelope.settings));
+        const persisted = toFormState(response.envelope.settings);
+        setForm((current) =>
+          current === null || permissionEpochRef.current === savePermissionEpoch
+            ? persisted
+            : mergePermissionDerivedFields(
+                persisted,
+                current,
+                claudePermissionsRef.current,
+              ),
+        );
         setNotice("Settings saved.");
       } else if (
         response.type === "error" &&
@@ -209,9 +342,9 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
         setNotice("Settings could not be saved.");
       }
     } catch {
-      setNotice("Settings could not be saved.");
+      if (mountedRef.current) setNotice("Settings could not be saved.");
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }
 
@@ -344,9 +477,15 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
               Origin: <code>{CLAUDE_HOST_PERMISSION_PATTERN}</code>
             </p>
             <p role="status">
-              {claudePermissions?.host && claudePermissions.named
-                ? "Claude access is granted."
-                : "Claude access is not granted."}
+              {claudePermissions === null
+                ? "Access status is unavailable."
+                : claudePermissions.joint &&
+                    claudePermissions.host &&
+                    claudePermissions.named
+                  ? "Access is granted."
+                  : claudePermissions.host || claudePermissions.named
+                    ? "Access is partially granted."
+                    : "Access is not granted."}
             </p>
             <div className="page-actions">
               <button
@@ -359,7 +498,10 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
               <button
                 className="button secondary"
                 type="button"
-                disabled={!claudePermissions?.host && !claudePermissions?.named}
+                disabled={
+                  claudePermissions === null ||
+                  (!claudePermissions.host && !claudePermissions.named)
+                }
                 onClick={() => void removeClaudeAccess()}
               >
                 Remove Claude access
@@ -369,7 +511,11 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
               <input
                 type="checkbox"
                 checked={claudeEnabled()}
-                disabled={!claudePermissions?.host || !claudePermissions?.named}
+                disabled={
+                  !claudePermissions?.joint ||
+                  !claudePermissions.host ||
+                  !claudePermissions.named
+                }
                 onChange={(event) => setClaudeEnabled(event.target.checked)}
               />
               Enable Claude protection

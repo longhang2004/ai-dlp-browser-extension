@@ -34,6 +34,7 @@ export function createMessageListener(options: {
   readStatus?: () => Promise<ProtectionStatusSnapshot>;
   isContentRuntimeAllowed?: (descriptor: AdapterDescriptor) => boolean;
   onSettingsSaved?: () => void;
+  removeClaudeAccess?: () => Promise<boolean>;
 }): RuntimeMessageListener {
   let pendingSettingsSave: Promise<void> = Promise.resolve();
 
@@ -131,6 +132,15 @@ export function createMessageListener(options: {
           case "audit.clear":
             await options.auditStore.clear();
             return { type: "audit.cleared" };
+          case "permissions.claude.remove": {
+            let removed = false;
+            try {
+              removed = (await options.removeClaudeAccess?.()) ?? false;
+            } catch {
+              // Permission cleanup is best effort; report the fixed live result.
+            }
+            return { type: "permissions.claude.removed", removed };
+          }
           case "status.read": {
             if (options.readStatus !== undefined) {
               return {

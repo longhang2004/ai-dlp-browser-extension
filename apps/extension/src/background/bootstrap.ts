@@ -77,15 +77,16 @@ export function bootstrapBackground(
           },
         ];
       },
+      onReconciled(snapshot) {
+        claudeRuntimeAllowed = snapshot.registration === "registered";
+      },
       invalidateSurface() {
         claudeRuntimeAllowed = false;
         disconnectSurface("claude_web");
       },
     });
     reconcileClaude = () => {
-      registrationManager?.reconcile().then((snapshot) => {
-        claudeRuntimeAllowed = snapshot.registration === "registered";
-      });
+      void registrationManager?.reconcile();
     };
   }
   const settingsPorts = createSettingsPortManager({
@@ -106,6 +107,8 @@ export function bootstrapBackground(
       settingsPorts.readStatus((await auditStore.read()).events.length),
     isContentRuntimeAllowed: (descriptor) =>
       descriptor.surfaceId !== "claude_web" || claudeRuntimeAllowed,
+    removeClaudeAccess: () =>
+      registrationManager?.removeClaudeAccess() ?? Promise.resolve(false),
     onSettingsSaved() {
       if (registrationManager !== undefined) {
         claudeRuntimeAllowed = false;
@@ -120,11 +123,7 @@ export function bootstrapBackground(
     settingsPorts.handleConnect(port),
   );
   if (registrationManager !== undefined) {
-    void storageReady.then(() =>
-      registrationManager?.reconcile().then((snapshot) => {
-        claudeRuntimeAllowed = snapshot.registration === "registered";
-      }),
-    );
+    void storageReady.then(() => registrationManager?.reconcile());
   }
 
   return { storageReady };

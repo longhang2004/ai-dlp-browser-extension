@@ -1747,7 +1747,11 @@ describe("runtime message validation", () => {
   ];
 
   it("accepts every exact request variant", () => {
-    expect(validRequests.every(isRuntimeRequest)).toBe(true);
+    expect(
+      [...validRequests, { type: "permissions.claude.remove" }].every(
+        isRuntimeRequest,
+      ),
+    ).toBe(true);
   });
 
   it.each([
@@ -1779,6 +1783,31 @@ describe("runtime message validation", () => {
   });
 
   it("validates response and port envelopes without generic payloads", () => {
+    expect(
+      isRuntimeResponse({
+        type: "permissions.claude.removed",
+        removed: true,
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeResponse({
+        type: "permissions.claude.removed",
+        removed: false,
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeResponse({
+        type: "permissions.claude.removed",
+        removed: "true",
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeResponse({
+        type: "permissions.claude.removed",
+        removed: true,
+        prompt: "secret",
+      }),
+    ).toBe(false);
     expect(
       isRuntimeResponse({
         type: "status.result",

@@ -1085,6 +1085,7 @@ function isRuntimeRequestSnapshot(value: unknown): value is RuntimeRequest {
       case "settings.read":
       case "audit.read":
       case "audit.clear":
+      case "permissions.claude.remove":
       case "status.read":
         return hasExactOwnKeys(value, ["type"]);
       case "settings.save":
@@ -1128,6 +1129,11 @@ function isRuntimeResponseSnapshot(value: unknown): value is RuntimeResponse {
       case "audit.appended":
       case "audit.cleared":
         return hasExactOwnKeys(value, ["type"]);
+      case "permissions.claude.removed":
+        return (
+          hasExactOwnKeys(value, ["type", "removed"]) &&
+          typeof value.removed === "boolean"
+        );
       case "status.result":
         return (
           hasExactOwnKeys(value, ["type", "status"]) &&

@@ -18,6 +18,7 @@ export type RuntimeRequest = PromptFreeBoundary &
     | { type: "audit.read" }
     | { type: "audit.append"; event: AuditEvent }
     | { type: "audit.clear" }
+    | { type: "permissions.claude.remove" }
     | { type: "status.read" }
   );
 
@@ -51,6 +52,7 @@ export type RuntimeResponse = PromptFreeBoundary &
     | { type: "audit.result"; envelope: StoredAuditEnvelope }
     | { type: "audit.appended" }
     | { type: "audit.cleared" }
+    | { type: "permissions.claude.removed"; removed: boolean }
     | { type: "status.result"; status: ProtectionStatusSnapshot }
     | RuntimeErrorResponse
   );

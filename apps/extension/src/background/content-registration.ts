@@ -1,11 +1,13 @@
 import {
   CLAUDE_HOST_PERMISSION_PATTERN,
   isScriptingStillRequired,
+  SURFACE_PERMISSION_CATALOG,
   type EffectiveSurfacePermission,
   type PermissionApi,
   type PermissionChange,
   type PermissionScope,
   type RegistrationState,
+  type SurfacePermissionCatalogEntry,
   type SurfaceRuntimeHealthCode,
 } from "@ai-dlp/shared-types/permissions";
 import type { ProtectionSettings } from "@ai-dlp/shared-types";
@@ -123,6 +125,70 @@ function isPermissionChangeForClaude(change: PermissionChange): boolean {
   );
 }
 
+function isKnownEffectiveSurfacePermissions(
+  value: unknown,
+  catalog: readonly SurfacePermissionCatalogEntry[],
+): value is readonly EffectiveSurfacePermission[] {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    Reflect.ownKeys(value).length !== value.length + 1 ||
+    !Reflect.ownKeys(value).includes("length")
+  ) {
+    return false;
+  }
+
+  const catalogSurfaceIds = new Set<string>(
+    catalog.map((entry) => entry.surfaceId),
+  );
+  if (catalogSurfaceIds.size !== catalog.length) return false;
+
+  const seenSurfaceIds = new Set<string>();
+  for (const surface of value) {
+    const surfaceKeys =
+      typeof surface === "object" && surface !== null
+        ? Reflect.ownKeys(surface)
+        : [];
+    if (
+      typeof surface !== "object" ||
+      surface === null ||
+      Array.isArray(surface) ||
+      (Object.getPrototypeOf(surface) !== Object.prototype &&
+        Object.getPrototypeOf(surface) !== null) ||
+      surfaceKeys.length !== 4 ||
+      !surfaceKeys.every(
+        (key) =>
+          key === "surfaceId" ||
+          key === "enabled" ||
+          key === "hostGranted" ||
+          key === "namedPermissionGranted",
+      ) ||
+      !surfaceKeys.every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(surface, key);
+        return (
+          descriptor !== undefined &&
+          descriptor.enumerable === true &&
+          Object.hasOwn(descriptor, "value")
+        );
+      }) ||
+      typeof (surface as { surfaceId?: unknown }).surfaceId !== "string" ||
+      typeof (surface as { enabled?: unknown }).enabled !== "boolean" ||
+      typeof (surface as { hostGranted?: unknown }).hostGranted !== "boolean" ||
+      typeof (surface as { namedPermissionGranted?: unknown })
+        .namedPermissionGranted !== "boolean"
+    ) {
+      return false;
+    }
+    const surfaceId = (surface as { surfaceId: string }).surfaceId;
+    if (!catalogSurfaceIds.has(surfaceId) || seenSurfaceIds.has(surfaceId)) {
+      return false;
+    }
+    seenSurfaceIds.add(surfaceId);
+  }
+
+  return catalog.every((entry) => seenSurfaceIds.has(entry.surfaceId));
+}
+
 export function createContentRegistrationManager(options: {
   permissionApi: PermissionApi;
   scripting?: ScriptingApi;
@@ -130,13 +196,33 @@ export function createContentRegistrationManager(options: {
   getEffectiveSurfacePermissions?(): Promise<
     readonly EffectiveSurfacePermission[]
   >;
+  permissionCatalog?: readonly SurfacePermissionCatalogEntry[];
+  onReconciled?(snapshot: ContentRegistrationSnapshot): void;
   invalidateSurface(): void;
 }): ContentRegistrationManager {
   let snapshot = defaultSnapshot();
   let disposed = false;
-  let queue: Promise<ContentRegistrationSnapshot> = Promise.resolve(snapshot);
+  // All browser mutations and reconciliations share one queue.  Keeping the
+  // queue at this boundary means a revocation cannot race a reconciliation
+  // that would re-register the content script from the pre-removal grants.
+  let operationQueue: Promise<unknown> = Promise.resolve();
+  let reconciliationEpoch = 0;
+  let activeRemoval:
+    | {
+        epoch: number;
+        suppressHostRemovalEvent: boolean;
+        suppressNamedRemovalEvent: boolean;
+        pendingPermissionChange: boolean;
+      }
+    | undefined;
 
-  function invalidate(): void {
+  function isEpochCurrent(epoch: number): boolean {
+    if (disposed || reconciliationEpoch !== epoch) return false;
+    const removal = activeRemoval;
+    return !(removal?.epoch === epoch && removal.pendingPermissionChange);
+  }
+
+  function invalidateSnapshot(): void {
     if (
       snapshot.registration === "not_registered" &&
       !snapshot.hostGranted &&
@@ -147,6 +233,23 @@ export function createContentRegistrationManager(options: {
     }
     snapshot = { ...snapshot, registration: "not_registered" };
     options.invalidateSurface();
+  }
+
+  function invalidate(): void {
+    // A removal owns the serialization boundary from the moment it is
+    // requested. Permission-change callbacks that arrive during that critical
+    // section must not invalidate its post-removal reconciliation generation.
+    if (activeRemoval === undefined) reconciliationEpoch += 1;
+    invalidateSnapshot();
+  }
+
+  function enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const next = operationQueue.then(operation, operation);
+    operationQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   }
 
   async function removeOwnedRegistrations(
@@ -179,14 +282,20 @@ export function createContentRegistrationManager(options: {
     }
   }
 
-  async function reconcileNow(): Promise<ContentRegistrationSnapshot> {
-    if (disposed) return snapshot;
-    invalidate();
+  async function reconcileNow(
+    epoch: number,
+  ): Promise<ContentRegistrationSnapshot> {
+    const isCurrent = (): boolean => isEpochCurrent(epoch);
+    if (!isCurrent()) return snapshot;
+
     const settings = await options.readSettings();
+    if (!isCurrent()) return snapshot;
     const enabled = hasClaudeEnabled(settings);
     const hostGranted = await options.permissionApi.contains(CLAUDE_HOST_SCOPE);
+    if (!isCurrent()) return snapshot;
     const namedPermissionGranted =
       await options.permissionApi.contains(CLAUDE_NAMED_SCOPE);
+    if (!isCurrent()) return snapshot;
     snapshot = {
       registration: "reconciling",
       healthCode: null,
@@ -199,8 +308,11 @@ export function createContentRegistrationManager(options: {
       try {
         await cleanupOwnedRegistrations();
       } catch {
-        snapshot = { ...snapshot, healthCode: "registration_failed" };
+        if (isCurrent()) {
+          snapshot = { ...snapshot, healthCode: "registration_failed" };
+        }
       }
+      if (!isCurrent()) return snapshot;
       snapshot = { ...snapshot, registration: "not_registered" };
       return snapshot;
     }
@@ -208,8 +320,11 @@ export function createContentRegistrationManager(options: {
       try {
         await cleanupOwnedRegistrations();
       } catch {
-        snapshot = { ...snapshot, healthCode: "registration_failed" };
+        if (isCurrent()) {
+          snapshot = { ...snapshot, healthCode: "registration_failed" };
+        }
       }
+      if (!isCurrent()) return snapshot;
       snapshot = {
         ...snapshot,
         registration: "not_registered",
@@ -221,8 +336,11 @@ export function createContentRegistrationManager(options: {
       try {
         await cleanupOwnedRegistrations();
       } catch {
-        snapshot = { ...snapshot, healthCode: "registration_failed" };
+        if (isCurrent()) {
+          snapshot = { ...snapshot, healthCode: "registration_failed" };
+        }
       }
+      if (!isCurrent()) return snapshot;
       snapshot = {
         ...snapshot,
         registration: "not_registered",
@@ -234,8 +352,11 @@ export function createContentRegistrationManager(options: {
       try {
         await cleanupOwnedRegistrations();
       } catch {
-        snapshot = { ...snapshot, healthCode: "registration_failed" };
+        if (isCurrent()) {
+          snapshot = { ...snapshot, healthCode: "registration_failed" };
+        }
       }
+      if (!isCurrent()) return snapshot;
       snapshot = {
         ...snapshot,
         registration: "not_registered",
@@ -255,7 +376,9 @@ export function createContentRegistrationManager(options: {
     try {
       const registrations =
         await options.scripting.getRegisteredContentScripts();
+      if (!isCurrent()) return snapshot;
       await removeOwnedRegistrations(registrations);
+      if (!isCurrent()) return snapshot;
       const current = registrations.find(
         (registration) => registration.id === CLAUDE_CONTENT_REGISTRATION.id,
       );
@@ -264,9 +387,11 @@ export function createContentRegistrationManager(options: {
           CLAUDE_CONTENT_REGISTRATION,
         ]);
       }
+      if (!isCurrent()) return snapshot;
       snapshot = { ...snapshot, registration: "registered" };
       return snapshot;
     } catch {
+      if (!isCurrent()) return snapshot;
       snapshot = {
         ...snapshot,
         registration: "failed",
@@ -276,9 +401,12 @@ export function createContentRegistrationManager(options: {
     }
   }
 
-  function reconcile(): Promise<ContentRegistrationSnapshot> {
-    const next = queue.then(reconcileNow, reconcileNow).catch(() => {
-      invalidate();
+  async function runReconcile(
+    epoch: number,
+  ): Promise<ContentRegistrationSnapshot> {
+    const result = await reconcileNow(epoch).catch(() => {
+      if (!isEpochCurrent(epoch)) return snapshot;
+      invalidateSnapshot();
       snapshot = {
         ...snapshot,
         registration: "failed",
@@ -286,34 +414,212 @@ export function createContentRegistrationManager(options: {
       };
       return snapshot;
     });
-    queue = next;
-    return next;
+    if (isEpochCurrent(epoch)) {
+      try {
+        options.onReconciled?.(result);
+      } catch {
+        // Runtime-gate updates are ancillary to the authoritative snapshot.
+      }
+    }
+    return result;
   }
 
-  function handlePermissionChange(change: PermissionChange): void {
+  function reconcile(): Promise<ContentRegistrationSnapshot> {
+    if (disposed) return Promise.resolve(snapshot);
+
+    // A reconcile requested while a removal is active is deliberately queued
+    // behind that removal. It receives a fresh generation when it starts so a
+    // settings-save or permission event cannot reopen the runtime gate during
+    // the removal's critical section.
+    let epoch: number | undefined;
+    if (activeRemoval === undefined) {
+      epoch = ++reconciliationEpoch;
+      // Invalidate immediately; the actual browser work remains serialized below.
+      invalidateSnapshot();
+    } else {
+      invalidateSnapshot();
+    }
+
+    return enqueueOperation(async () => {
+      if (disposed) return snapshot;
+      if (epoch === undefined) {
+        epoch = ++reconciliationEpoch;
+        invalidateSnapshot();
+      }
+      return runReconcile(epoch);
+    });
+  }
+
+  type PermissionEventSource = "added" | "removed";
+
+  function handlePermissionChange(
+    change: PermissionChange,
+    source: PermissionEventSource,
+  ): void {
     if (!isPermissionChangeForClaude(change)) return;
+    if (activeRemoval !== undefined) {
+      if (
+        source === "removed" &&
+        activeRemoval.suppressHostRemovalEvent &&
+        change.kind === "host" &&
+        change.originPattern === CLAUDE_HOST_PERMISSION_PATTERN
+      ) {
+        activeRemoval.suppressHostRemovalEvent = false;
+        return;
+      }
+      if (
+        source === "removed" &&
+        activeRemoval.suppressNamedRemovalEvent &&
+        change.kind === "named" &&
+        change.permission === "scripting"
+      ) {
+        activeRemoval.suppressNamedRemovalEvent = false;
+        return;
+      }
+      // Coalesce external changes while removal owns the serialization
+      // boundary. The final callback is invalidated and one fresh reconcile
+      // is queued after the removal releases the boundary.
+      activeRemoval.pendingPermissionChange = true;
+      invalidateSnapshot();
+      return;
+    }
     invalidate();
     void reconcile();
   }
 
-  options.permissionApi.onAdded.addListener(handlePermissionChange);
-  options.permissionApi.onRemoved.addListener(handlePermissionChange);
+  const handlePermissionAdded = (change: PermissionChange): void => {
+    handlePermissionChange(change, "added");
+  };
+  const handlePermissionRemoved = (change: PermissionChange): void => {
+    handlePermissionChange(change, "removed");
+  };
+
+  async function performRemoval(removal: {
+    epoch: number;
+    suppressHostRemovalEvent: boolean;
+    suppressNamedRemovalEvent: boolean;
+    pendingPermissionChange: boolean;
+  }): Promise<boolean> {
+    const { epoch } = removal;
+    const isCurrent = (): boolean => !disposed && reconciliationEpoch === epoch;
+    if (!isCurrent()) {
+      if (activeRemoval === removal) activeRemoval = undefined;
+      return false;
+    }
+
+    let hostRemoved = false;
+    let namedRemoved = false;
+    try {
+      try {
+        hostRemoved = await options.permissionApi.remove(CLAUDE_HOST_SCOPE);
+      } catch {
+        // Permission removal is best effort; reconcile below reads live state.
+      } finally {
+        removal.suppressHostRemovalEvent = false;
+      }
+
+      // Dependency reads and decisions are advisory. Any helper, catalog, or
+      // validation failure keeps scripting conservatively and must not prevent
+      // the best-effort final reconciliation below.
+      try {
+        const dependencyReader = options.getEffectiveSurfacePermissions;
+        const catalog = options.permissionCatalog ?? SURFACE_PERMISSION_CATALOG;
+        let canRemoveNamed = false;
+        if (
+          isCurrent() &&
+          !removal.pendingPermissionChange &&
+          dependencyReader
+        ) {
+          const effective = await dependencyReader();
+          if (
+            isKnownEffectiveSurfacePermissions(effective, catalog) &&
+            !isScriptingStillRequired(effective, catalog)
+          ) {
+            // Re-read immediately before the destructive step so a newly
+            // enabled dynamic surface keeps the shared permission.
+            const finalEffective = await dependencyReader();
+            canRemoveNamed =
+              isKnownEffectiveSurfacePermissions(finalEffective, catalog) &&
+              !isScriptingStillRequired(finalEffective, catalog);
+          }
+        }
+        if (isCurrent() && !removal.pendingPermissionChange && canRemoveNamed) {
+          removal.suppressNamedRemovalEvent = true;
+          try {
+            namedRemoved =
+              await options.permissionApi.remove(CLAUDE_NAMED_SCOPE);
+          } catch {
+            // Permission removal is best effort; reconcile below reads live state.
+          } finally {
+            removal.suppressNamedRemovalEvent = false;
+          }
+        }
+      } catch {
+        // Unknown dependency state conservatively retains scripting.
+      }
+      return hostRemoved || namedRemoved;
+    } finally {
+      // Reconcile while the removal lock is still held. If a permission event
+      // was coalesced, this call is a no-op and the fresh queued reconcile below
+      // owns the post-event snapshot.
+      if (isCurrent()) {
+        try {
+          await runReconcile(epoch);
+        } catch {
+          // Keep the already-invalidated state if reconciliation fails.
+        }
+      }
+      if (activeRemoval === removal) {
+        const pendingPermissionChange = removal.pendingPermissionChange;
+        removal.suppressHostRemovalEvent = false;
+        removal.suppressNamedRemovalEvent = false;
+        activeRemoval = undefined;
+        if (pendingPermissionChange && !disposed) {
+          void reconcile();
+        }
+      }
+    }
+  }
+
+  options.permissionApi.onAdded.addListener(handlePermissionAdded);
+  options.permissionApi.onRemoved.addListener(handlePermissionRemoved);
 
   return {
     reconcile,
     invalidate,
-    async removeClaudeAccess() {
-      invalidate();
-      const hostRemoved = await options.permissionApi.remove(CLAUDE_HOST_SCOPE);
-      let namedRemoved = false;
-      const effective = options.getEffectiveSurfacePermissions
-        ? await options.getEffectiveSurfacePermissions()
-        : [];
-      if (!isScriptingStillRequired(effective)) {
-        namedRemoved = await options.permissionApi.remove(CLAUDE_NAMED_SCOPE);
+    removeClaudeAccess() {
+      if (disposed) return Promise.resolve(false);
+      if (activeRemoval !== undefined) {
+        // A second request waits behind the first removal and establishes its
+        // own generation only once it owns the serialized operation boundary.
+        return enqueueOperation(async () => {
+          if (disposed) return false;
+          const epoch = ++reconciliationEpoch;
+          invalidateSnapshot();
+          const removal = {
+            epoch,
+            suppressHostRemovalEvent: true,
+            suppressNamedRemovalEvent: false,
+            pendingPermissionChange: false,
+          };
+          activeRemoval = removal;
+          return performRemoval(removal);
+        });
       }
-      await reconcile();
-      return hostRemoved || namedRemoved;
+
+      const epoch = ++reconciliationEpoch;
+      // Invalidate before queuing any awaited permission or cleanup work and
+      // mark the removal active synchronously so concurrent reconciles queue
+      // behind it even while an earlier operation is still finishing.
+      invalidateSnapshot();
+      const removal = {
+        epoch,
+        suppressHostRemovalEvent: true,
+        suppressNamedRemovalEvent: false,
+        pendingPermissionChange: false,
+      };
+      activeRemoval = removal;
+      return enqueueOperation(() => performRemoval(removal));
     },
     isDescriptorAllowed() {
       return (
@@ -329,8 +635,8 @@ export function createContentRegistrationManager(options: {
     dispose() {
       if (disposed) return;
       disposed = true;
-      options.permissionApi.onAdded.removeListener(handlePermissionChange);
-      options.permissionApi.onRemoved.removeListener(handlePermissionChange);
+      options.permissionApi.onAdded.removeListener(handlePermissionAdded);
+      options.permissionApi.onRemoved.removeListener(handlePermissionRemoved);
       invalidate();
     },
   };

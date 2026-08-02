@@ -116,36 +116,146 @@ function uniqueElements(
   return result;
 }
 
-function semanticRegionFor(element: HTMLElement): HTMLElement | null {
+function matchesSemanticRegion(element: Element): element is HTMLElement {
+  return (
+    element instanceof HTMLElement &&
+    element.matches(CLAUDE_SELECTORS.composerRegion)
+  );
+}
+
+function semanticRegionAncestors(element: Element): HTMLElement[] {
+  const regions: HTMLElement[] = [];
+  let current: Element | null = element;
+  while (current !== null) {
+    if (matchesSemanticRegion(current)) regions.push(current);
+    current = current.parentElement;
+  }
+  return regions;
+}
+
+function nearestSemanticRegion(element: HTMLElement): HTMLElement | null {
   const region = element.closest(CLAUDE_SELECTORS.composerRegion);
   return region instanceof HTMLElement ? region : null;
 }
 
-function sendCandidatesFor(
+function composerCandidatesInRegion(region: HTMLElement): HTMLElement[] {
+  const candidates = uniqueElements(
+    region,
+    CLAUDE_COMPOSER_SELECTORS.join(", "),
+    (candidate): candidate is HTMLElement => candidate instanceof HTMLElement,
+  );
+  if (region.matches(CLAUDE_COMPOSER_SELECTORS.join(", "))) {
+    candidates.unshift(region);
+  }
+  return candidates;
+}
+
+function directlyOwnedComposers(region: HTMLElement): HTMLElement[] {
+  return composerCandidatesInRegion(region).filter(
+    (candidate) => nearestSemanticRegion(candidate) === region,
+  );
+}
+
+function matchingSemanticSendCandidatesInRegion(
+  region: HTMLElement,
+): HTMLElement[] {
+  return uniqueElements(
+    region,
+    CLAUDE_SELECTORS.send,
+    (candidate): candidate is HTMLElement =>
+      candidate instanceof HTMLElement &&
+      nearestSemanticRegion(candidate) === region,
+  );
+}
+
+function semanticSendCandidatesInRegion(region: HTMLElement): HTMLElement[] {
+  return matchingSemanticSendCandidatesInRegion(region).filter(
+    isUsableSendControl,
+  );
+}
+
+function matchingNativeSendCandidatesInRegion(
   document: Document,
   region: HTMLElement,
 ): HTMLElement[] {
-  const semantic = uniqueElements(
-    region,
-    CLAUDE_SELECTORS.send,
-    isUsableSendControl,
-  );
-  if (semantic.length > 0) return semantic;
-
   const form = region instanceof HTMLFormElement ? region : null;
   if (form === null) return [];
   return uniqueElements(
     document,
     CLAUDE_SELECTORS.nativeSubmit,
     (candidate): candidate is HTMLElement => {
-      if (!isUsableSendControl(candidate)) return false;
+      if (!(
+        candidate instanceof HTMLButtonElement ||
+        candidate instanceof HTMLInputElement
+      )) {
+        return false;
+      }
       return (
-        (candidate instanceof HTMLButtonElement ||
-          candidate instanceof HTMLInputElement) &&
-        candidate.form === form
+        candidate.form === form && nearestSemanticRegion(candidate) === region
       );
     },
   );
+}
+
+function nativeSendCandidatesInRegion(
+  document: Document,
+  region: HTMLElement,
+): HTMLElement[] {
+  return matchingNativeSendCandidatesInRegion(document, region).filter(
+    isUsableSendControl,
+  );
+}
+
+function directlyOwnedSendCandidates(
+  document: Document,
+  region: HTMLElement,
+): HTMLElement[] {
+  const semantic = semanticSendCandidatesInRegion(region);
+  const native = nativeSendCandidatesInRegion(document, region);
+  return [...new Set([...semantic, ...native])];
+}
+
+function directlyOwnedMatchingSendCandidates(
+  document: Document,
+  region: HTMLElement,
+): HTMLElement[] {
+  const semantic = matchingSemanticSendCandidatesInRegion(region);
+  const native = matchingNativeSendCandidatesInRegion(document, region);
+  return [...new Set([...semantic, ...native])];
+}
+
+function hasMatchingSendControlForRegion(region: HTMLElement): boolean {
+  return (
+    directlyOwnedMatchingSendCandidates(region.ownerDocument, region).length > 0
+  );
+}
+
+function ownedComposersForRegion(region: HTMLElement): HTMLElement[] {
+  return composerCandidatesInRegion(region).filter((candidate) => {
+    const nearest = nearestSemanticRegion(candidate);
+    if (nearest === region) return true;
+    if (nearest === null || hasIndependentSubmissionPairForRegion(nearest)) {
+      return false;
+    }
+    // A nested region with a matching but unusable Send is still an ownership
+    // boundary. Falling back to an outer Send would pair unrelated controls.
+    return !hasMatchingSendControlForRegion(nearest);
+  });
+}
+
+// Kept separate from hasIndependentSubmissionPair so candidate enumeration
+// cannot recursively walk the same nested region graph.
+function hasIndependentSubmissionPairForRegion(region: HTMLElement): boolean {
+  const composers = directlyOwnedComposers(region).filter(isUsableComposer);
+  const sends = directlyOwnedSendCandidates(region.ownerDocument, region);
+  return composers.length === 1 && sends.length === 1;
+}
+
+function sendCandidatesFor(
+  document: Document,
+  region: HTMLElement,
+): HTMLElement[] {
+  return directlyOwnedSendCandidates(document, region);
 }
 
 function strategyForComposer(
@@ -185,6 +295,82 @@ function composerCandidates(document: Document): HTMLElement[] {
   );
 }
 
+type TargetOwnershipResolution = {
+  contexts: ResolvedSubmissionElements[];
+  ambiguous: boolean;
+  sawRegion: boolean;
+  sawComposerCandidate: boolean;
+  sawSendCandidate: boolean;
+};
+
+function collectComposerTargetOwnership(
+  document: Document,
+  composer: HTMLElement,
+): TargetOwnershipResolution {
+  const regions = semanticRegionAncestors(composer);
+  const contexts: ResolvedSubmissionElements[] = [];
+  let ambiguous = false;
+  let sawComposerCandidate = false;
+  let sawSendCandidate = false;
+
+  for (const region of regions) {
+    const composerCandidates = ownedComposersForRegion(region);
+    if (composerCandidates.length > 0) sawComposerCandidate = true;
+    const composers = composerCandidates.filter(isUsableComposer);
+    if (!composers.includes(composer)) continue;
+    const sends = sendCandidatesFor(document, region);
+    if (sends.length > 0) sawSendCandidate = true;
+    if (composers.length !== 1 || sends.length !== 1) {
+      if (composers.length > 1 || sends.length > 1) ambiguous = true;
+      continue;
+    }
+    const context = completeContext(composer, sends[0]!, region);
+    if (context !== null) contexts.push(context);
+  }
+
+  return {
+    contexts,
+    ambiguous: ambiguous || contexts.length > 1,
+    sawRegion: regions.length > 0,
+    sawComposerCandidate,
+    sawSendCandidate,
+  };
+}
+
+function collectSendTargetOwnership(
+  document: Document,
+  send: HTMLElement,
+): TargetOwnershipResolution {
+  const regions = semanticRegionAncestors(send);
+  const contexts: ResolvedSubmissionElements[] = [];
+  let ambiguous = false;
+  let sawComposerCandidate = false;
+  let sawSendCandidate = false;
+
+  for (const region of regions) {
+    const sends = sendCandidatesFor(document, region);
+    if (!sends.includes(send)) continue;
+    sawSendCandidate = true;
+    const composerCandidates = ownedComposersForRegion(region);
+    if (composerCandidates.length > 0) sawComposerCandidate = true;
+    const composers = composerCandidates.filter(isUsableComposer);
+    if (composers.length !== 1 || sends.length !== 1) {
+      if (composers.length > 1 || sends.length > 1) ambiguous = true;
+      continue;
+    }
+    const context = completeContext(composers[0]!, send, region);
+    if (context !== null) contexts.push(context);
+  }
+
+  return {
+    contexts,
+    ambiguous: ambiguous || contexts.length > 1,
+    sawRegion: regions.length > 0,
+    sawComposerCandidate,
+    sawSendCandidate,
+  };
+}
+
 export function collectSubmissionContexts(
   document: Document,
   serializedOrigin: string = CLAUDE_ORIGIN,
@@ -196,13 +382,13 @@ export function collectSubmissionContexts(
   const candidates = composerCandidates(document);
   const contexts: ResolvedSubmissionElements[] = [];
   for (const composer of candidates) {
-    const region = semanticRegionFor(composer);
-    if (region === null) continue;
-    const sends = sendCandidatesFor(document, region);
-    if (sends.length !== 1) continue;
-    if (sendControl !== undefined && sends[0] !== sendControl) continue;
-    const context = completeContext(composer, sends[0]!, region);
-    if (context !== null) contexts.push(context);
+    const ownership = collectComposerTargetOwnership(document, composer);
+    if (ownership.ambiguous) return { kind: "ambiguous" };
+    for (const context of ownership.contexts) {
+      if (sendControl === undefined || context.sendControl === sendControl) {
+        contexts.push(context);
+      }
+    }
   }
   if (contexts.length === 0) {
     return { kind: "none", sawComposerCandidate: candidates.length > 0 };
@@ -229,43 +415,28 @@ export function resolveComposerSubmissionFromTarget(
       healthCode: "unsupported_dom_variant",
     };
   }
-  const region = semanticRegionFor(composer);
-  if (region === null) {
+  const ownership = collectComposerTargetOwnership(document, composer);
+  if (ownership.ambiguous) {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "ambiguous_submission_context",
+    };
+  }
+  if (ownership.contexts.length === 1) {
+    return { kind: "resolved", context: ownership.contexts[0]! };
+  }
+  if (!ownership.sawRegion) {
     return {
       kind: "strong_candidate_unresolved",
       healthCode: "unsupported_dom_variant",
     };
   }
-  const sends = sendCandidatesFor(document, region);
-  if (sends.length === 0) {
-    return {
-      kind: "strong_candidate_unresolved",
-      healthCode: "send_control_not_found",
-    };
-  }
-  if (sends.length > 1) {
-    return {
-      kind: "strong_candidate_unresolved",
-      healthCode: "ambiguous_submission_context",
-    };
-  }
-  const ownership = collectSubmissionContexts(
-    document,
-    serializedOrigin,
-    sends[0],
-  );
-  if (ownership.kind === "ambiguous") {
-    return {
-      kind: "strong_candidate_unresolved",
-      healthCode: "ambiguous_submission_context",
-    };
-  }
-  return ownership.kind === "unique" && ownership.context.composer === composer
-    ? { kind: "resolved", context: ownership.context }
-    : {
-        kind: "strong_candidate_unresolved",
-        healthCode: "unsupported_dom_variant",
-      };
+  return {
+    kind: "strong_candidate_unresolved",
+    healthCode: ownership.sawSendCandidate
+      ? "unsupported_dom_variant"
+      : "send_control_not_found",
+  };
 }
 
 export function resolveSendSubmissionFromTarget(
@@ -276,7 +447,9 @@ export function resolveSendSubmissionFromTarget(
   if (!isExactClaudeOrigin(serializedOrigin)) {
     return { kind: "not_a_submission_candidate" };
   }
-  const send = target.closest(CLAUDE_SELECTORS.send);
+  const send = target.closest(
+    `${CLAUDE_SELECTORS.send}, ${CLAUDE_SELECTORS.nativeSubmit}`,
+  );
   if (!(send instanceof HTMLElement)) {
     return { kind: "not_a_submission_candidate" };
   }
@@ -286,17 +459,21 @@ export function resolveSendSubmissionFromTarget(
       healthCode: "send_control_not_found",
     };
   }
-  const ownership = collectSubmissionContexts(document, serializedOrigin, send);
-  if (ownership.kind === "unique")
-    return { kind: "resolved", context: ownership.context };
+  const ownership = collectSendTargetOwnership(document, send);
+  if (ownership.ambiguous) {
+    return {
+      kind: "strong_candidate_unresolved",
+      healthCode: "ambiguous_submission_context",
+    };
+  }
+  if (ownership.contexts.length === 1) {
+    return { kind: "resolved", context: ownership.contexts[0]! };
+  }
   return {
     kind: "strong_candidate_unresolved",
-    healthCode:
-      ownership.kind === "ambiguous"
-        ? "ambiguous_submission_context"
-        : ownership.sawComposerCandidate
-          ? "unsupported_dom_variant"
-          : "composer_not_found",
+    healthCode: ownership.sawComposerCandidate
+      ? "unsupported_dom_variant"
+      : "composer_not_found",
   };
 }
 

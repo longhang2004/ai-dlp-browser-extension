@@ -8,6 +8,8 @@ import {
 } from "./claude-adapter.js";
 import {
   CLAUDE_DATA_COMPOSER_FIXTURE,
+  CLAUDE_NATIVE_BUTTON_SUBMIT_FIXTURE,
+  CLAUDE_NATIVE_INPUT_SUBMIT_FIXTURE,
   CLAUDE_SEMANTIC_COMPOSER_FIXTURE,
 } from "./fixtures.js";
 
@@ -58,6 +60,11 @@ async function flushMutations(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
+async function updateTextNode(node: Text, value: string): Promise<void> {
+  node.data = value;
+  await flushMutations();
+}
+
 afterEach(() => {
   for (const adapter of adapters.splice(0)) adapter.dispose();
   document.body.replaceChildren();
@@ -99,6 +106,40 @@ describe("ClaudeAdapter descriptor and origin", () => {
 });
 
 describe("ClaudeAdapter submission capture", () => {
+  it.each([
+    ["button", CLAUDE_NATIVE_BUTTON_SUBMIT_FIXTURE, "#native-button-submit"],
+    ["input", CLAUDE_NATIVE_INPUT_SUBMIT_FIXTURE, "#native-input-submit"],
+  ])(
+    "intercepts a direct native %s submit click for its owned composer",
+    (_kind, fixture, sendSelector) => {
+      renderFixture(fixture);
+      const adapter = createAdapter();
+      const handler = vi.fn(() => "intercept" as const);
+      adapter.registerSubmitInterceptor(handler);
+      const context = adapter.resolveCurrentSubmissionContext();
+      const send = document.querySelector(sendSelector);
+      expect(context).not.toBeNull();
+      expect(send).toBeInstanceOf(HTMLElement);
+      if (context === null || !(send instanceof HTMLElement)) {
+        throw new Error("Missing native submit interception fixture.");
+      }
+
+      const click = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+      });
+      send.dispatchEvent(click);
+
+      expect(click.defaultPrevented).toBe(true);
+      expect(handler).toHaveBeenCalledWith({
+        id: "claude-submit-1",
+        source: "click",
+        contextIdentity: context.contextIdentity,
+        initialContextVersion: context.contextVersion,
+      });
+    },
+  );
+
   it("captures click and unmodified Enter, but passes through Shift+Enter, modifiers, and IME", () => {
     renderFixture(CLAUDE_SEMANTIC_COMPOSER_FIXTURE);
     const composer = document.querySelector('[role="textbox"]');
@@ -184,6 +225,215 @@ describe("ClaudeAdapter submission capture", () => {
     expect(JSON.stringify(removed.attachmentStateFingerprint)).not.toContain(
       "attachment",
     );
+  });
+
+  it("tracks every attachment mutation class only inside the owned region", async () => {
+    const promptBefore = "claude-prompt-private-before";
+    const promptAfter = "claude-prompt-private-after";
+    const attachmentBefore = "claude-attachment-private-before";
+    const attachmentAfter = "claude-attachment-private-after";
+    const outsideBefore = "claude-outside-private-before";
+    const outsideAfter = "claude-outside-private-after";
+    renderFixture(`
+      <div data-testid="attachment-chip" id="outside-evidence">${outsideBefore}</div>
+      <section data-testid="chat-composer" id="attachment-region">
+        <textarea data-testid="chat-input" aria-label="Message Claude" id="prompt">${promptBefore}</textarea>
+        <div id="unrelated">unrelated-before</div>
+        <button type="button" data-testid="send-button" aria-label="Send">Send</button>
+      </section>
+    `);
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor(() => "intercept");
+    const context = adapter.resolveCurrentSubmissionContext();
+    const prompt = document.querySelector("#prompt")?.firstChild;
+    const outside = document.querySelector("#outside-evidence")?.firstChild;
+    const unrelated = document.querySelector("#unrelated")?.firstChild;
+    if (
+      context === null ||
+      !(prompt instanceof Text) ||
+      !(outside instanceof Text) ||
+      !(unrelated instanceof Text)
+    ) {
+      throw new Error("Expected attachment lifecycle fixture.");
+    }
+
+    const absent = adapter.inspectSubmissionCapabilities(context);
+    expect(absent.attachmentPresent).toBe(false);
+    const unchanged = adapter.inspectSubmissionCapabilities(context);
+    expect(unchanged.attachmentStateFingerprint).toBe(
+      absent.attachmentStateFingerprint,
+    );
+
+    const evidence = document.createElement("div");
+    evidence.dataset.testid = "attachment-chip";
+    const directText = document.createTextNode(attachmentBefore);
+    const nestedText = document.createTextNode("nested-before");
+    const nested = document.createElement("span");
+    nested.append(nestedText);
+    evidence.append(directText, nested);
+    context.submissionRegion.prepend(evidence);
+    await flushMutations();
+    const added = adapter.inspectSubmissionCapabilities(context);
+    expect(added.attachmentPresent).toBe(true);
+    expect(added.attachmentStateFingerprint).not.toBe(
+      absent.attachmentStateFingerprint,
+    );
+
+    evidence.setAttribute("data-state", "opaque-private-state");
+    await flushMutations();
+    const attributeChanged = adapter.inspectSubmissionCapabilities(context);
+    expect(attributeChanged.attachmentStateFingerprint).not.toBe(
+      added.attachmentStateFingerprint,
+    );
+
+    await updateTextNode(directText, attachmentAfter);
+    const directTextChanged = adapter.inspectSubmissionCapabilities(context);
+    expect(directTextChanged.attachmentStateFingerprint).not.toBe(
+      attributeChanged.attachmentStateFingerprint,
+    );
+
+    await updateTextNode(nestedText, "nested-after");
+    const nestedTextChanged = adapter.inspectSubmissionCapabilities(context);
+    expect(nestedTextChanged.attachmentStateFingerprint).not.toBe(
+      directTextChanged.attachmentStateFingerprint,
+    );
+
+    await updateTextNode(prompt, promptAfter);
+    await updateTextNode(unrelated, "unrelated-after");
+    const afterUnrelated = adapter.inspectSubmissionCapabilities(context);
+    expect(afterUnrelated.attachmentStateFingerprint).toBe(
+      nestedTextChanged.attachmentStateFingerprint,
+    );
+
+    await updateTextNode(outside, outsideAfter);
+    const afterOutside = adapter.inspectSubmissionCapabilities(context);
+    expect(afterOutside.attachmentStateFingerprint).toBe(
+      afterUnrelated.attachmentStateFingerprint,
+    );
+
+    const replacement = evidence.cloneNode(true);
+    evidence.replaceWith(replacement);
+    await flushMutations();
+    const replaced = adapter.inspectSubmissionCapabilities(context);
+    expect(replaced.attachmentPresent).toBe(true);
+    expect(replaced.attachmentStateFingerprint).not.toBe(
+      afterOutside.attachmentStateFingerprint,
+    );
+
+    if (!(replacement instanceof Element)) {
+      throw new Error("Expected replacement attachment element.");
+    }
+    replacement.remove();
+    await flushMutations();
+    const removed = adapter.inspectSubmissionCapabilities(context);
+    expect(removed.attachmentPresent).toBe(false);
+    expect(removed.attachmentStateFingerprint).not.toBe(
+      replaced.attachmentStateFingerprint,
+    );
+    expect(Reflect.ownKeys(removed.attachmentStateFingerprint)).toEqual([]);
+
+    const serializedBoundary = JSON.stringify({
+      diagnostics: adapter.getDiagnosticsForTesting(),
+      fingerprints: [
+        absent.attachmentStateFingerprint,
+        added.attachmentStateFingerprint,
+        attributeChanged.attachmentStateFingerprint,
+        directTextChanged.attachmentStateFingerprint,
+        nestedTextChanged.attachmentStateFingerprint,
+        afterUnrelated.attachmentStateFingerprint,
+        afterOutside.attachmentStateFingerprint,
+        replaced.attachmentStateFingerprint,
+        removed.attachmentStateFingerprint,
+      ],
+    });
+    for (const value of [
+      promptBefore,
+      promptAfter,
+      attachmentBefore,
+      attachmentAfter,
+      outsideBefore,
+      outsideAfter,
+    ]) {
+      expect(serializedBoundary).not.toContain(value);
+    }
+  });
+
+  it("disconnects the scoped attachment observer on unregister and dispose", async () => {
+    renderFixture(CLAUDE_DATA_COMPOSER_FIXTURE);
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+    const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
+    const adapter = createAdapter();
+    const dispose = adapter.registerSubmitInterceptor(() => "intercept");
+    expect(observe).toHaveBeenCalled();
+    expect(adapter.getDiagnosticsForTesting().retainsObserver).toBe(true);
+
+    const context = adapter.resolveCurrentSubmissionContext();
+    if (context === null) throw new Error("Expected context.");
+    adapter.inspectSubmissionCapabilities(context);
+    const evidence = document.createElement("div");
+    evidence.dataset.testid = "attachment-chip";
+    context.submissionRegion.append(evidence);
+    await flushMutations();
+
+    dispose();
+    expect(disconnect).toHaveBeenCalled();
+    expect(adapter.getDiagnosticsForTesting()).toMatchObject({
+      retainsObserver: false,
+      retainsInterceptor: false,
+      retainsDisposer: false,
+      retainsHealthTimer: false,
+    });
+
+    const observeCallsAfterUnregister = observe.mock.calls.length;
+    evidence.setAttribute("data-state", "after-unregister");
+    await flushMutations();
+    expect(observe).toHaveBeenCalledTimes(observeCallsAfterUnregister);
+
+    adapter.dispose();
+    expect(adapter.getDiagnosticsForTesting()).toMatchObject({
+      disposed: true,
+      retainsDocument: false,
+      retainsObserver: false,
+    });
+  });
+
+  it("observes only the exact submission region for attachment mutations", () => {
+    renderFixture(CLAUDE_DATA_COMPOSER_FIXTURE);
+    const observe = vi.spyOn(MutationObserver.prototype, "observe");
+    const adapter = createAdapter();
+    adapter.registerSubmitInterceptor(() => "intercept");
+    const context = adapter.resolveCurrentSubmissionContext();
+    expect(context).not.toBeNull();
+    if (context === null) throw new Error("Expected context.");
+
+    adapter.inspectSubmissionCapabilities(context);
+
+    const regionCalls = observe.mock.calls.filter(
+      ([target]) => target === context.submissionRegion,
+    );
+    expect(regionCalls).toHaveLength(1);
+    expect(regionCalls[0]?.[1]).toEqual({
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+    });
+
+    const documentCalls = observe.mock.calls.filter(
+      ([target]) => target === document || target === document.documentElement,
+    );
+    expect(documentCalls.length).toBeGreaterThan(0);
+    expect(
+      documentCalls.every(([, options]) =>
+        Array.isArray((options as MutationObserverInit).attributeFilter),
+      ),
+    ).toBe(true);
+    expect(
+      documentCalls.some(
+        ([, options]) =>
+          !Array.isArray((options as MutationObserverInit).attributeFilter),
+      ),
+    ).toBe(false);
   });
 });
 

@@ -170,6 +170,9 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
   #interceptor: SubmitInterceptor | null = null;
   #interceptorDisposer: (() => void) | null = null;
   #observer: MutationObserver | null = null;
+  #attachmentObserver: MutationObserver | null = null;
+  #attachmentObservationRegion: WeakRef<HTMLElement> | null = null;
+  #attachmentObservationIdentity: number | null = null;
   #attachmentStates = new Map<number, AttachmentStateTracker>();
   #healthCheckQueued = false;
   #lastHealth: "waiting_for_composer" | "healthy" | AdapterHealthCode | null =
@@ -207,7 +210,8 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
       retainsComposerIdentity: this.#identityContexts.size > 0,
       retainsInterceptor: this.#interceptor !== null,
       retainsDisposer: this.#interceptorDisposer !== null,
-      retainsObserver: this.#observer !== null,
+      retainsObserver:
+        this.#observer !== null || this.#attachmentObserver !== null,
       retainsHealthTimer: this.#healthGraceTimer !== null,
       resumeInProgress: this.#resumeInProgress,
     };
@@ -269,6 +273,10 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
     context: LiveSubmissionContext,
   ): SubmissionContentCapabilities {
     this.#assertPromptContext(context);
+    this.#ensureAttachmentObserver(
+      context.contextIdentity,
+      context.submissionRegion,
+    );
     const evidence = [
       ...context.submissionRegion.querySelectorAll(
         CLAUDE_SELECTORS.attachmentEvidence,
@@ -367,6 +375,7 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
     if (this.#disposed) return;
     this.#interceptorDisposer?.();
     this.#observer?.disconnect();
+    this.#disconnectAttachmentObserver();
     this.#clearHealthGrace();
     this.#observer = null;
     this.#interceptor = null;
@@ -505,10 +514,12 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
     this.#document?.removeEventListener("click", this.#onClick, true);
     this.#document?.removeEventListener("keydown", this.#onKeyDown, true);
     this.#observer?.disconnect();
+    this.#disconnectAttachmentObserver();
     this.#clearHealthGrace();
     this.#observer = null;
     this.#interceptor = null;
     this.#interceptorDisposer = null;
+    this.#attachmentStates.clear();
     this.#healthCheckQueued = false;
   }
 
@@ -587,8 +598,7 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
       this.#runHealthCheck();
       return;
     }
-    this.#observer = new MutationObserverConstructor((records) => {
-      this.#markAttachmentMutations(records);
+    this.#observer = new MutationObserverConstructor(() => {
       this.#queueHealthCheck();
     });
     this.#observer.observe(document.documentElement, {
@@ -616,34 +626,84 @@ export class ClaudeAdapter implements ChatApplicationAdapter {
     this.#runHealthCheck();
   }
 
-  #markAttachmentMutations(records: readonly MutationRecord[]): void {
-    for (const tracker of this.#attachmentStates.values()) {
-      const region = tracker.submissionRegion.deref();
-      if (region === undefined || !region.isConnected) continue;
-      const priorEvidence = new Set(
-        tracker.evidence
-          .map((reference) => reference.deref())
-          .filter((element): element is Element => element !== undefined),
-      );
-      const changed = records.some((record) => {
-        const target =
-          record.target instanceof Element
-            ? record.target
-            : record.target.parentElement;
-        if (target === null || !region.contains(target)) return false;
-        if (
-          priorEvidence.has(target) ||
-          [...priorEvidence].some((element) => element.contains(target)) ||
-          target.matches(CLAUDE_SELECTORS.attachmentEvidence)
-        ) {
-          return true;
-        }
-        return [...record.addedNodes, ...record.removedNodes].some(
-          nodeContainsAttachmentEvidence,
-        );
-      });
-      if (changed) tracker.mutationVersion += 1;
+  #ensureAttachmentObserver(
+    contextIdentity: number,
+    submissionRegion: HTMLElement,
+  ): void {
+    if (this.#interceptor === null || this.#disposed) return;
+    if (
+      this.#attachmentObserver !== null &&
+      this.#attachmentObservationIdentity === contextIdentity &&
+      this.#attachmentObservationRegion?.deref() === submissionRegion
+    ) {
+      return;
     }
+
+    this.#disconnectAttachmentObserver();
+    this.#attachmentStates.clear();
+    const document = this.#requireDocument();
+    const MutationObserverConstructor = document.defaultView?.MutationObserver;
+    if (MutationObserverConstructor === undefined) return;
+
+    const regionReference = new WeakRef(submissionRegion);
+    this.#attachmentObservationRegion = regionReference;
+    this.#attachmentObservationIdentity = contextIdentity;
+    this.#attachmentObserver = new MutationObserverConstructor((records) => {
+      const region = regionReference.deref();
+      if (region === undefined || !region.isConnected) return;
+      this.#markAttachmentMutations(contextIdentity, region, records);
+    });
+    this.#attachmentObserver.observe(submissionRegion, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+    });
+  }
+
+  #markAttachmentMutations(
+    contextIdentity: number,
+    region: HTMLElement,
+    records: readonly MutationRecord[],
+  ): void {
+    const tracker = this.#attachmentStates.get(contextIdentity);
+    if (
+      tracker === undefined ||
+      tracker.submissionRegion.deref() !== region ||
+      !region.isConnected
+    ) {
+      return;
+    }
+    const priorEvidence = new Set(
+      tracker.evidence
+        .map((reference) => reference.deref())
+        .filter((element): element is Element => element !== undefined),
+    );
+    const changed = records.some((record) => {
+      const target =
+        record.target instanceof Element
+          ? record.target
+          : record.target.parentElement;
+      if (target === null || !region.contains(target)) return false;
+      if (
+        priorEvidence.has(target) ||
+        [...priorEvidence].some((element) => element.contains(target)) ||
+        target.matches(CLAUDE_SELECTORS.attachmentEvidence)
+      ) {
+        return true;
+      }
+      return [...record.addedNodes, ...record.removedNodes].some(
+        nodeContainsAttachmentEvidence,
+      );
+    });
+    if (changed) tracker.mutationVersion += 1;
+  }
+
+  #disconnectAttachmentObserver(): void {
+    this.#attachmentObserver?.disconnect();
+    this.#attachmentObserver = null;
+    this.#attachmentObservationRegion = null;
+    this.#attachmentObservationIdentity = null;
   }
 
   #queueHealthCheck(): void {

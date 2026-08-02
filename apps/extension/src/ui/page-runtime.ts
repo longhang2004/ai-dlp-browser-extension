@@ -3,9 +3,15 @@ import {
   type RuntimeRequest,
   type RuntimeResponse,
 } from "@ai-dlp/shared-types";
+import {
+  createPermissionApi,
+  type PermissionApiSource,
+} from "../background/permission-api.js";
+import type { PermissionApi } from "@ai-dlp/shared-types/permissions";
 
 export type ExtensionPageRuntime = {
   sendMessage(message: RuntimeRequest): Promise<unknown> | unknown;
+  permissions?: PermissionApi;
 };
 
 export async function sendPageRequest(
@@ -27,5 +33,8 @@ export function getInstalledPageRuntime(): ExtensionPageRuntime {
     sendMessage(message) {
       return chrome.runtime.sendMessage<RuntimeRequest, unknown>(message);
     },
+    permissions: createPermissionApi(
+      chrome.permissions as unknown as PermissionApiSource,
+    ),
   };
 }

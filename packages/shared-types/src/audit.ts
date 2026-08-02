@@ -71,8 +71,8 @@ export type DecisionAuditEvent = PromptFreeBoundary & {
   kind: "decision";
   id: AuditEventId;
   timestamp: AuditTimestamp;
-  adapterId: "chatgpt";
-  surfaceId: "chatgpt_web";
+  adapterId: AdapterId;
+  surfaceId: AiSurfaceId;
   policyAction: PolicyAction;
   resolution: DecisionResolution;
   detectorCategories: PromptFreeArray<SensitiveDataCategory>;
@@ -81,7 +81,7 @@ export type DecisionAuditEvent = PromptFreeBoundary & {
   reasonCode: DecisionReason;
   attachmentPresent: boolean;
   maskedExcerpt?: MaskedPreview;
-  adapterVersion: ChatGptAdapterVersion;
+  adapterVersion: string;
 };
 
 export const ENFORCEMENT_ERROR_CODES = Object.freeze([
@@ -101,10 +101,10 @@ export type EnforcementErrorAuditEvent = PromptFreeBoundary & {
   kind: "enforcement_error";
   id: AuditEventId;
   timestamp: AuditTimestamp;
-  adapterId: "chatgpt";
-  surfaceId: "chatgpt_web";
+  adapterId: AdapterId;
+  surfaceId: AiSurfaceId;
   errorCode: EnforcementErrorCode;
-  adapterVersion: ChatGptAdapterVersion;
+  adapterVersion: string;
 };
 
 export const ADAPTER_HEALTH_CODES = Object.freeze([
@@ -116,8 +116,11 @@ export const ADAPTER_HEALTH_CODES = Object.freeze([
 
 export const CHATGPT_ADAPTER_VERSIONS = Object.freeze(["1", "2", "3"] as const);
 export const CHATGPT_ADAPTER_VERSION = "3" as const;
+export const CLAUDE_ADAPTER_VERSIONS = Object.freeze(["1"] as const);
+export const CLAUDE_ADAPTER_VERSION = "1" as const;
 
 export type ChatGptAdapterVersion = (typeof CHATGPT_ADAPTER_VERSIONS)[number];
+export type ClaudeAdapterVersion = (typeof CLAUDE_ADAPTER_VERSIONS)[number];
 
 export type AdapterHealthCode = (typeof ADAPTER_HEALTH_CODES)[number];
 
@@ -125,11 +128,11 @@ export type AdapterHealthAuditEvent = PromptFreeBoundary & {
   kind: "adapter_health";
   id: AuditEventId;
   timestamp: AuditTimestamp;
-  adapterId: "chatgpt";
-  surfaceId: "chatgpt_web";
+  adapterId: AdapterId;
+  surfaceId: AiSurfaceId;
   status: "degraded";
   healthCode: AdapterHealthCode;
-  adapterVersion: ChatGptAdapterVersion;
+  adapterVersion: string;
 };
 
 export type AuditEvent =

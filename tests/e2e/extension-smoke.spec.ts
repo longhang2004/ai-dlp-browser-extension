@@ -3,10 +3,12 @@ import { resolve } from "node:path";
 
 import {
   expect,
+  claudeSubmissionValues,
   openExtensionPage,
   protectionDialog,
   sendRuntimeMessage,
   setComposerText,
+  setClaudeComposerText,
   setStructuralAttachment,
   submissionValues,
   test,
@@ -646,9 +648,11 @@ test("options disabling is reflected truthfully and passes submissions through",
   await expect(
     optionsPage.getByRole("heading", { name: "Protection settings" }),
   ).toBeVisible();
-  await optionsPage.getByRole("checkbox").uncheck();
+  await optionsPage
+    .getByRole("checkbox", { name: "Enable prompt protection on ChatGPT" })
+    .uncheck();
   await optionsPage.getByRole("button", { name: "Save settings" }).click();
-  await expect(optionsPage.getByRole("status")).toContainText("Settings saved");
+  await expect(optionsPage.getByText("Settings saved.")).toBeVisible();
   await waitForProtectionState(optionsPage, "disabled");
 
   await setComposerText(chatPage, sensitive.paymentCard.validVisa);
@@ -703,4 +707,50 @@ test("audit page displays the retained final privacy-safe decision", async ({
   ).toBeVisible();
   await expect(auditPage.locator(".event-card")).toHaveCount(1);
   await auditPage.close();
+});
+
+test("Claude remains pass-through without exact optional access and excludes the alternate port", async ({
+  claudePage,
+  extensionContext,
+  extensionId,
+}) => {
+  const popupPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await expect(
+    popupPage.getByRole("heading", { name: "Protection is unavailable" }),
+  ).toBeVisible();
+
+  const prompt = sensitive.paymentCard.validVisa;
+  await setClaudeComposerText(claudePage, prompt);
+  await claudePage.getByRole("button", { name: "Send message" }).click();
+  await expect.poll(() => claudeSubmissionValues(claudePage)).toEqual([prompt]);
+  await expect(protectionDialog(claudePage)).toHaveCount(0);
+
+  const audit = (await sendRuntimeMessage(popupPage, {
+    type: "audit.read",
+  })) as {
+    type: string;
+    envelope: {
+      events: Array<Record<string, unknown>>;
+    };
+  };
+  expect(audit.type).toBe("audit.result");
+  expect(audit.envelope.events).toEqual([]);
+
+  const alternatePage = await extensionContext.newPage();
+  await alternatePage.goto("https://claude.ai:8443/promptguard-e2e", {
+    waitUntil: "domcontentloaded",
+  });
+  await setClaudeComposerText(alternatePage, sensitive.paymentCard.validVisa);
+  await alternatePage.getByRole("button", { name: "Send message" }).click();
+  await expect
+    .poll(() => claudeSubmissionValues(alternatePage))
+    .toEqual([sensitive.paymentCard.validVisa]);
+  await expect(protectionDialog(alternatePage)).toHaveCount(0);
+
+  await alternatePage.close();
+  await popupPage.close();
 });

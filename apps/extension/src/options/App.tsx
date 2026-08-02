@@ -6,6 +6,12 @@ import {
   type SettingsValidationError,
   type SurfaceSettings,
 } from "@ai-dlp/shared-types";
+import {
+  CLAUDE_HOST_PERMISSION_PATTERN,
+  CLAUDE_PERMISSION_SCOPE,
+  type PermissionApi,
+  type PermissionScope,
+} from "@ai-dlp/shared-types/permissions";
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
@@ -22,6 +28,15 @@ type FormState = {
   attachmentAction: ConfigurableProtectionAction;
   protectedKeywords: string;
   auditRetentionLimit: string;
+};
+
+const CLAUDE_HOST_SCOPE: PermissionScope = {
+  permissions: [],
+  origins: [CLAUDE_HOST_PERMISSION_PATTERN],
+};
+const CLAUDE_NAMED_SCOPE: PermissionScope = {
+  permissions: ["scripting"],
+  origins: [],
 };
 
 const FIELD_ERROR_COPY: Record<SettingsValidationError["field"], string> = {
@@ -70,14 +85,19 @@ function createSettings(form: FormState): ProtectionSettings | undefined {
 
 export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
   const [form, setForm] = useState<FormState | null>(null);
+  const [claudePermissions, setClaudePermissions] = useState<{
+    host: boolean;
+    named: boolean;
+  } | null>(null);
   const [notice, setNotice] = useState("Loading validated settings…");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let current = true;
+    const pageRuntime = runtime ?? getInstalledPageRuntime();
     void Promise.resolve()
       .then(() =>
-        sendPageRequest(runtime ?? getInstalledPageRuntime(), {
+        sendPageRequest(pageRuntime, {
           type: "settings.read",
         }),
       )
@@ -95,10 +115,67 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
           if (current) setNotice("Settings are currently unavailable.");
         },
       );
+    const permissions = pageRuntime.permissions;
+    if (permissions === undefined) {
+      void Promise.resolve().then(() => {
+        if (current) setClaudePermissions(null);
+      });
+    } else {
+      void Promise.all([
+        permissions.contains(CLAUDE_HOST_SCOPE),
+        permissions.contains(CLAUDE_NAMED_SCOPE),
+      ]).then(
+        ([host, named]) => {
+          if (current) setClaudePermissions({ host, named });
+        },
+        () => {
+          if (current) setClaudePermissions({ host: false, named: false });
+        },
+      );
+    }
     return () => {
       current = false;
     };
   }, [runtime]);
+
+  function claudeEnabled(): boolean {
+    return (
+      form?.surfaces.find((surface) => surface.surfaceId === "claude_web")
+        ?.enabled ?? false
+    );
+  }
+
+  function setClaudeEnabled(enabled: boolean): void {
+    if (form === null) return;
+    setForm({
+      ...form,
+      surfaces: form.surfaces.map((surface) =>
+        surface.surfaceId === "claude_web" ? { ...surface, enabled } : surface,
+      ),
+    });
+  }
+
+  async function requestClaudeAccess(): Promise<void> {
+    const pageRuntime = runtime ?? getInstalledPageRuntime();
+    const permissions: PermissionApi | undefined = pageRuntime.permissions;
+    if (permissions === undefined) return;
+    const granted = await permissions.request(CLAUDE_PERMISSION_SCOPE);
+    if (granted) {
+      setClaudePermissions({ host: true, named: true });
+    } else {
+      setClaudePermissions({ host: false, named: false });
+    }
+  }
+
+  async function removeClaudeAccess(): Promise<void> {
+    const pageRuntime = runtime ?? getInstalledPageRuntime();
+    const permissions = pageRuntime.permissions;
+    if (permissions === undefined) return;
+    await permissions.remove(CLAUDE_HOST_SCOPE);
+    await permissions.remove(CLAUDE_NAMED_SCOPE);
+    setClaudePermissions({ host: false, named: false });
+    setClaudeEnabled(false);
+  }
 
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -258,7 +335,48 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
           </section>
           <section className="card">
             <h2>Claude web</h2>
-            <p>Claude support is not installed in this release.</p>
+            <p>Claude verification candidate</p>
+            <p>
+              PromptGuard can access only the AI applications that are
+              explicitly enabled and granted permission.
+            </p>
+            <p>
+              Origin: <code>{CLAUDE_HOST_PERMISSION_PATTERN}</code>
+            </p>
+            <p role="status">
+              {claudePermissions?.host && claudePermissions.named
+                ? "Claude access is granted."
+                : "Claude access is not granted."}
+            </p>
+            <div className="page-actions">
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => void requestClaudeAccess()}
+              >
+                Grant Claude access
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={!claudePermissions?.host && !claudePermissions?.named}
+                onClick={() => void removeClaudeAccess()}
+              >
+                Remove Claude access
+              </button>
+            </div>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={claudeEnabled()}
+                disabled={!claudePermissions?.host || !claudePermissions?.named}
+                onChange={(event) => setClaudeEnabled(event.target.checked)}
+              />
+              Enable Claude protection
+            </label>
+            <small>
+              Loaded pages may need refresh after Claude access is removed.
+            </small>
           </section>
           <div className="form-footer">
             <button className="button primary" type="submit" disabled={saving}>

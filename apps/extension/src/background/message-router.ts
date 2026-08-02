@@ -1,4 +1,5 @@
 import type {
+  AdapterDescriptor,
   ProtectionStatusSnapshot,
   RuntimeResponse,
 } from "@ai-dlp/shared-types";
@@ -31,6 +32,8 @@ export function createMessageListener(options: {
   // Phase 11 must inject this only after a validated content-script status ack.
   // Without it, status.read remains conservatively `initializing`.
   readStatus?: () => Promise<ProtectionStatusSnapshot>;
+  isContentRuntimeAllowed?: (descriptor: AdapterDescriptor) => boolean;
+  onSettingsSaved?: () => void;
 }): RuntimeMessageListener {
   let pendingSettingsSave: Promise<void> = Promise.resolve();
 
@@ -63,17 +66,19 @@ export function createMessageListener(options: {
       sender,
       options.runtimeId,
     );
-    if (
-      senderAuthorization === null ||
-      (request.type === "audit.append" &&
-        (senderAuthorization.source !== "content_script" ||
-          request.event.adapterId !==
-            senderAuthorization.descriptor.adapterId ||
-          request.event.surfaceId !==
-            senderAuthorization.descriptor.surfaceId ||
-          request.event.adapterVersion !==
-            senderAuthorization.descriptor.version))
-    ) {
+    const contentDescriptor =
+      senderAuthorization?.source === "content_script"
+        ? senderAuthorization.descriptor
+        : null;
+    const invalidAuditSender =
+      request.type === "audit.append" &&
+      (contentDescriptor === null ||
+        request.event.adapterId !== contentDescriptor.adapterId ||
+        request.event.surfaceId !== contentDescriptor.surfaceId ||
+        request.event.adapterVersion !== contentDescriptor.version ||
+        (options.isContentRuntimeAllowed !== undefined &&
+          !options.isContentRuntimeAllowed(contentDescriptor)));
+    if (senderAuthorization === null || invalidAuditSender) {
       respond({ type: "error", errorCode: "invalid_sender" });
       return true;
     }
@@ -106,6 +111,11 @@ export function createMessageListener(options: {
                 await options.broadcastSettings(result.envelope);
               } catch {
                 // Connected-port delivery is ancillary after persistence.
+              }
+              try {
+                options.onSettingsSaved?.();
+              } catch {
+                // Registration reconciliation is ancillary after persistence.
               }
               return { type: "settings.saved", envelope: result.envelope };
             });

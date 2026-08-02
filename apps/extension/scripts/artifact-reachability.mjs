@@ -108,6 +108,16 @@ function collectManifestRoots(manifest, addRoot) {
       addRoot(file, "Manifest content stylesheet");
     }
   }
+  if (
+    JSON.stringify(manifest.optional_permissions) ===
+      JSON.stringify(["scripting"]) &&
+    JSON.stringify(manifest.optional_host_permissions) ===
+      JSON.stringify(["https://claude.ai:443/*"])
+  ) {
+    addRoot("content-claude.js", "Manifest dynamic content script", {
+      executable: true,
+    });
+  }
   addIconReferences(manifest, addRoot);
 }
 

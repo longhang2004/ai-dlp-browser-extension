@@ -36,9 +36,16 @@ if (
 if (JSON.stringify(manifest.permissions) !== JSON.stringify(["storage"])) {
   fail("permissions must contain only storage");
 }
+if (
+  JSON.stringify(manifest.optional_permissions) !==
+    JSON.stringify(["scripting"]) ||
+  JSON.stringify(manifest.optional_host_permissions) !==
+    JSON.stringify(["https://claude.ai:443/*"])
+) {
+  fail("Claude optional permission declaration changed");
+}
 for (const forbidden of [
   "host_permissions",
-  "optional_host_permissions",
   "externally_connectable",
   "sandbox",
   "web_accessible_resources",
@@ -84,6 +91,7 @@ for (const required of [
   "manifest.json",
   "background.js",
   "content-script.js",
+  "content-claude.js",
   "popup.html",
   "options.html",
   "audit.html",
@@ -103,6 +111,28 @@ if (contentImports.staticSpecifiers.length > 0) {
 }
 if (!/^var AiDlpContentScript=/u.test(contentSource)) {
   fail("content script is not a self-contained IIFE");
+}
+if (/Message Claude|data-testid=["']chat-input/u.test(contentSource)) {
+  fail("ChatGPT content script contains Claude selector evidence");
+}
+
+const claudeContentSource = await readFile(
+  new URL("content-claude.js", distRoot),
+  "utf8",
+);
+const claudeContentImports = inspectJavaScriptImports(claudeContentSource);
+if (claudeContentImports.staticSpecifiers.length > 0) {
+  fail("Claude content script contains an ESM import");
+}
+if (!/^var AiDlpClaudeContentScript=/u.test(claudeContentSource)) {
+  fail("Claude content script is not a self-contained IIFE");
+}
+if (
+  /Message ChatGPT|#prompt-textarea|data-testid=["']fruitjuice-send-button/u.test(
+    claudeContentSource,
+  )
+) {
+  fail("Claude content script contains ChatGPT selector evidence");
 }
 
 for (const page of ["popup.html", "options.html", "audit.html"]) {

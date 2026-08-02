@@ -15,6 +15,8 @@ const manifest = JSON.stringify({
   manifest_version: 3,
   minimum_chrome_version: "102",
   permissions: ["storage"],
+  optional_permissions: ["scripting"],
+  optional_host_permissions: ["https://claude.ai:443/*"],
   background: { service_worker: "background.js", type: "module" },
   action: { default_popup: "popup.html" },
   options_page: "options.html",
@@ -40,8 +42,9 @@ function page(script, style) {
 function cleanArtifact() {
   return [
     ["manifest.json", manifest],
-    ["background.js", "export const background = true;"],
+    ["background.js", 'export const background = "https://claude.ai:443/*";'],
     ["content-script.js", 'var content = "https://react.dev/errors/";'],
+    ["content-claude.js", 'var claude = "https://react.dev/errors/";'],
     ["popup.html", page("assets/popup-12345678.js", "assets/popup.css")],
     ["options.html", page("assets/options-12345678.js", "assets/options.css")],
     ["audit.html", page("assets/audit-12345678.js", "assets/popup.css")],
@@ -51,7 +54,7 @@ function cleanArtifact() {
     ],
     ["assets/options-12345678.js", "export const options = true;"],
     ["assets/audit-12345678.js", "export const audit = true;"],
-    ["assets/runtime.js", "export const runtime = true;"],
+    ["assets/runtime.js", 'export const runtime = "https://claude.ai:443/*";'],
     ["assets/popup.css", "body { color: black; }"],
     ["assets/options.css", "body { color: black; }"],
   ];
@@ -104,7 +107,7 @@ async function runVerifier(artifact) {
   };
 }
 
-test("verify artifact accepts a clean 12-file reachable artifact", async () => {
+test("verify artifact accepts a clean 13-file reachable artifact", async () => {
   const { result } = await runVerifier(await createArtifact());
   assert.equal(result.code, 0, result.output);
 });
@@ -139,16 +142,16 @@ test("verify artifact rejects a missing imported asset", async () => {
   assert.match(result.output, /imports missing local asset/u);
 });
 
-test("verify artifact rejects optional scripting even without an optional host", async () => {
+test("verify artifact rejects an unknown optional named permission", async () => {
   const { result } = await runVerifier(
     await createArtifact(
       artifactWithManifest((candidate) => {
-        candidate.optional_permissions = ["scripting"];
+        candidate.optional_permissions = ["tabs"];
       }),
     ),
   );
   assert.notEqual(result.code, 0, result.output);
-  assert.match(result.output, /optional_permissions/u);
+  assert.match(result.output, /optional named permissions/u);
 });
 
 test("verify artifact rejects any extension CSP drift", async () => {
@@ -164,16 +167,7 @@ test("verify artifact rejects any extension CSP drift", async () => {
   assert.match(result.output, /CSP must match/u);
 });
 
-test("verify artifact rejects Claude-named bundles and selector literals", async () => {
-  const claudeBundle = await runVerifier(
-    await createArtifact([
-      ...cleanArtifact(),
-      ["claude-content-script.js", "var candidate = true;"],
-    ]),
-  );
-  assert.notEqual(claudeBundle.result.code, 0, claudeBundle.result.output);
-  assert.match(claudeBundle.result.output, /Claude-named artifact/u);
-
+test("verify artifact rejects cross-entry selector literals", async () => {
   const claudeSelector = await runVerifier(
     await createArtifact(
       cleanArtifact().map(([file, contents]) =>
@@ -194,14 +188,14 @@ test("verify artifact rejects bracket-hidden dynamic content registration", asyn
         file === "background.js"
           ? [
               file,
-              'chrome["scripting"]["registerContentScripts"]([{ id: "candidate" }]);',
+              'const scope = "https://claude.ai:443/*"; chrome["scripting"]["registerContentScripts"]([{ id: "candidate" }]);',
             ]
           : [file, contents],
       ),
     ),
   );
   assert.notEqual(result.code, 0, result.output);
-  assert.match(result.output, /dynamic content registration/u);
+  assert.match(result.output, /hidden Chrome API access/u);
 });
 
 test("verify artifact isolates URL reports for concurrent fixtures", async () => {
@@ -226,7 +220,7 @@ test("pnpm build creates and verifies a clean artifact", async () => {
   const result = await execFileAsync("pnpm", ["build"], {
     cwd: repositoryRoot,
   });
-  assert.match(result.stdout, /Verified MV3 build topology \(12 files\)\./u);
+  assert.match(result.stdout, /Verified MV3 build topology \(13 files\)\./u);
 
   const artifactRoot = new URL("./apps/extension/dist/", repositoryRoot);
   const javascriptFiles = (

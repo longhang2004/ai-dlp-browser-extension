@@ -1,5 +1,6 @@
 import {
   ADAPTER_HEALTH_CODES,
+  CLAUDE_ADAPTER_VERSIONS,
   CHATGPT_ADAPTER_VERSIONS,
   DECISION_RESOLUTIONS,
   ENFORCEMENT_ERROR_CODES,
@@ -630,12 +631,19 @@ function isDecisionResolutionForAction(
 }
 
 function hasCommonAuditFields(value: Record<PropertyKey, unknown>): boolean {
+  if (!isAuditEventId(value.id) || !isAuditTimestamp(value.timestamp)) {
+    return false;
+  }
+  if (value.adapterId === "chatgpt") {
+    return (
+      value.surfaceId === "chatgpt_web" &&
+      isOneOf(value.adapterVersion, CHATGPT_ADAPTER_VERSIONS)
+    );
+  }
   return (
-    isAuditEventId(value.id) &&
-    isAuditTimestamp(value.timestamp) &&
-    value.adapterId === "chatgpt" &&
-    value.surfaceId === "chatgpt_web" &&
-    isOneOf(value.adapterVersion, CHATGPT_ADAPTER_VERSIONS)
+    value.adapterId === "claude" &&
+    value.surfaceId === "claude_web" &&
+    isOneOf(value.adapterVersion, CLAUDE_ADAPTER_VERSIONS)
   );
 }
 
@@ -943,7 +951,8 @@ function isProtectionStatusSnapshotValue(
     }
 
     const hasReportedIdentity =
-      value.application === "chatgpt" && value.surfaceId === "chatgpt_web";
+      (value.application === "chatgpt" && value.surfaceId === "chatgpt_web") ||
+      (value.application === "claude" && value.surfaceId === "claude_web");
     const hasNoIdentity =
       value.application === null && value.surfaceId === null;
 
@@ -985,7 +994,11 @@ function isContentProtectionStatusValue(
         "surfaceId",
         "protectionEnabled",
       ]) ||
-      !(value.application === "chatgpt" && value.surfaceId === "chatgpt_web")
+      !(
+        (value.application === "chatgpt" &&
+          value.surfaceId === "chatgpt_web") ||
+        (value.application === "claude" && value.surfaceId === "claude_web")
+      )
     ) {
       return false;
     }

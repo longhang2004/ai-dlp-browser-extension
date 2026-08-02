@@ -3,18 +3,17 @@ import {
   cloneProtectionSettings,
   createAuditEventId,
   createAuditTimestamp,
+  type AdapterDescriptor,
   type AuditEvent,
   type ContentProtectionStatus,
   type ProtectionSettings,
-  type RuntimeResponse,
 } from "@ai-dlp/shared-types";
 
-import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/adapter-catalog.js";
-import {
-  createDocumentAdapterRegistry,
-  type DocumentAdapterRegistry,
-} from "../adapters/adapter-registry.js";
-import type { ChatGptAdapterOptions } from "../adapters/chatgpt/chatgpt-adapter.js";
+import type {
+  AdapterHealthTransition,
+  AdapterLifecycleOptions,
+} from "../adapters/chat-application-adapter.js";
+import type { DocumentAdapterRegistry } from "../adapters/catalog-registry.js";
 import {
   createProtectionDialogController,
   type ProtectionDialogController,
@@ -49,8 +48,8 @@ export type ContentBootstrap = {
     | ContentProtectionStatus
     | {
         state: "unavailable";
-        application: typeof CHATGPT_ADAPTER_DESCRIPTOR.adapterId;
-        surfaceId: typeof CHATGPT_ADAPTER_DESCRIPTOR.surfaceId;
+        application: AdapterDescriptor["adapterId"];
+        surfaceId: AdapterDescriptor["surfaceId"];
         protectionEnabled: null;
       };
   getSettings(): ProtectionSettings | null;
@@ -60,10 +59,7 @@ export type ContentBootstrap = {
 type RegistryFactory = (options: {
   document: Document;
   entryPoint: string;
-  adapterOptions: Pick<
-    ChatGptAdapterOptions,
-    "onAdapterError" | "onHealthTransition"
-  >;
+  adapterOptions: Omit<AdapterLifecycleOptions, "document">;
 }) => DocumentAdapterRegistry | null;
 type DialogFactory = (
   documentValue: Document,
@@ -73,20 +69,22 @@ type ControllerFactory = (
   options: SubmissionControllerOptions,
 ) => SubmissionController;
 
-function unavailableStatus() {
+function unavailableStatus(descriptor: AdapterDescriptor) {
   return {
     state: "unavailable" as const,
-    application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-    surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+    application: descriptor.adapterId,
+    surfaceId: descriptor.surfaceId,
     protectionEnabled: null,
   };
 }
 
-function initializingStatus(): ContentProtectionStatus {
+function initializingStatus(
+  descriptor: AdapterDescriptor,
+): ContentProtectionStatus {
   return {
     state: "initializing",
-    application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-    surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+    application: descriptor.adapterId,
+    surfaceId: descriptor.surfaceId,
     protectionEnabled: null,
   };
 }
@@ -94,23 +92,27 @@ function initializingStatus(): ContentProtectionStatus {
 export function bootstrapContent(options: {
   document: Document;
   runtime: ContentRuntime;
+  descriptor: AdapterDescriptor;
   scheduler?: RetryScheduler;
-  createRegistry?: RegistryFactory;
+  createRegistry: RegistryFactory;
   createDialog?: DialogFactory;
   createController?: ControllerFactory;
   eventId?: () => string;
   now?: () => Date;
 }): ContentBootstrap {
-  if (options.document.defaultView?.location.origin !== "https://chatgpt.com") {
+  const { descriptor } = options;
+  if (
+    descriptor.origins.length !== 1 ||
+    options.document.defaultView?.location.origin !== descriptor.origins[0]
+  ) {
     return {
-      getStatus: unavailableStatus,
+      getStatus: () => unavailableStatus(descriptor),
       getSettings: () => null,
       dispose() {},
     };
   }
 
-  const registryFactory =
-    options.createRegistry ?? createDocumentAdapterRegistry;
+  const registryFactory = options.createRegistry;
   const dialogFactory =
     options.createDialog ?? createProtectionDialogController;
   const controllerFactory =
@@ -118,10 +120,11 @@ export function bootstrapContent(options: {
   const eventId = options.eventId ?? (() => crypto.randomUUID());
   const now = options.now ?? (() => new Date());
   let settings: ProtectionSettings | null = null;
+  let surfaceEnabled = false;
   let enforcementSettings: EnforcementSettings | null = null;
   let enforcementRevision: EnforcementRevision = 0;
   let status: ContentProtectionStatus | ReturnType<typeof unavailableStatus> =
-    initializingStatus();
+    initializingStatus(descriptor);
   let adapterRegistry: DocumentAdapterRegistry | null = null;
   let dialog: ProtectionDialogController | null = null;
   let controller: SubmissionController | null = null;
@@ -152,11 +155,11 @@ export function bootstrapContent(options: {
   function publishReadyStatus(): void {
     const current = settings;
     if (current === null || unregister === null) return;
-    if (!current.protectionEnabled) {
+    if (!current.protectionEnabled || !surfaceEnabled) {
       publish({
         state: "disabled",
-        application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-        surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+        application: descriptor.adapterId,
+        surfaceId: descriptor.surfaceId,
         protectionEnabled: false,
       });
       return;
@@ -167,17 +170,13 @@ export function bootstrapContent(options: {
         : adapterWaiting
           ? "waiting_for_composer"
           : "active",
-      application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-      surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+      application: descriptor.adapterId,
+      surfaceId: descriptor.surfaceId,
       protectionEnabled: true,
     });
   }
 
-  function handleHealth(
-    transition: Parameters<
-      NonNullable<ChatGptAdapterOptions["onHealthTransition"]>
-    >[0],
-  ): void {
+  function handleHealth(transition: AdapterHealthTransition): void {
     if (disposed) return;
     if (transition.status === "waiting_for_composer") {
       adapterDegraded = false;
@@ -197,18 +196,16 @@ export function bootstrapContent(options: {
       kind: "adapter_health",
       id: createAuditEventId(eventId()),
       timestamp: createAuditTimestamp(now().toISOString()),
-      adapterId: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-      surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+      adapterId: descriptor.adapterId,
+      surfaceId: descriptor.surfaceId,
       status: "degraded",
       healthCode: transition.healthCode,
-      adapterVersion: CHATGPT_ADAPTER_DESCRIPTOR.version,
+      adapterVersion: descriptor.version,
     });
     publishReadyStatus();
   }
 
-  function handleAdapterError(
-    error: Parameters<NonNullable<ChatGptAdapterOptions["onAdapterError"]>>[0],
-  ): void {
+  function handleAdapterError(error: { readonly code: string }): void {
     if (disposed || error.code !== "interceptor_failure") return;
     adapterDegraded = true;
     try {
@@ -220,10 +217,10 @@ export function bootstrapContent(options: {
       kind: "enforcement_error",
       id: createAuditEventId(eventId()),
       timestamp: createAuditTimestamp(now().toISOString()),
-      adapterId: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-      surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+      adapterId: descriptor.adapterId,
+      surfaceId: descriptor.surfaceId,
       errorCode: "extension_context_invalidated",
-      adapterVersion: CHATGPT_ADAPTER_DESCRIPTOR.version,
+      adapterVersion: descriptor.version,
     });
     try {
       void Promise.resolve(
@@ -239,6 +236,7 @@ export function bootstrapContent(options: {
   }
 
   function ensureRuntime(): boolean {
+    if (registryFactory === undefined) return false;
     if (controller !== null) return true;
     let createdRegistry: DocumentAdapterRegistry | null = null;
     let createdDialog: ProtectionDialogController | null = null;
@@ -246,7 +244,7 @@ export function bootstrapContent(options: {
     try {
       createdRegistry = registryFactory({
         document: options.document,
-        entryPoint: CHATGPT_ADAPTER_DESCRIPTOR.entryPoint,
+        entryPoint: descriptor.entryPoint,
         adapterOptions: {
           onHealthTransition: handleHealth,
           onAdapterError: handleAdapterError,
@@ -266,7 +264,8 @@ export function bootstrapContent(options: {
           }
           return cloneProtectionSettings(settings);
         },
-        isProtectionEnabled: () => settings?.protectionEnabled === true,
+        isProtectionEnabled: () =>
+          settings?.protectionEnabled === true && surfaceEnabled,
         currentRevision: () => enforcementRevision,
       });
       adapterRegistry = createdRegistry;
@@ -338,7 +337,7 @@ export function bootstrapContent(options: {
       try {
         port.postMessage({
           type: "content.handshake",
-          descriptor: structuredClone(CHATGPT_ADAPTER_DESCRIPTOR),
+          descriptor: structuredClone(descriptor),
         });
       } catch (error) {
         try {
@@ -357,26 +356,33 @@ export function bootstrapContent(options: {
       if (disposed) return;
       if (connectionState === "initializing") {
         settings = null;
-        publish(initializingStatus());
+        surfaceEnabled = false;
+        publish(initializingStatus(descriptor));
         return;
       }
       if (connectionState === "unavailable") {
         disposeProtectionRuntime();
         settings = null;
-        publish(unavailableStatus());
+        surfaceEnabled = false;
+        publish(unavailableStatus(descriptor));
       }
     },
     onSettings(nextSettings) {
       if (disposed) return;
       const next = cloneProtectionSettings(nextSettings);
+      const nextSurfaceEnabled = next.surfaces.some(
+        (surface) =>
+          surface.surfaceId === descriptor.surfaceId && surface.enabled,
+      );
       const nextEnforcement = snapshotEnforcementSettings(next);
       const enforcementChanged =
         enforcementSettings === null ||
-        !areEnforcementSettingsEqual(enforcementSettings, nextEnforcement);
+        !areEnforcementSettingsEqual(enforcementSettings, nextEnforcement) ||
+        surfaceEnabled !== nextSurfaceEnabled;
       if (enforcementChanged) {
         enforcementRevision += 1;
         enforcementSettings = nextEnforcement;
-        if (next.protectionEnabled) {
+        if (next.protectionEnabled && nextSurfaceEnabled) {
           try {
             controller?.cancelActiveAttempt();
           } catch {
@@ -387,11 +393,12 @@ export function bootstrapContent(options: {
         }
       }
       settings = next;
-      if (!settings.protectionEnabled) {
+      surfaceEnabled = nextSurfaceEnabled;
+      if (!settings.protectionEnabled || !surfaceEnabled) {
         publish({
           state: "disabled",
-          application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-          surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+          application: descriptor.adapterId,
+          surfaceId: descriptor.surfaceId,
           protectionEnabled: false,
         });
         return;
@@ -407,8 +414,8 @@ export function bootstrapContent(options: {
       if (unregister === null) {
         publish({
           state: "degraded",
-          application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
-          surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
+          application: descriptor.adapterId,
+          surfaceId: descriptor.surfaceId,
           protectionEnabled: true,
         });
         return;
@@ -440,13 +447,16 @@ export function bootstrapContent(options: {
         // Final public state is still made unavailable below.
       } finally {
         settings = null;
-        status = unavailableStatus();
+        surfaceEnabled = false;
+        status = unavailableStatus(descriptor);
       }
     },
   };
 }
 
-function adaptInstalledPort(port: chrome.runtime.Port): ContentRuntimePort {
+export function adaptInstalledPort(
+  port: chrome.runtime.Port,
+): ContentRuntimePort {
   const messageListeners = new Map<
     (message: unknown) => void,
     (message: unknown, port: chrome.runtime.Port) => void
@@ -491,20 +501,3 @@ function adaptInstalledPort(port: chrome.runtime.Port): ContentRuntimePort {
     },
   };
 }
-
-const installedChrome = typeof chrome === "undefined" ? undefined : chrome;
-
-export const installedContent: ContentBootstrap | undefined =
-  installedChrome === undefined || typeof document === "undefined"
-    ? undefined
-    : bootstrapContent({
-        document,
-        runtime: {
-          connect: ({ name }) =>
-            adaptInstalledPort(installedChrome.runtime.connect({ name })),
-          sendMessage: (message) =>
-            installedChrome.runtime.sendMessage<unknown, RuntimeResponse>(
-              message,
-            ),
-        },
-      });

@@ -5,7 +5,10 @@ import type {
   StoredSettingsEnvelope,
 } from "@ai-dlp/shared-types";
 
-import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/adapter-catalog.js";
+import {
+  CHATGPT_ADAPTER_DESCRIPTOR,
+  CLAUDE_ADAPTER_DESCRIPTOR,
+} from "../adapters/adapter-catalog.js";
 import { createSettingsStore } from "../storage/settings-store.js";
 import { createMemoryStoragePort } from "../storage/storage-port.js";
 import {
@@ -361,6 +364,43 @@ describe("settings ports", () => {
     });
   });
 
+  it("accepts disabled status when only the Claude surface is disabled", async () => {
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+    });
+    const connected = port({
+      sender: {
+        ...port().sender,
+        url: "https://claude.ai/promptguard-test",
+        origin: "https://claude.ai",
+      },
+    });
+    manager.handleConnect(connected);
+    handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+
+    connected.fireMessage({
+      type: "status.snapshot",
+      generation: 0,
+      status: {
+        state: "disabled",
+        application: "claude",
+        surfaceId: "claude_web",
+        protectionEnabled: false,
+      },
+    });
+
+    expect(manager.readStatus(0)).toEqual({
+      state: "disabled",
+      application: "claude",
+      surfaceId: "claude_web",
+      protectionEnabled: false,
+      recentEventCount: 0,
+    });
+  });
+
   it("reports unavailable after the last content port disconnects", async () => {
     const manager = createSettingsPortManager({
       runtimeId,
@@ -614,6 +654,33 @@ describe("settings ports", () => {
     await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
     expect(connected.disconnect).not.toHaveBeenCalled();
     expect(manager.readStatus(0).state).toBe("initializing");
+  });
+
+  it("rechecks Claude authorization when a pending port handshakes", async () => {
+    let claudeAllowed = true;
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: createSettingsStore(createMemoryStoragePort()),
+      storageReady: Promise.resolve(),
+      isDescriptorAllowed: (descriptor) =>
+        descriptor.surfaceId !== "claude_web" || claudeAllowed,
+    });
+    const connected = port({
+      sender: {
+        ...port().sender,
+        url: "https://claude.ai/promptguard-test",
+        origin: "https://claude.ai",
+      },
+    });
+
+    manager.handleConnect(connected);
+    claudeAllowed = false;
+    handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
+    await flush();
+
+    expect(connected.disconnect).toHaveBeenCalledOnce();
+    expect(connected.postMessage).not.toHaveBeenCalled();
+    expect(manager.readStatus(0).state).toBe("unavailable");
   });
 
   it("expires a pending content port after the bounded prompt-free handshake timeout", async () => {

@@ -36,7 +36,9 @@ function normalizePopupStatus(
   status: ProtectionStatusSnapshot,
 ): ProtectionStatusSnapshot {
   if (status.application === null && status.surfaceId === null) return status;
-  return status.application === "chatgpt" && status.surfaceId === "chatgpt_web"
+  return (status.application === "chatgpt" &&
+    status.surfaceId === "chatgpt_web") ||
+    (status.application === "claude" && status.surfaceId === "claude_web")
     ? status
     : UNAVAILABLE_STATUS;
 }
@@ -74,12 +76,18 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
   const applicationName =
     status.application === "chatgpt" && status.surfaceId === "chatgpt_web"
       ? "ChatGPT"
-      : null;
+      : status.application === "claude" && status.surfaceId === "claude_web"
+        ? "Claude"
+        : null;
+  const statusHeading =
+    status.state === "waiting_for_composer" && applicationName !== null
+      ? `Protection is waiting for ${applicationName}`
+      : STATUS_COPY[status.state];
 
   return (
     <main className="page-shell popup-shell">
       <p className="eyebrow">AI DLP</p>
-      <h1>{STATUS_COPY[status.state]}</h1>
+      <h1>{statusHeading}</h1>
       <p className={`status-pill status-${status.state}`}>
         {status.state === "initializing"
           ? applicationName === null
@@ -91,6 +99,9 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
               ? "No validated protected surface is reporting"
               : `${applicationName ?? "Supported surface"} · local inspection only`}
       </p>
+      {applicationName === "Claude" ? (
+        <p className="muted">Claude verification candidate</p>
+      ) : null}
       <p className="muted">
         {status.recentEventCount} recent protection events
       </p>

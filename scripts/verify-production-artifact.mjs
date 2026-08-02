@@ -198,7 +198,8 @@ function classifyUrl(occurrence, allowlist) {
   }
   if (
     generatedFile === "manifest.json" &&
-    literal === "https://chatgpt.com/*"
+    (literal === "https://chatgpt.com/*" ||
+      literal === "https://claude.ai:443/*")
   ) {
     return {
       ...occurrence,
@@ -208,13 +209,13 @@ function classifyUrl(occurrence, allowlist) {
         "Static manifest scope only; it does not initiate a network request.",
     };
   }
-  if (literal === "https://chatgpt.com") {
+  if (literal === "https://chatgpt.com" || literal === "https://claude.ai") {
     return {
       ...occurrence,
       classification: "required_application_origin_identifier",
       executableOrFetching: false,
       allowlistJustification:
-        "Exact ChatGPT origin comparison only; it does not initiate a network request.",
+        "Exact packaged application origin comparison only; it does not initiate a network request.",
     };
   }
 
@@ -264,10 +265,18 @@ function validateManifest(manifest) {
     JSON.stringify(manifest.permissions) === JSON.stringify(["storage"]),
     "Manifest permissions must contain only storage.",
   );
+  assert(
+    JSON.stringify(manifest.optional_permissions) ===
+      JSON.stringify(["scripting"]),
+    "Manifest optional named permissions must contain only scripting.",
+  );
+  assert(
+    JSON.stringify(manifest.optional_host_permissions) ===
+      JSON.stringify(["https://claude.ai:443/*"]),
+    "Manifest optional host permissions must contain only the exact Claude pattern.",
+  );
   for (const forbidden of [
     "host_permissions",
-    "optional_permissions",
-    "optional_host_permissions",
     "externally_connectable",
     "sandbox",
     "web_accessible_resources",
@@ -303,6 +312,7 @@ function validateManifest(manifest) {
   if (Array.isArray(content?.js)) {
     for (const file of content.js) addReference(file, "Content script");
   }
+  addReference("content-claude.js", "Dynamic Claude content script");
 
   const csp = manifest.content_security_policy?.extension_pages;
   assert(
@@ -379,12 +389,23 @@ function inspectJavaScript(file, source) {
       /\b(?:registerContentScripts|unregisterContentScripts|getRegisteredContentScripts)\b/u,
       "dynamic content registration",
     ],
+    [/\bchrome\s*\[\s*["']scripting["']\s*\]/u, "hidden Chrome API access"],
     [/\bchat-input\b/u, "Claude selector"],
     [/(?:^|["'`/])tests?\//u, "test import"],
     [/\.(?:test|spec)\.[cm]?[jt]sx?\b/u, "test module"],
   ];
   for (const [pattern, label] of forbiddenPatterns) {
-    if (pattern.test(source)) fail(`${file} contains forbidden ${label} code.`);
+    const allowedRegistration =
+      label === "dynamic content registration" && file === "background.js";
+    const allowedClaudeSelector =
+      label === "Claude selector" && file === "content-claude.js";
+    if (
+      pattern.test(source) &&
+      !allowedRegistration &&
+      !allowedClaudeSelector
+    ) {
+      fail(`${file} contains forbidden ${label} code.`);
+    }
   }
   if (
     (file === "background.js" || file === "content-script.js") &&
@@ -392,7 +413,10 @@ function inspectJavaScript(file, source) {
   ) {
     fail(`${file} contains a dynamic import.`);
   }
-  if (file === "content-script.js" && /^\s*import\b/mu.test(source)) {
+  if (
+    (file === "content-script.js" || file === "content-claude.js") &&
+    /^\s*import\b/mu.test(source)
+  ) {
     fail(
       "content-script.js contains a static import and is not self-contained.",
     );
@@ -453,11 +477,7 @@ try {
   fail(`Production artifact could not be listed: ${String(error)}`);
 }
 
-for (const file of files) {
-  if (/(?:^|\/)claude[^/]*\.(?:[cm]?js|css|html)$/iu.test(file)) {
-    fail(`Claude-named artifact is forbidden in M2.0: ${file}`);
-  }
-}
+assert(files.includes("content-claude.js"), "Claude content entry is missing.");
 
 try {
   await verifyExtensionArtifactReachability(distRoot);

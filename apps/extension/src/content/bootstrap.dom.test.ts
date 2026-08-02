@@ -281,6 +281,7 @@ function enforcementIntegrationHarness(options: {
   };
   const content = bootstrapContent({
     document,
+    descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
     runtime: {
       connect: () => port,
       sendMessage: async (message) => {
@@ -377,6 +378,7 @@ function harness() {
   });
   const content = bootstrapContent({
     document,
+    descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
     runtime,
     scheduler,
     createRegistry,
@@ -419,6 +421,7 @@ describe("content bootstrap", () => {
 
       const content = bootstrapContent({
         document: originOnlyDocument(origin),
+        descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
         runtime,
         createRegistry,
       });
@@ -453,6 +456,7 @@ describe("content bootstrap", () => {
 
     const content = bootstrapContent({
       document,
+      descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
       runtime,
       createRegistry,
       createDialog: () => ({
@@ -577,6 +581,7 @@ describe("content bootstrap", () => {
 
     const content = bootstrapContent({
       document,
+      descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
       runtime,
       scheduler,
       createRegistry: () => {

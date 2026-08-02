@@ -4,6 +4,7 @@ import {
   isContentStatusPortMessage,
   isStoredSettingsEnvelope,
   type ContentProtectionStatus,
+  type AdapterDescriptor,
   type ProtectionStatusSnapshot,
   type StoredSettingsEnvelope,
 } from "@ai-dlp/shared-types";
@@ -35,6 +36,7 @@ export interface SettingsPortManager {
   handleConnect(port: RuntimePortLike): void;
   broadcast(envelope: StoredSettingsEnvelope): Promise<void>;
   readStatus(recentEventCount: number): ProtectionStatusSnapshot;
+  disconnectSurface(surfaceId: string): void;
 }
 
 export interface HandshakeScheduler {
@@ -55,15 +57,17 @@ export function createSettingsPortManager(options: {
   settingsStore: SettingsStore;
   storageReady: Promise<void>;
   handshakeScheduler?: HandshakeScheduler;
+  isDescriptorAllowed?: (descriptor: AdapterDescriptor) => boolean;
 }): SettingsPortManager {
   const handshakeScheduler =
     options.handshakeScheduler ?? browserHandshakeScheduler;
   const ports = new Set<RuntimePortLike>();
   const lastSentGeneration = new Map<RuntimePortLike, number>();
   const expectedGeneration = new Map<RuntimePortLike, number>();
-  const expectedProtectionEnabled = new Map<RuntimePortLike, boolean>();
+  const expectedRuntimeEnabled = new Map<RuntimePortLike, boolean>();
   const connectionTokens = new Map<RuntimePortLike, number>();
   const statuses = new Map<RuntimePortLike, ContentProtectionStatus>();
+  const descriptors = new Map<RuntimePortLike, AdapterDescriptor>();
   const listenerCleanup = new Map<RuntimePortLike, () => void>();
   let generation = 0;
   let nextConnectionToken = 0;
@@ -78,9 +82,10 @@ export function createSettingsPortManager(options: {
     ports.delete(port);
     lastSentGeneration.delete(port);
     expectedGeneration.delete(port);
-    expectedProtectionEnabled.delete(port);
+    expectedRuntimeEnabled.delete(port);
     connectionTokens.delete(port);
     statuses.delete(port);
+    descriptors.delete(port);
     const cleanup = listenerCleanup.get(port);
     listenerCleanup.delete(port);
     cleanup?.();
@@ -111,11 +116,19 @@ export function createSettingsPortManager(options: {
       return;
     }
     try {
+      const surfaceEnabled = envelope.settings.surfaces.some(
+        (surface) =>
+          surface.surfaceId === descriptors.get(port)?.surfaceId &&
+          surface.enabled,
+      );
+      expectedRuntimeEnabled.set(
+        port,
+        envelope.settings.protectionEnabled && surfaceEnabled,
+      );
       port.postMessage(
         createSettingsSnapshotMessage(envelope, messageGeneration),
       );
       lastSentGeneration.set(port, messageGeneration);
-      expectedProtectionEnabled.set(port, envelope.settings.protectionEnabled);
     } catch {
       disconnect(port);
     }
@@ -127,7 +140,12 @@ export function createSettingsPortManager(options: {
         port.sender,
         options.runtimeId,
       );
-      if (port.name !== SETTINGS_PORT_NAME || expectedDescriptor === null) {
+      if (
+        port.name !== SETTINGS_PORT_NAME ||
+        expectedDescriptor === null ||
+        (options.isDescriptorAllowed !== undefined &&
+          !options.isDescriptorAllowed(expectedDescriptor))
+      ) {
         disconnect(port);
         return;
       }
@@ -148,10 +166,18 @@ export function createSettingsPortManager(options: {
             disconnect(port, connectionToken);
             return;
           }
+          if (
+            options.isDescriptorAllowed !== undefined &&
+            !options.isDescriptorAllowed(expectedDescriptor)
+          ) {
+            disconnect(port, connectionToken);
+            return;
+          }
           accepted = true;
           cancelHandshakeTimeout?.();
           cancelHandshakeTimeout = undefined;
           ports.add(port);
+          descriptors.set(port, expectedDescriptor);
           const initialGeneration = generation;
           expectedGeneration.set(port, initialGeneration);
           statuses.set(port, {
@@ -174,16 +200,16 @@ export function createSettingsPortManager(options: {
           return;
         }
 
-        const protectionEnabled = expectedProtectionEnabled.get(port);
+        const runtimeEnabled = expectedRuntimeEnabled.get(port);
         if (
           !isContentStatusPortMessage(message) ||
           message.status.application !== expectedDescriptor.adapterId ||
           message.status.surfaceId !== expectedDescriptor.surfaceId ||
           expectedGeneration.get(port) !== message.generation ||
           lastSentGeneration.get(port) !== message.generation ||
-          protectionEnabled === undefined ||
+          runtimeEnabled === undefined ||
           (message.status.state !== "initializing" &&
-            (protectionEnabled
+            (runtimeEnabled
               ? message.status.state === "disabled"
               : message.status.state !== "disabled"))
         ) {
@@ -323,6 +349,13 @@ export function createSettingsPortManager(options: {
         protectionEnabled: true,
         recentEventCount: count,
       };
+    },
+    disconnectSurface(surfaceId) {
+      for (const port of [...ports]) {
+        if (descriptors.get(port)?.surfaceId === surfaceId) {
+          disconnect(port);
+        }
+      }
     },
   };
 }

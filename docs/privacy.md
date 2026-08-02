@@ -5,11 +5,17 @@ prompt inspection into monitoring or telemetry.
 
 ## Raw prompt ownership
 
-Raw prompt text may be accessed transiently by the ChatGPT adapter solely to
-read or replace the active composer. It may be retained only by the submission
-controller for the lifetime of an active attempt and passed transiently to
-detector and redaction functions. The adapter must not cache, log, persist,
-message, or retain prompt content after the synchronous operation returns.
+Raw prompt text may be accessed transiently by the ChatGPT adapter or the Claude
+verification candidate solely to read the active composer. It may be retained
+only by the submission controller for the lifetime of an active attempt and
+passed transiently to detector and redaction functions. Neither adapter may
+cache, log, persist, message, or retain prompt content after the synchronous
+operation returns.
+
+Claude's current candidate evidence is synthetic structural evidence plus
+permission/registration proof; authenticated Claude application-state acceptance
+is not recorded here. Claude attachment handling remains presence only, with
+attachment inspection and prompt replacement unsupported.
 
 `matchedText`, offsets, and redacted prompt text may exist transiently only in
 detector, redaction, and submission-controller memory. Before policy or UI is
@@ -26,14 +32,14 @@ audit data, and production logs are completely prompt-free.
 | `matchedText`, offsets   | Detector/redaction/controller memory       | Active attempt only                                | Never                                 |
 | Policy finding metadata  | Controller and policy engine               | Policy evaluation only                             | Never as original findings            |
 | Display finding metadata | Controller and dialog                      | Active dialog only                                 | Placeholder/category/confidence only  |
-| Settings                 | `chrome.storage.local`                     | Until changed or extension data is removed         | Local version-2 envelope              |
-| Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-3 envelope  |
+| Settings                 | `chrome.storage.local`                     | Until changed or extension data is removed         | Local version-3 envelope              |
+| Audit events             | `chrome.storage.local`                     | Bounded by configured retention or manual clear    | Local prompt-free version-4 envelope  |
 | Status snapshots         | Settings port and extension pages          | Current connection/page lifetime                   | Not durable                           |
 | Attachment presence flag | Adapter/controller active attempt          | Synchronous checks and active attempt only         | Fixed boolean only; no file metadata  |
 | Attachment fingerprint   | Adapter/controller active attempt          | Replaced on structural identity or mutation change | Opaque identity only; never persisted |
 
 No backend, telemetry endpoint, remote API, analytics SDK, or central audit
-collector exists in Milestone 1.
+collector exists in the current extension.
 
 ## Persisted settings
 
@@ -71,11 +77,13 @@ that rule contributed; an allowed attachment beside a text warning uses
 `bypassed`. Records never contain raw text, matched values, filenames,
 attachment counts, prompt excerpts, offsets, or sanitized prompt text.
 
-Audit storage is a V3 envelope, and newly emitted events have adapter version 3.
-On first read, V1/V2 audit envelopes are normalized, retention-filtered, and
-persisted as V3 before use only when the stored contributor set is provable from
-the record. Ambiguous legacy decisions are discarded rather than guessed or
-relabeled; valid non-decision events from the same legacy envelope remain.
+Audit storage is a V4 envelope, and newly emitted events carry the immutable
+catalog identity and adapter-specific version (`3` for ChatGPT and `1` for the
+Claude candidate). On first read, legacy audit envelopes are normalized,
+retention-filtered, and persisted as V4 before use only when the stored
+contributor set is provable from the record. Ambiguous legacy decisions are
+discarded rather than guessed or relabeled; valid non-decision events from the
+same legacy envelope remain.
 
 ## Oversized prompts
 

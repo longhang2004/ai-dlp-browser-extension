@@ -120,13 +120,6 @@ describe("settings store", () => {
       ],
       "duplicate_surface",
     ],
-    [
-      [
-        { surfaceId: "chatgpt_web", enabled: true },
-        { surfaceId: "claude_web", enabled: true },
-      ],
-      "surface_disabled",
-    ],
   ] as const)("rejects unsafe surface state: %s", async (surfaces, code) => {
     const store = createSettingsStore(createMemoryStoragePort());
     await expect(

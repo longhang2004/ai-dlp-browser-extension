@@ -62,6 +62,14 @@ export type AdapterHealthTransition =
   | { status: "healthy" }
   | { status: "degraded"; healthCode: AdapterHealthCode };
 
+export type AdapterLifecycleOptions = {
+  document: Document;
+  getCurrentUrl?: () => URL;
+  onHealthTransition?: (transition: AdapterHealthTransition) => void;
+  onAdapterError?: (error: { readonly code: string }) => void;
+  healthGracePeriodMs?: number;
+};
+
 export interface ChatApplicationAdapter {
   readonly descriptor: AdapterDescriptor;
 

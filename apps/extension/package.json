@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/clean-dist.mjs dist && vite build --config vite.pages.config.ts && vite build --config vite.content.config.ts && pnpm test:build-topology && node scripts/verify-build-topology.mjs",
+    "build": "node scripts/clean-dist.mjs dist && vite build --config vite.pages.config.ts && vite build --config vite.content.config.ts && AI_DLP_CONTENT_ENTRY=claude vite build --config vite.content.config.ts && pnpm test:build-topology && node scripts/verify-build-topology.mjs",
     "test:build-topology": "node --test scripts/build-topology-rules.test.mjs",
     "typecheck": "tsc --build tsconfig.json --pretty false"
   },

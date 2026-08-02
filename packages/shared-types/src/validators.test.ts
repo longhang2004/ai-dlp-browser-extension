@@ -1812,6 +1812,15 @@ describe("runtime message validation", () => {
         recentEventCount: 0,
       }),
     ).toBe(true);
+    expect(
+      isProtectionStatusSnapshot({
+        state: "active",
+        application: "claude",
+        surfaceId: "claude_web",
+        protectionEnabled: true,
+        recentEventCount: 0,
+      }),
+    ).toBe(true);
     for (const [application, surfaceId] of [
       ["unknown", "chatgpt_web"],
       ["chatgpt", "claude_web"],
@@ -1858,6 +1867,18 @@ describe("runtime message validation", () => {
           application: "chatgpt",
           surfaceId: "chatgpt_web",
           protectionEnabled: true,
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isContentStatusPortMessage({
+        type: "status.snapshot",
+        generation: 0,
+        status: {
+          state: "disabled",
+          application: "claude",
+          surfaceId: "claude_web",
+          protectionEnabled: false,
         },
       }),
     ).toBe(true);

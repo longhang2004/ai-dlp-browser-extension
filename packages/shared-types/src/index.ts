@@ -1,5 +1,7 @@
 export {
   ADAPTER_HEALTH_CODES,
+  CLAUDE_ADAPTER_VERSION,
+  CLAUDE_ADAPTER_VERSIONS,
   CHATGPT_ADAPTER_VERSION,
   CHATGPT_ADAPTER_VERSIONS,
   createAuditEventId,
@@ -16,6 +18,7 @@ export type {
   AuditApplicationIdentity,
   AuditEventId,
   AuditTimestamp,
+  ClaudeAdapterVersion,
   ChatGptAdapterVersion,
   DecisionAuditEvent,
   DecisionResolution,

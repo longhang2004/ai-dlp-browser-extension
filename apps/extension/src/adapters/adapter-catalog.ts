@@ -1,4 +1,5 @@
 import {
+  CLAUDE_ADAPTER_VERSION,
   CHATGPT_ADAPTER_VERSION,
   isAdapterDescriptorClaim,
   type AdapterDescriptor,
@@ -23,7 +24,11 @@ export function assertExecutableAdapterCatalogInvariants(
 
   for (const entry of entries) {
     const packagedIdentity =
-      entry.adapterId === "chatgpt" ? CHATGPT_ADAPTER_DESCRIPTOR : null;
+      entry.adapterId === "chatgpt"
+        ? CHATGPT_ADAPTER_DESCRIPTOR
+        : entry.adapterId === "claude"
+          ? CLAUDE_ADAPTER_DESCRIPTOR
+          : null;
     if (
       packagedIdentity === null ||
       !isAdapterDescriptorClaim(packagedIdentity, entry)
@@ -54,8 +59,8 @@ export function assertExecutableAdapterCatalogInvariants(
   if (duplicateOwnership.length > 0) {
     throw new Error(duplicateOwnership.join("; "));
   }
-  if (entries.length !== 1) {
-    throw new Error("M2.0 requires exactly one executable adapter.");
+  if (entries.length !== 2) {
+    throw new Error("M2.2 requires exactly two executable adapters.");
   }
 }
 
@@ -76,7 +81,27 @@ export const CHATGPT_ADAPTER_DESCRIPTOR = freezeDescriptor({
   entryPoint: "content-script.js",
 });
 
-const executableAdapterCatalog = [CHATGPT_ADAPTER_DESCRIPTOR] as const;
+export const CLAUDE_ADAPTER_DESCRIPTOR = freezeDescriptor({
+  adapterId: "claude",
+  surfaceId: "claude_web",
+  version: CLAUDE_ADAPTER_VERSION,
+  trust: "verified",
+  origins: ["https://claude.ai"],
+  capabilities: {
+    submissionDetection: "verified",
+    promptRead: "verified",
+    attachmentDetection: "verified",
+    attachmentInspection: "unsupported",
+    promptReplacement: "unsupported",
+    submissionResume: "verified",
+  },
+  entryPoint: "content-claude.js",
+});
+
+const executableAdapterCatalog = [
+  CHATGPT_ADAPTER_DESCRIPTOR,
+  CLAUDE_ADAPTER_DESCRIPTOR,
+] as const;
 assertExecutableAdapterCatalogInvariants(executableAdapterCatalog);
 
 export const EXECUTABLE_ADAPTER_CATALOG: readonly AdapterDescriptor[] =

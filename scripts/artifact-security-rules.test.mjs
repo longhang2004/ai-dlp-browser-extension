@@ -44,6 +44,19 @@ test("accepts only the locked ChatGPT production URL identifiers", () => {
   );
 });
 
+test("rejects a Claude URL injected into the ChatGPT adapter", () => {
+  const findings = inspectProductionSource(
+    "apps/extension/src/adapters/chatgpt/chatgpt-adapter.ts",
+    [
+      'const ownOrigin = "https://chatgpt.com";',
+      'const crossAdapterOrigin = "https://claude.ai";',
+    ].join("\n"),
+  );
+  assert.deepEqual(findings, [
+    "apps/extension/src/adapters/chatgpt/chatgpt-adapter.ts contains an unapproved production-source URL: https://claude.ai",
+  ]);
+});
+
 test("rejects prompt-obscuring logs and dynamic or network-capable code", () => {
   for (const source of [
     "console.log(value)",

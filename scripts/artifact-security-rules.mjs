@@ -20,7 +20,7 @@ const APPROVED_SOURCE_URLS = new Map([
   ],
   [
     "apps/extension/src/adapters/chatgpt/chatgpt-adapter.ts",
-    new Set(["https://chatgpt.com", "https://claude.ai"]),
+    new Set(["https://chatgpt.com"]),
   ],
   [
     "apps/extension/src/background/sender-validation.ts",

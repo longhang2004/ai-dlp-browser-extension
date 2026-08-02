@@ -1,6 +1,5 @@
 import {
   ATTACHMENT_POLICY_RULE_ID,
-  CHATGPT_ADAPTER_VERSION,
   isAuditEvent,
   isStoredAuditEnvelope,
   POLICY_ACTION_PRECEDENCE,
@@ -12,6 +11,7 @@ import {
   type StoredAuditEnvelope,
 } from "@ai-dlp/shared-types";
 
+import { EXECUTABLE_ADAPTER_CATALOG } from "../adapters/adapter-catalog.js";
 import type { SettingsStore } from "./settings-store.js";
 import type { StoragePort } from "./storage-port.js";
 
@@ -32,6 +32,15 @@ function emptyEnvelope(): StoredAuditEnvelope {
 
 function isPersistable(event: AuditEvent): boolean {
   return event.kind !== "decision" || event.policyAction !== "allow";
+}
+
+function isCurrentCatalogIdentity(event: AuditEvent): boolean {
+  return EXECUTABLE_ADAPTER_CATALOG.some(
+    (descriptor) =>
+      descriptor.adapterId === event.adapterId &&
+      descriptor.surfaceId === event.surfaceId &&
+      descriptor.version === event.adapterVersion,
+  );
 }
 
 function isSameHealthRetransmission(
@@ -446,10 +455,7 @@ export function createAuditStore(
     async append(candidate) {
       return serialize(async () => {
         await storageReady;
-        if (
-          !isAuditEvent(candidate) ||
-          candidate.adapterVersion !== CHATGPT_ADAPTER_VERSION
-        ) {
+        if (!isAuditEvent(candidate) || !isCurrentCatalogIdentity(candidate)) {
           throw new Error("Invalid audit event.");
         }
         const event = structuredClone(candidate);

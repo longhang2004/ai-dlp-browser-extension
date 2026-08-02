@@ -104,10 +104,10 @@ build timestamp or a post-edit source tree.
 
 The local evidence date is based on the filesystem and report metadata: the
 Playwright `trace.zip`/`error-context.md` artifacts have 2026-08-03
-Asia/Ho_Chi_Minh timestamps, and `artifacts/verification/url-report.json`
-reports `generatedAt` `2026-08-02T18:00:06.386Z` (2026-08-03 01:00:06.386
-Asia/Ho_Chi_Minh). These timestamps date the local evidence only; they do not
-bind it to a CI artifact or authenticated acceptance.
+Asia/Ho_Chi_Minh timestamps, and `artifacts/verification/url-report.json` was
+generated during the 2026-08-03 Asia/Ho_Chi_Minh local workspace snapshot; its
+timestamp is diagnostic only. These timestamps date the local evidence only;
+they do not bind it to a CI artifact or authenticated acceptance.
 
 The 16 Playwright E2E launches failed only because the restricted sandbox could
 not launch Chromium (`EPERM`/`SIGABRT`); they are not scenario passes. The

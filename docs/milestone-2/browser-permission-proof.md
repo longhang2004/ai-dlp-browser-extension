@@ -1,18 +1,15 @@
 # M2.1 browser permission proof
 
-Run date: 2026-08-02 (Asia/Ho_Chi_Minh; historical planning-time proof; exact
+Run date: 2026-08-03 (Asia/Ho_Chi_Minh; escalated local browser run; exact
 execution versions below)
 
-This prior proof was not independently rerun in the restricted execution sandbox
-used for the current local run; Chromium launches there failed with
-`EPERM`/`SIGABRT`. The browser/version rows below therefore remain historical
-planning-time evidence from 2026-08-02, and no 2026-08-03 date/version pairing
-is implied.
-
-The isolated proof was run with `pnpm test:permission-proof`. It used a
+The escalated local proof was run with `pnpm test:permission-proof`. It used a
 temporary Manifest V3 fixture, browser-level CDP `Extensions.loadUnpacked`, and
 a synthetic `claude.ai` route. It recorded no page contents, cookies, account
 state, or user data.
+
+An earlier restricted-sandbox attempt could not launch Chromium
+(`EPERM`/`SIGABRT`); that failure is superseded for this local evidence.
 
 The fixture first installs the same temporary extension with the exact scope as
 required permissions, then reloaded the same extension path with the

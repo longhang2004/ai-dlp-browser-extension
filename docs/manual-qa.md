@@ -87,36 +87,36 @@ behavior, DOM order and selector-priority reversal, stale and hidden candidates,
 separate composer roots, immediate `ambiguous_submission_context` health, and
 prompt-free transitions, messages, errors, audit, and logs.
 
-## Provisional M2.2 automated candidate evidence — post-P4-08 local run (2026-08-03)
+## Provisional M2.2 automated candidate evidence — latest escalated local browser run (2026-08-03)
 
 The latest local corrective-candidate gate is provisional and is not bound to a
-final commit or CI artifact. Format, lint, typecheck, and performance checks
+final exact-head CI artifact. Format, lint, typecheck, and performance checks
 passed. The unit/node/dom suites reported 932 Vitest tests, and the artifact
 scripts reported 21 TAP tests. The generated candidate artifact contained 13
-manifest/registration-reachable files and 76 reviewed URL literals; its
-provisional canonical digest was
+manifest/registration-reachable files and 76 reviewed URL literals; its local
+candidate canonical digest was
 `7964a320c28b275eb16fa99926cda6078639592d155f3eaedbb647a956decede`.
 
-Workspace snapshot: 2026-08-03 (Asia/Ho_Chi_Minh), source SHA
-`f7cf16a73613f3a7e15250c29e8025e2b75f479a` (local HEAD before documentation
-edits). This identifies the workspace snapshot only, not an asserted artifact
-build timestamp or a post-edit source tree.
+Final local candidate artifact/source code SHA:
+`f7cf16a73613f3a7e15250c29e8025e2b75f479a`. Subsequent commits are
+documentation-only updates; this SHA identifies the source used for the local
+candidate artifact and evidence, not a CI publication.
 
-The local evidence date is based on the filesystem and report metadata: the
-Playwright `trace.zip`/`error-context.md` artifacts have 2026-08-03
-Asia/Ho_Chi_Minh timestamps, and `artifacts/verification/url-report.json` was
-generated during the 2026-08-03 Asia/Ho_Chi_Minh local workspace snapshot; its
-timestamp is diagnostic only. These timestamps date the local evidence only;
-they do not bind it to a CI artifact or authenticated acceptance.
+Local run date: 2026-08-03 (Asia/Ho_Chi_Minh), supported by the local Playwright
+artifacts and verification report metadata. This dates local evidence only; it
+does not bind it to an exact-head CI artifact or authenticated acceptance.
 
-The 16 Playwright E2E launches failed only because the restricted sandbox could
-not launch Chromium (`EPERM`/`SIGABRT`); they are not scenario passes. The
-artifact-independent permission proof remains limited to the exact browser
-versions and pattern recorded in
-[the browser proof](milestone-2/browser-permission-proof.md). No authenticated
-Claude submission, prompt read, attachment-presence, or resume acceptance has
-been recorded. Use the exact post-E2E CI artifact, digest, and source archive
-from PR metadata for any later authenticated QA.
+The escalated local `pnpm test:e2e` run passed all 16/16 Playwright launches. An
+earlier restricted-sandbox attempt could not launch Chromium
+(`EPERM`/`SIGABRT`); that failure is superseded and is not local browser-run
+evidence. The escalated local `pnpm test:permission-proof` run passed for Chrome
+`150.0.7871.187` and Edge `151.0.4129.59`; declaration, joint request, contains,
+registration, default-port match, and removal were `true`, while the
+alternate-port match was `false` for both browsers. See
+[the browser proof](milestone-2/browser-permission-proof.md) for the exact rows.
+Authenticated Claude submission, prompt read, attachment-presence, and resume
+acceptance remain absent; production acceptance, exact-head CI artifact and
+digest, and PR publication remain external.
 
 ## Historical M1 Audit V3 authenticated Edge attempt — 2026-07-29
 

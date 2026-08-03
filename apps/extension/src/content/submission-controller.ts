@@ -5,6 +5,7 @@ import {
 } from "@ai-dlp/detectors";
 import { evaluatePolicy } from "@ai-dlp/policy-engine";
 import {
+  CHATGPT_ADAPTER_VERSION,
   cloneProtectionSettings,
   createAuditEventId,
   createAuditTimestamp,
@@ -254,13 +255,12 @@ export function createSubmissionController(
   }
 
   function newAuditBase() {
-    const { descriptor } = options.adapter;
     return {
       id: createAuditEventId(eventId()),
       timestamp: createAuditTimestamp(wallClockNow().toISOString()),
-      adapterId: descriptor.adapterId,
-      surfaceId: descriptor.surfaceId,
-      adapterVersion: descriptor.version,
+      adapterId: "chatgpt" as const,
+      surfaceId: "chatgpt_web" as const,
+      adapterVersion: CHATGPT_ADAPTER_VERSION,
     };
   }
 

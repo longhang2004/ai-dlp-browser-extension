@@ -6,23 +6,13 @@ import {
 import { createSettingsStore } from "../storage/settings-store.js";
 import { createProductionChromeApiAdapter } from "./chrome-api-adapter.js";
 import {
-  createContentRegistrationManager,
-  type ContentRegistrationManager,
-} from "./content-registration.js";
-import {
   createMessageListener,
   type RuntimeMessageListener,
 } from "./message-router.js";
 import {
   createSettingsPortManager,
-  type RuntimeAuthorizationState,
   type RuntimePortLike,
 } from "./settings-ports.js";
-import {
-  CLAUDE_HOST_PERMISSION_PATTERN,
-  type PermissionApi,
-} from "@ai-dlp/shared-types/permissions";
-import type { ScriptingApi } from "./content-registration.js";
 
 export type BackgroundChromeApi = {
   storage: { local: ChromeLocalStorageArea };
@@ -31,8 +21,6 @@ export type BackgroundChromeApi = {
     onMessage: { addListener(listener: RuntimeMessageListener): void };
     onConnect: { addListener(listener: (port: RuntimePortLike) => void): void };
   };
-  permissions?: PermissionApi;
-  scripting?: ScriptingApi;
 };
 
 export type BackgroundContext = {
@@ -47,65 +35,11 @@ export function bootstrapBackground(
   );
   const settingsStore = createSettingsStore(storage, storageReady);
   const auditStore = createAuditStore(storage, settingsStore, storageReady);
-  let claudeRuntimeAuthorization: RuntimeAuthorizationState =
-    api.permissions === undefined ? "denied" : "hydrating";
-  let disconnectSurface: (surfaceId: string) => void = () => undefined;
-  let refreshSurfaceAuthorization: (surfaceId: string) => void = () =>
-    undefined;
-  let reconcileClaude: () => void = () => undefined;
-  let registrationManager: ContentRegistrationManager | undefined;
-  if (api.permissions !== undefined) {
-    registrationManager = createContentRegistrationManager({
-      permissionApi: api.permissions,
-      ...(api.scripting === undefined ? {} : { scripting: api.scripting }),
-      readSettings: async () => (await settingsStore.read()).settings,
-      getEffectiveSurfacePermissions: async () => {
-        const settings = (await settingsStore.read()).settings;
-        const hostGranted = await api.permissions!.contains({
-          permissions: [],
-          origins: [CLAUDE_HOST_PERMISSION_PATTERN],
-        });
-        const namedPermissionGranted = await api.permissions!.contains({
-          permissions: ["scripting"],
-          origins: [],
-        });
-        return [
-          {
-            surfaceId: "claude_web" as const,
-            enabled:
-              settings.surfaces.find(
-                (surface) => surface.surfaceId === "claude_web",
-              )?.enabled ?? false,
-            hostGranted,
-            namedPermissionGranted,
-          },
-        ];
-      },
-      onReconciled(snapshot) {
-        claudeRuntimeAuthorization =
-          snapshot.registration === "registered" ? "allowed" : "denied";
-        refreshSurfaceAuthorization("claude_web");
-      },
-      invalidateSurface() {
-        claudeRuntimeAuthorization = "denied";
-        disconnectSurface("claude_web");
-      },
-    });
-    reconcileClaude = () => {
-      void registrationManager?.reconcile();
-    };
-  }
   const settingsPorts = createSettingsPortManager({
     runtimeId: api.runtime.id,
     settingsStore,
     storageReady,
-    getDescriptorAuthorization: (descriptor) =>
-      descriptor.surfaceId === "claude_web"
-        ? claudeRuntimeAuthorization
-        : "allowed",
   });
-  disconnectSurface = settingsPorts.disconnectSurface;
-  refreshSurfaceAuthorization = settingsPorts.refreshSurfaceAuthorization;
   const messageListener = createMessageListener({
     runtimeId: api.runtime.id,
     storageReady,
@@ -114,32 +48,12 @@ export function bootstrapBackground(
     broadcastSettings: async (envelope) => settingsPorts.broadcast(envelope),
     readStatus: async () =>
       settingsPorts.readStatus((await auditStore.read()).events.length),
-    isContentRuntimeAllowed: (descriptor) =>
-      descriptor.surfaceId !== "claude_web" ||
-      claudeRuntimeAuthorization === "allowed",
-    removeClaudeAccess: () =>
-      registrationManager?.removeClaudeAccess() ?? Promise.resolve(false),
-    onSettingsSaved() {
-      if (registrationManager !== undefined) {
-        claudeRuntimeAuthorization = "hydrating";
-        disconnectSurface("claude_web");
-        reconcileClaude();
-      }
-    },
   });
 
   api.runtime.onMessage.addListener(messageListener);
   api.runtime.onConnect.addListener((port) =>
     settingsPorts.handleConnect(port),
   );
-  if (registrationManager !== undefined) {
-    void storageReady
-      .then(() => registrationManager?.reconcile())
-      .catch(() => {
-        claudeRuntimeAuthorization = "denied";
-        refreshSurfaceAuthorization("claude_web");
-      });
-  }
 
   return { storageReady };
 }

@@ -2,7 +2,6 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const isClaudeEntry = process.env.AI_DLP_CONTENT_ENTRY === "claude";
 
 export default defineConfig({
   root,
@@ -18,17 +17,11 @@ export default defineConfig({
     cssCodeSplit: false,
     lib: {
       entry: fileURLToPath(
-        new URL(
-          isClaudeEntry
-            ? "src/content/claude-index.ts"
-            : "src/content/chatgpt-index.ts",
-          import.meta.url,
-        ),
+        new URL("src/content/bootstrap.ts", import.meta.url),
       ),
-      name: isClaudeEntry ? "AiDlpClaudeContentScript" : "AiDlpContentScript",
+      name: "AiDlpContentScript",
       formats: ["iife"],
-      fileName: () =>
-        isClaudeEntry ? "content-claude.js" : "content-script.js",
+      fileName: () => "content-script.js",
     },
   },
 });

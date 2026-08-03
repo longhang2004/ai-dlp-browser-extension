@@ -1,26 +1,21 @@
-# PromptGuard — AI DLP for ChatGPT and Claude
+# PromptGuard — AI DLP for ChatGPT
 
 PromptGuard is a privacy-first Chromium Manifest V3 extension that inspects
-ChatGPT prompts locally before submission. The static ChatGPT entry uses the
-required `storage` permission only; it does not need optional host access or
-`scripting`. The current M2.2 build also packages an explicitly labeled Claude
-verification candidate behind one exact, jointly requested optional pair:
-`scripting` plus `https://claude.ai:443/*`. It never sends prompt content to a
-backend.
+ChatGPT prompts locally before submission. Milestone 1 supports
+`https://chatgpt.com/*` only and never sends prompt content to a backend.
 
 It detects email addresses, phone numbers, payment cards, AWS access key IDs,
 PEM private keys, contextual API secrets, and locally configured protected
 keywords. Depending on policy, a submission is allowed, warned, or blocked. The
-pure redaction engine remains available for future adapters. Neither the current
-ChatGPT runtime nor the Claude candidate replaces a composer automatically.
+pure redaction engine remains available for future adapters, but Milestone 1
+never replaces a ChatGPT composer automatically.
 
 ## Privacy and security summary
 
 - Prompt inspection, policy evaluation, and redaction run in the browser.
 - The ChatGPT adapter reads the active composer only for the synchronous
   operation being performed; it does not cache prompt content.
-- React receives no prompt-derived content or sensitive values; its view model
-  contains only category, confidence, and fixed placeholder metadata.
+- React receives category, confidence, and placeholder metadata only.
 - Dialogs and audit records retain only the categories and rules that
   contributed to the enforced action; lower-precedence or allowed matches are
   omitted.
@@ -37,9 +32,8 @@ ChatGPT runtime nor the Claude candidate replaces a composer automatically.
   internal redact decision fails closed without changing or submitting content.
 - The dialog uses open Shadow DOM for CSS/component isolation and inspection,
   not as a security boundary.
-- The static ChatGPT entry uses no host permission. Claude access is optional,
-  exact, and jointly gated by `scripting` plus `https://claude.ai:443/*`; there
-  are no remote scripts, remote assets, or network endpoints.
+- The production manifest grants only `storage`; there are no host permissions,
+  remote scripts, remote assets, or network endpoints.
 
 See [Privacy](docs/privacy.md), [Threat model](docs/threat-model.md), and the
 [architecture overview](docs/architecture/overview.md) for the complete model.
@@ -48,10 +42,7 @@ See [Privacy](docs/privacy.md), [Threat model](docs/threat-model.md), and the
 
 - Node.js `>=22.13.0 <23`
 - pnpm `10.13.1`
-- Chromium/Chrome `102` or newer for the static ChatGPT entry
-- The M2.2 Claude verification candidate is covered only by the exact browser
-  proof versions Google Chrome `150.0.7871.187` and Microsoft Edge
-  `151.0.4129.59`; this is not a general Claude browser/version support claim.
+- Chromium/Chrome `102` or newer
 
 ## Build and test
 
@@ -78,13 +69,9 @@ existing `apps/extension/dist` as-is and rejects missing, non-local,
 source-mapped, or unallowlisted unreachable output. `pnpm artifact:digest`
 repeats that reachability check before it hashes the canonical artifact.
 
-The M2.2 candidate build produces a 13-file, manifest/registration-reachable
-artifact with no source maps. CI runs browser tests before the final artifact
-reachability/security check and canonical digest, then uploads that same
-verified tree and its reviewed-commit source archive. See the
-[M2.2 candidate evidence](docs/milestone-2/m2.2-claude-verification-candidate.md)
-for the exact permission and acceptance boundary; the candidate is not
-production acceptance.
+The reviewed remediation verification on 2026-07-29 produced a 12-file,
+manifest-reachable build with no source maps or required local-asset allowlist
+entries.
 
 ## Load the unpacked extension
 
@@ -93,8 +80,7 @@ production acceptance.
 3. Enable Developer mode.
 4. Choose **Load unpacked** and select `apps/extension/dist`.
 5. Open ChatGPT and confirm the popup reports **Protection is active** before
-   relying on interception. Claude remains a verification candidate and requires
-   the exact optional access grant plus explicit Claude enablement.
+   relying on interception.
 
 The popup reports `initializing`, `waiting_for_composer`, `active`, `disabled`,
 `degraded`, or `unavailable`. A submission made before validated settings
@@ -106,21 +92,21 @@ interval active.
 The options page exposes protection enablement, email, phone, and attachment
 actions, protected keywords, and a local audit-retention limit from 1 to 1,000
 events. The settings UI does not offer automatic `redact`. Persisted settings
-use a V3 envelope. Strictly valid V1/V2 settings migrate once, preserving
-choices, normalizing legacy email/phone `redact` to `warn`, and adding the
-default attachment action `warn`. Invalid attachment actions fall back to
-`warn`, never `allow`. Payment cards, AWS access keys, and private keys always
-block; protected keywords warn; high-confidence API secrets block and
-medium-confidence API secrets warn.
+use a V2 envelope. Strictly valid V1 settings migrate once, preserving choices,
+normalizing legacy email/phone `redact` to `warn`, and adding the default
+attachment action `warn`. Invalid attachment actions fall back to `warn`, never
+`allow`. Payment cards, AWS access keys, and private keys always block;
+protected keywords warn; high-confidence API secrets block and medium-confidence
+API secrets warn.
 
 The audit page stores only privacy-safe contributor metadata and enforcement or
-adapter-health errors in a V4 envelope; newly emitted events use ChatGPT adapter
-version 3 or Claude candidate adapter version 1. A warning gets
-`attachment_bypassed` only when the attachment rule contributed to the final
-action; an allowed attachment alongside a text warning remains the ordinary
-`bypassed` case. Valid legacy audit records are migrated conservatively to V4
-once, while ambiguous legacy decisions are discarded rather than relabeled.
-Clearing the audit log requires explicit confirmation.
+adapter-health errors in a V3 envelope; newly emitted events use ChatGPT adapter
+event version 3. A warning gets `attachment_bypassed` only when the attachment
+rule contributed to the final action; an allowed attachment alongside a text
+warning remains the ordinary `bypassed` case. Valid legacy V1/V2 audit records
+are migrated conservatively to V3 once, while ambiguous legacy decisions are
+discarded rather than relabeled. Clearing the audit log requires explicit
+confirmation.
 
 CI publishes a reachability-verified extension, its canonical digest, and a
 `git archive` source tarball for the same reviewed commit. Authenticated QA uses

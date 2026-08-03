@@ -1,12 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "AI DLP for ChatGPT and Claude",
+  "name": "AI DLP for ChatGPT",
   "version": "0.1.0",
   "description": "Privacy-first local protection for sensitive ChatGPT prompts.",
   "minimum_chrome_version": "102",
   "permissions": ["storage"],
-  "optional_permissions": ["scripting"],
-  "optional_host_permissions": ["https://claude.ai:443/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -42,66 +42,23 @@ const backgroundSource = `
 const pattern = ${JSON.stringify(PATTERN)};
 const registrationId = ${JSON.stringify(REGISTRATION_ID)};
 const injectionEvents = [];
-const registrationInput = {
-  id: registrationId,
-  matches: [pattern],
-  js: ["content.js"],
-  allFrames: false,
-  world: "ISOLATED",
-  runAt: "document_idle",
-  persistAcrossSessions: true,
-};
-const registrationKeys = new Set([...Object.keys(registrationInput), "matchOriginAsFallback"]);
-let registrationMutationCount = 0;
-
-function sameArray(actual, expected) {
-  return Array.isArray(actual) &&
-    actual.length === expected.length &&
-    actual.every((item, index) => item === expected[index]);
-}
-
-function isExactRegistration(actual) {
-  return actual !== null &&
-    typeof actual === "object" &&
-    Reflect.ownKeys(actual).every((key) => typeof key === "string" && registrationKeys.has(key)) &&
-    Object.keys(registrationInput).every((key) => Object.hasOwn(actual, key)) &&
-    (!Object.hasOwn(actual, "matchOriginAsFallback") || actual.matchOriginAsFallback === false) &&
-    actual.id === registrationInput.id &&
-    sameArray(actual.matches, registrationInput.matches) &&
-    sameArray(actual.js, registrationInput.js) &&
-    actual.allFrames === registrationInput.allFrames &&
-    actual.world === registrationInput.world &&
-    actual.runAt === registrationInput.runAt &&
-    actual.persistAcrossSessions === registrationInput.persistAcrossSessions;
-}
-
-async function reconcileRegistration() {
-  const current = await chrome.scripting.getRegisteredContentScripts({ ids: [registrationId] });
-  if (current.length === 1 && isExactRegistration(current[0])) return true;
-  if (current.length > 0) {
-    await chrome.scripting.unregisterContentScripts({ ids: [registrationId] });
-    registrationMutationCount += 1;
-  }
-  await chrome.scripting.registerContentScripts([registrationInput]);
-  registrationMutationCount += 1;
-  const verified = await chrome.scripting.getRegisteredContentScripts({ ids: [registrationId] });
-  return verified.length === 1 && isExactRegistration(verified[0]);
-}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     try {
       if (message?.type === "register") {
-        const beforeFirst = registrationMutationCount;
-        const firstExact = await reconcileRegistration();
-        const afterFirst = registrationMutationCount;
-        const secondExact = await reconcileRegistration();
-        sendResponse({
-          ok: true,
-          registered: firstExact && secondExact,
-          firstMutationCount: afterFirst - beforeFirst,
-          secondMutationCount: registrationMutationCount - afterFirst,
-        });
+        await chrome.scripting.unregisterContentScripts({ ids: [registrationId] }).catch(() => undefined);
+        await chrome.scripting.registerContentScripts([{
+          id: registrationId,
+          matches: [pattern],
+          js: ["content.js"],
+          allFrames: false,
+          world: "ISOLATED",
+          runAt: "document_idle",
+          persistAcrossSessions: true,
+        }]);
+        const registrations = await chrome.scripting.getRegisteredContentScripts({ ids: [registrationId] });
+        sendResponse({ ok: true, registered: registrations.length === 1 && registrations[0].matches?.[0] === pattern });
         return;
       }
       if (message?.type === "injected") {
@@ -374,7 +331,6 @@ async function runBrowser(browserKey) {
     requestAccepted: false,
     containsAccepted: false,
     registrationAccepted: false,
-    registrationIdempotent: false,
     defaultPortPageMatched: false,
     alternatePortFixtureMatched: false,
     removeAccepted: false,
@@ -473,8 +429,6 @@ async function runBrowser(browserKey) {
       registration.ok === true &&
       registration.value?.ok === true &&
       registration.value?.registered === true;
-    result.registrationIdempotent =
-      registration.value?.secondMutationCount === 0;
 
     const fixturePage = await context.newPage();
     await fixturePage.goto(DEFAULT_PORT_URL, { waitUntil: "domcontentloaded" });
@@ -527,7 +481,6 @@ const failed = results.filter(
     result.requestAccepted !== true ||
     result.containsAccepted !== true ||
     result.registrationAccepted !== true ||
-    result.registrationIdempotent !== true ||
     result.defaultPortPageMatched !== true ||
     result.alternatePortFixtureMatched !== false ||
     result.removeAccepted !== true,

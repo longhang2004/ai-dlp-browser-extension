@@ -3,7 +3,6 @@ import {
   createDefaultProtectionSettings,
   SENSITIVE_DATA_PLACEHOLDERS,
   type AuditEvent,
-  type AdapterDescriptor,
   type PolicyAction,
   type PolicyDecision,
   type ProtectionDialogIntent,
@@ -17,10 +16,7 @@ import type {
   ChatApplicationAdapter,
   LiveSubmissionContext,
 } from "../adapters/chat-application-adapter.js";
-import {
-  CLAUDE_ADAPTER_DESCRIPTOR,
-  CHATGPT_ADAPTER_DESCRIPTOR,
-} from "../adapters/adapter-catalog.js";
+import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/chatgpt/chatgpt-adapter.js";
 import {
   AUTHORIZATION_LIFETIME_MS,
   consumeSubmissionAuthorization,
@@ -61,7 +57,6 @@ function phoneFinding(
 }
 
 type HarnessOptions = {
-  descriptor?: AdapterDescriptor;
   prompt?: string;
   findings?: SensitiveDataFinding[];
   action?: PolicyAction;
@@ -78,11 +73,10 @@ type HarnessOptions = {
 
 function createHarness(value: string | HarnessOptions = "clean prompt") {
   const harnessOptions = typeof value === "string" ? { prompt: value } : value;
-  const descriptor = harnessOptions.descriptor ?? CHATGPT_ADAPTER_DESCRIPTOR;
   const prompt = harnessOptions.prompt ?? "clean prompt";
   let currentPrompt = prompt;
   let contextVersion = 1;
-  let currentUrl = new URL(`${descriptor.origins[0]}/`);
+  let currentUrl = new URL("https://chatgpt.com/");
   let hasAttachment = harnessOptions.hasAttachment ?? false;
   let attachmentFingerprint = {} as AttachmentStateFingerprint;
   const composer = { isConnected: true } as HTMLElement;
@@ -107,8 +101,8 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     () => harnessOptions.replacementCapability ?? "supported",
   );
   const adapter: ChatApplicationAdapter = {
-    descriptor,
-    matches: (url) => url.origin === descriptor.origins[0],
+    descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
+    matches: (url) => url.origin === "https://chatgpt.com",
     resolveCurrentSubmissionContext: vi.fn(() => context()),
     resolveSubmissionContext: vi.fn(() => context()),
     inspectSubmissionCapabilities,
@@ -975,45 +969,6 @@ describe("submission controller", () => {
     ]) {
       expect(serialized).not.toContain(forbidden);
     }
-  });
-
-  it("derives decision and error audit identity from the active adapter descriptor", async () => {
-    const decisionHarness = createHarness({
-      descriptor: CLAUDE_ADAPTER_DESCRIPTOR,
-      prompt: "person@example.com",
-      findings: [emailFinding()],
-      action: "warn",
-      dialogIntent: "cancel",
-    });
-    decisionHarness.fire();
-    await decisionHarness.controller.whenSettledForTesting();
-
-    expect(decisionHarness.events).toContainEqual(
-      expect.objectContaining({
-        kind: "decision",
-        adapterId: "claude",
-        surfaceId: "claude_web",
-        adapterVersion: "1",
-      }),
-    );
-
-    const errorHarness = createHarness({
-      descriptor: CLAUDE_ADAPTER_DESCRIPTOR,
-      analyze: () => {
-        throw new Error("detector failed");
-      },
-    });
-    errorHarness.fire();
-    await errorHarness.controller.whenSettledForTesting();
-
-    expect(errorHarness.events).toContainEqual(
-      expect.objectContaining({
-        kind: "enforcement_error",
-        adapterId: "claude",
-        surfaceId: "claude_web",
-        adapterVersion: "1",
-      }),
-    );
   });
 
   it("serializes physical attempts and does not create a second decision", async () => {

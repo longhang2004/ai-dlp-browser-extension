@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CLAUDE_ADAPTER_VERSION,
   CHATGPT_ADAPTER_VERSION,
   createAuditEventId,
   createAuditTimestamp,
@@ -416,90 +415,6 @@ describe("audit store", () => {
     expect(JSON.stringify(attachmentDecision)).not.toMatch(
       /filename|fileCount|mime|size|content|label|html/iu,
     );
-  });
-
-  it("persists current Claude decision and health identities from the executable catalog", async () => {
-    const storage = createMemoryStoragePort();
-    const store = createAuditStore(storage, createSettingsStore(storage));
-    const claudeDecision = event(1, {
-      adapterId: "claude",
-      surfaceId: "claude_web",
-      adapterVersion: CLAUDE_ADAPTER_VERSION,
-    });
-    const claudeHealth: AuditEvent = {
-      kind: "adapter_health",
-      id: createAuditEventId("00000000-0000-4000-8000-000000000002"),
-      timestamp: createAuditTimestamp("2026-07-26T12:00:02.000Z"),
-      adapterId: "claude",
-      surfaceId: "claude_web",
-      status: "degraded",
-      healthCode: "composer_not_found",
-      adapterVersion: CLAUDE_ADAPTER_VERSION,
-    };
-
-    await expect(store.append(claudeDecision)).resolves.toBe("persisted");
-    await expect(store.append(claudeHealth)).resolves.toBe("persisted");
-    await expect(store.read()).resolves.toEqual({
-      schemaVersion: 4,
-      events: [claudeDecision, claudeHealth],
-    });
-  });
-
-  it.each([
-    [
-      "unknown surface",
-      {
-        ...event(1),
-        surfaceId: "unknown_web",
-      } as unknown as AuditEvent,
-    ],
-    [
-      "mismatched adapter ID",
-      event(1, {
-        adapterId: "claude",
-      }),
-    ],
-    [
-      "Claude version 0",
-      event(1, {
-        adapterId: "claude",
-        surfaceId: "claude_web",
-        adapterVersion: "0",
-      }),
-    ],
-    [
-      "Claude version 2",
-      event(1, {
-        adapterId: "claude",
-        surfaceId: "claude_web",
-        adapterVersion: "2",
-      }),
-    ],
-    [
-      "ChatGPT adapter with Claude surface",
-      event(1, {
-        surfaceId: "claude_web",
-      }),
-    ],
-    [
-      "Claude adapter with ChatGPT surface",
-      event(1, {
-        adapterId: "claude",
-        surfaceId: "chatgpt_web",
-        adapterVersion: CLAUDE_ADAPTER_VERSION,
-      }),
-    ],
-  ] as const)("rejects %s identities", async (_label, candidate) => {
-    const storage = createMemoryStoragePort();
-    const store = createAuditStore(storage, createSettingsStore(storage));
-
-    await expect(store.append(candidate)).rejects.toThrow(
-      "Invalid audit event.",
-    );
-    await expect(store.read()).resolves.toEqual({
-      schemaVersion: 4,
-      events: [],
-    });
   });
 
   it("accepts adapter version 1 only as migrated history, not a new append", async () => {

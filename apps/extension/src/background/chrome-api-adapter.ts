@@ -1,13 +1,4 @@
 import type { BackgroundChromeApi } from "./bootstrap.js";
-import {
-  createPermissionApi,
-  type PermissionApiSource,
-} from "./permission-api.js";
-import type {
-  ContentScriptRegistration,
-  RegisteredContentScript,
-  ScriptingApi,
-} from "./content-registration.js";
 import type { RuntimeMessageListener } from "./message-router.js";
 import type { RuntimeSender } from "./sender-validation.js";
 import type { RuntimePortLike } from "./settings-ports.js";
@@ -21,16 +12,6 @@ export type ProductionChromeApi = {
     onMessage: Pick<typeof chrome.runtime.onMessage, "addListener">;
     onConnect: Pick<typeof chrome.runtime.onConnect, "addListener">;
   };
-  permissions?: Pick<
-    typeof chrome.permissions,
-    "contains" | "request" | "remove" | "onAdded" | "onRemoved"
-  >;
-  scripting?: Pick<
-    typeof chrome.scripting,
-    | "getRegisteredContentScripts"
-    | "registerContentScripts"
-    | "unregisterContentScripts"
-  >;
 };
 
 export function adaptRuntimeSender(
@@ -100,7 +81,7 @@ export function adaptRuntimePort(port: chrome.runtime.Port): RuntimePortLike {
 export function createProductionChromeApiAdapter(
   source: ProductionChromeApi,
 ): BackgroundChromeApi {
-  const adapted: BackgroundChromeApi = {
+  return {
     storage: {
       local: {
         async get(key) {
@@ -135,89 +116,4 @@ export function createProductionChromeApiAdapter(
       },
     },
   };
-
-  if (source.permissions !== undefined) {
-    const added = new Map<
-      (payload: unknown) => void,
-      (payload: chrome.permissions.Permissions) => void
-    >();
-    const removed = new Map<
-      (payload: unknown) => void,
-      (payload: chrome.permissions.Permissions) => void
-    >();
-    const permissionSource: PermissionApiSource = {
-      contains(scope) {
-        return source.permissions!.contains({
-          permissions: [...scope.permissions],
-          origins: [...scope.origins],
-        });
-      },
-      request(scope) {
-        return source.permissions!.request({
-          permissions: [...scope.permissions],
-          origins: [...scope.origins],
-        });
-      },
-      remove(scope) {
-        return source.permissions!.remove({
-          permissions: [...scope.permissions],
-          origins: [...scope.origins],
-        });
-      },
-      onAdded: {
-        addListener(listener) {
-          const wrapped = (payload: chrome.permissions.Permissions): void =>
-            listener(payload);
-          added.set(listener, wrapped);
-          source.permissions!.onAdded.addListener(wrapped);
-        },
-        removeListener(listener) {
-          const wrapped = added.get(listener);
-          if (wrapped === undefined) return;
-          source.permissions!.onAdded.removeListener(wrapped);
-          added.delete(listener);
-        },
-      },
-      onRemoved: {
-        addListener(listener) {
-          const wrapped = (payload: chrome.permissions.Permissions): void =>
-            listener(payload);
-          removed.set(listener, wrapped);
-          source.permissions!.onRemoved.addListener(wrapped);
-        },
-        removeListener(listener) {
-          const wrapped = removed.get(listener);
-          if (wrapped === undefined) return;
-          source.permissions!.onRemoved.removeListener(wrapped);
-          removed.delete(listener);
-        },
-      },
-    };
-    adapted.permissions = createPermissionApi(permissionSource);
-  }
-
-  if (source.scripting !== undefined) {
-    const scripting: ScriptingApi = {
-      async getRegisteredContentScripts() {
-        return (await source.scripting!.getRegisteredContentScripts()).map(
-          (script) => ({ ...script }) as RegisteredContentScript,
-        );
-      },
-      async registerContentScripts(
-        scripts: readonly ContentScriptRegistration[],
-      ) {
-        await source.scripting!.registerContentScripts(
-          scripts as chrome.scripting.RegisteredContentScript[],
-        );
-      },
-      async unregisterContentScripts(details) {
-        await source.scripting!.unregisterContentScripts({
-          ids: [...details.ids],
-        });
-      },
-    };
-    adapted.scripting = scripting;
-  }
-
-  return adapted;
 }

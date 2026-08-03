@@ -176,7 +176,7 @@ function isSurfaceSettingSnapshot(value: unknown): value is SurfaceSettings {
   ) {
     return false;
   }
-  return true;
+  return value.surfaceId !== "claude_web" || value.enabled === false;
 }
 
 export function isSurfaceSettingsSnapshot(
@@ -193,7 +193,9 @@ export function isSurfaceSettingsSnapshot(
     return false;
   }
   return value.every(
-    (surface, index) => surface.surfaceId === CONFIGURABLE_SURFACE_IDS[index],
+    (surface, index) =>
+      surface.surfaceId === CONFIGURABLE_SURFACE_IDS[index] &&
+      (surface.surfaceId !== "claude_web" || surface.enabled === false),
   );
 }
 

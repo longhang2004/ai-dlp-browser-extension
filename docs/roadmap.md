@@ -30,13 +30,11 @@ Exit criteria:
 - Active attempts are bound to immutable enforcement settings and a local
   revision.
 - Dialog and audit data contain only final-action contributors.
-- Milestone 1's historical ChatGPT envelope was Audit V3; M2.1 introduced the
-  current Audit V4 envelope and migrates only provable legacy identity.
+- Audit history migrates conservatively to V3.
 - The production artifact is manifest-reachable, source-map-free,
   least-privilege, reproducible, and digest-bound to reviewed source.
 - Unit, DOM, performance, artifact, Playwright, CI, and authenticated current-
-  ChatGPT QA evidence are recorded with limitations. M1 Audit V3 records remain
-  historical after the M2.1 Audit V4 migration.
+  ChatGPT QA evidence are recorded with limitations.
 
 Approval gate:
 
@@ -51,12 +49,9 @@ small, approved set of web AI applications.
 
 The proposed design package is documented in
 [Milestone 2 verified browser surfaces](milestone-2/verified-browser-surfaces-design.md).
-It recommends Claude web at the exact `https://claude.ai` origin. ChatGPT
-continues to use its static entry without optional permissions; only the M2.2
-Claude verification candidate uses the jointly requested optional `scripting`
-permission and `https://claude.ai:443/*` host pair. Neither that candidate nor
-the design package is production approval merely because the documents or
-runtime exist.
+It recommends Claude web at the exact `https://claude.ai` origin, but neither
+the surface nor its optional permission, capabilities, or implementation is
+approved merely by publication of the design.
 
 Exit criteria:
 
@@ -67,9 +62,8 @@ Exit criteria:
 - Each new origin has an application-specific selector, submission, attachment,
   privacy, status, and regression test suite.
 - Optional host and required optional named permissions are requested together
-  per usable approved dynamic surface, with a usable disclosure and
-  dependency-aware named-permission cleanup that does not silently broaden
-  access. ChatGPT's static entry has no optional-permission dependency.
+  per usable approved surface, with a usable disclosure and dependency-aware
+  named-permission cleanup that does not silently broaden access.
 - Unknown or drifted surfaces fail honestly without claiming active protection.
 - No remote executable adapter, page-world injection, broad browsing history, or
   network inspection is introduced.

@@ -3,14 +3,12 @@
 import { readFileSync } from "node:fs";
 
 import {
-  CLAUDE_ADAPTER_VERSION,
   CHATGPT_ADAPTER_VERSION,
   type AdapterDescriptor,
 } from "@ai-dlp/shared-types";
 import { describe, expect, it } from "vitest";
 
 import {
-  CLAUDE_ADAPTER_DESCRIPTOR,
   CHATGPT_ADAPTER_DESCRIPTOR,
   EXECUTABLE_ADAPTER_CATALOG,
   assertExecutableAdapterCatalogInvariants,
@@ -35,7 +33,7 @@ function descriptor(
 }
 
 describe("executable adapter catalog", () => {
-  it("contains the current ChatGPT v3 and Claude v1 executables", () => {
+  it("contains exactly the current ChatGPT v3 executable", () => {
     expect(EXECUTABLE_ADAPTER_CATALOG).toEqual([
       {
         adapterId: "chatgpt",
@@ -53,24 +51,17 @@ describe("executable adapter catalog", () => {
         },
         entryPoint: "content-script.js",
       },
-      {
-        adapterId: "claude",
-        surfaceId: "claude_web",
-        version: CLAUDE_ADAPTER_VERSION,
-        trust: "verified",
-        origins: ["https://claude.ai"],
-        capabilities: {
-          submissionDetection: "verified",
-          promptRead: "verified",
-          attachmentDetection: "verified",
-          attachmentInspection: "unsupported",
-          promptReplacement: "unsupported",
-          submissionResume: "verified",
-        },
-        entryPoint: "content-claude.js",
-      },
     ]);
-    expect(EXECUTABLE_ADAPTER_CATALOG).toHaveLength(2);
+    expect(EXECUTABLE_ADAPTER_CATALOG).toHaveLength(1);
+    expect(
+      EXECUTABLE_ADAPTER_CATALOG.some(
+        ({ adapterId, surfaceId, origins, entryPoint }) =>
+          adapterId === "claude" ||
+          surfaceId === "claude_web" ||
+          origins.includes("https://claude.ai") ||
+          entryPoint.includes("claude"),
+      ),
+    ).toBe(false);
   });
 
   it("deeply freezes the catalog authority", () => {
@@ -175,9 +166,9 @@ describe("executable adapter catalog", () => {
     ).toThrow(/packaged adapter identity/iu);
   });
 
-  it("rejects an incomplete executable catalog in M2.2", () => {
+  it("rejects an empty executable catalog in M2.0", () => {
     expect(() => assertExecutableAdapterCatalogInvariants([])).toThrow(
-      /exactly two executable adapters/iu,
+      /exactly one executable adapter/iu,
     );
   });
 
@@ -206,10 +197,7 @@ describe("executable adapter catalog", () => {
     expect(
       findExecutableAdapterByOrigin("https://chatgpt.com:8443"),
     ).toBeNull();
-    expect(findExecutableAdapterByOrigin("https://claude.ai")).toBe(
-      CLAUDE_ADAPTER_DESCRIPTOR,
-    );
-    expect(findExecutableAdapterByOrigin("https://claude.ai:8443")).toBeNull();
+    expect(findExecutableAdapterByOrigin("https://claude.ai")).toBeNull();
     expect(findExecutableAdapterByOrigin("https://unknown.example")).toBeNull();
   });
 

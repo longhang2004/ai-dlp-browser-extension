@@ -4,7 +4,6 @@ import {
   isContentStatusPortMessage,
   isStoredSettingsEnvelope,
   type ContentProtectionStatus,
-  type AdapterDescriptor,
   type ProtectionStatusSnapshot,
   type StoredSettingsEnvelope,
 } from "@ai-dlp/shared-types";
@@ -36,20 +35,13 @@ export interface SettingsPortManager {
   handleConnect(port: RuntimePortLike): void;
   broadcast(envelope: StoredSettingsEnvelope): Promise<void>;
   readStatus(recentEventCount: number): ProtectionStatusSnapshot;
-  refreshSurfaceAuthorization(surfaceId: string): void;
-  disconnectSurface(surfaceId: string): void;
 }
-
-export type RuntimeAuthorizationState = "hydrating" | "allowed" | "denied";
 
 export interface HandshakeScheduler {
   schedule(callback: () => void, delayMs: number): () => void;
 }
 
 export const CONTENT_HANDSHAKE_TIMEOUT_MS = 5_000;
-// An exact handshake and authorization hydration are independent startup
-// phases. Each receives the same conservative five-second budget.
-export const CONTENT_AUTHORIZATION_TIMEOUT_MS = 5_000;
 
 const browserHandshakeScheduler: HandshakeScheduler = {
   schedule(callback, delayMs) {
@@ -63,23 +55,15 @@ export function createSettingsPortManager(options: {
   settingsStore: SettingsStore;
   storageReady: Promise<void>;
   handshakeScheduler?: HandshakeScheduler;
-  getDescriptorAuthorization?: (
-    descriptor: AdapterDescriptor,
-  ) => RuntimeAuthorizationState;
 }): SettingsPortManager {
   const handshakeScheduler =
     options.handshakeScheduler ?? browserHandshakeScheduler;
   const ports = new Set<RuntimePortLike>();
   const lastSentGeneration = new Map<RuntimePortLike, number>();
   const expectedGeneration = new Map<RuntimePortLike, number>();
-  const expectedRuntimeEnabled = new Map<RuntimePortLike, boolean>();
+  const expectedProtectionEnabled = new Map<RuntimePortLike, boolean>();
   const connectionTokens = new Map<RuntimePortLike, number>();
   const statuses = new Map<RuntimePortLike, ContentProtectionStatus>();
-  const descriptors = new Map<RuntimePortLike, AdapterDescriptor>();
-  const pendingAuthorization = new Map<
-    RuntimePortLike,
-    { connectionToken: number; activate(): void }
-  >();
   const listenerCleanup = new Map<RuntimePortLike, () => void>();
   let generation = 0;
   let nextConnectionToken = 0;
@@ -94,11 +78,9 @@ export function createSettingsPortManager(options: {
     ports.delete(port);
     lastSentGeneration.delete(port);
     expectedGeneration.delete(port);
-    expectedRuntimeEnabled.delete(port);
+    expectedProtectionEnabled.delete(port);
     connectionTokens.delete(port);
     statuses.delete(port);
-    descriptors.delete(port);
-    pendingAuthorization.delete(port);
     const cleanup = listenerCleanup.get(port);
     listenerCleanup.delete(port);
     cleanup?.();
@@ -129,31 +111,13 @@ export function createSettingsPortManager(options: {
       return;
     }
     try {
-      const surfaceEnabled = envelope.settings.surfaces.some(
-        (surface) =>
-          surface.surfaceId === descriptors.get(port)?.surfaceId &&
-          surface.enabled,
-      );
-      expectedRuntimeEnabled.set(
-        port,
-        envelope.settings.protectionEnabled && surfaceEnabled,
-      );
       port.postMessage(
         createSettingsSnapshotMessage(envelope, messageGeneration),
       );
       lastSentGeneration.set(port, messageGeneration);
+      expectedProtectionEnabled.set(port, envelope.settings.protectionEnabled);
     } catch {
       disconnect(port);
-    }
-  }
-
-  function getAuthorization(
-    descriptor: AdapterDescriptor,
-  ): RuntimeAuthorizationState {
-    try {
-      return options.getDescriptorAuthorization?.(descriptor) ?? "allowed";
-    } catch {
-      return "denied";
     }
   }
 
@@ -163,11 +127,7 @@ export function createSettingsPortManager(options: {
         port.sender,
         options.runtimeId,
       );
-      if (
-        port.name !== SETTINGS_PORT_NAME ||
-        expectedDescriptor === null ||
-        getAuthorization(expectedDescriptor) === "denied"
-      ) {
+      if (port.name !== SETTINGS_PORT_NAME || expectedDescriptor === null) {
         disconnect(port);
         return;
       }
@@ -176,92 +136,54 @@ export function createSettingsPortManager(options: {
 
       const connectionToken = ++nextConnectionToken;
       connectionTokens.set(port, connectionToken);
-      descriptors.set(port, expectedDescriptor);
-      let handshakeComplete = false;
-      let activated = false;
+      let accepted = false;
       let cancelHandshakeTimeout: (() => void) | undefined;
-      let cancelAuthorizationTimeout: (() => void) | undefined;
-      const activate = (): void => {
-        if (
-          connectionTokens.get(port) !== connectionToken ||
-          activated ||
-          !handshakeComplete
-        ) {
-          return;
-        }
-        const authorization = getAuthorization(expectedDescriptor);
-        if (authorization === "denied") {
-          disconnect(port, connectionToken);
-          return;
-        }
-        if (authorization === "hydrating") {
-          pendingAuthorization.set(port, { connectionToken, activate });
-          cancelAuthorizationTimeout ??= handshakeScheduler.schedule(() => {
-            if (
-              connectionTokens.get(port) === connectionToken &&
-              pendingAuthorization.get(port)?.connectionToken ===
-                connectionToken &&
-              !activated
-            ) {
-              disconnect(port, connectionToken);
-            }
-          }, CONTENT_AUTHORIZATION_TIMEOUT_MS);
-          return;
-        }
-        cancelAuthorizationTimeout?.();
-        cancelAuthorizationTimeout = undefined;
-        pendingAuthorization.delete(port);
-        activated = true;
-        ports.add(port);
-        const initialGeneration = generation;
-        expectedGeneration.set(port, initialGeneration);
-        statuses.set(port, {
-          state: "initializing",
-          application: expectedDescriptor.adapterId,
-          surfaceId: expectedDescriptor.surfaceId,
-          protectionEnabled: null,
-        });
-        void options.storageReady
-          .then(() => options.settingsStore.read())
-          .then((envelope) => {
-            if (
-              connectionTokens.get(port) === connectionToken &&
-              generation === initialGeneration
-            ) {
-              send(port, envelope, initialGeneration);
-            }
-          })
-          .catch(() => disconnect(port, connectionToken));
-      };
       const onDisconnect = (): void => {
         forget(port, connectionToken);
       };
       const onMessage = (message: unknown): void => {
         if (connectionTokens.get(port) !== connectionToken) return;
-        if (!handshakeComplete) {
+        if (!accepted) {
           if (!isContentHandshakePortMessage(expectedDescriptor, message)) {
             disconnect(port, connectionToken);
             return;
           }
-          handshakeComplete = true;
+          accepted = true;
           cancelHandshakeTimeout?.();
           cancelHandshakeTimeout = undefined;
-          activate();
+          ports.add(port);
+          const initialGeneration = generation;
+          expectedGeneration.set(port, initialGeneration);
+          statuses.set(port, {
+            state: "initializing",
+            application: expectedDescriptor.adapterId,
+            surfaceId: expectedDescriptor.surfaceId,
+            protectionEnabled: null,
+          });
+          void options.storageReady
+            .then(() => options.settingsStore.read())
+            .then((envelope) => {
+              if (
+                connectionTokens.get(port) === connectionToken &&
+                generation === initialGeneration
+              ) {
+                send(port, envelope, initialGeneration);
+              }
+            })
+            .catch(() => disconnect(port, connectionToken));
           return;
         }
 
-        if (!activated) return;
-
-        const runtimeEnabled = expectedRuntimeEnabled.get(port);
+        const protectionEnabled = expectedProtectionEnabled.get(port);
         if (
           !isContentStatusPortMessage(message) ||
           message.status.application !== expectedDescriptor.adapterId ||
           message.status.surfaceId !== expectedDescriptor.surfaceId ||
           expectedGeneration.get(port) !== message.generation ||
           lastSentGeneration.get(port) !== message.generation ||
-          runtimeEnabled === undefined ||
+          protectionEnabled === undefined ||
           (message.status.state !== "initializing" &&
-            (runtimeEnabled
+            (protectionEnabled
               ? message.status.state === "disabled"
               : message.status.state !== "disabled"))
         ) {
@@ -275,15 +197,9 @@ export function createSettingsPortManager(options: {
         try {
           cancelHandshakeTimeout?.();
         } catch {
-          // Continue cancelling authorization and removing both listeners.
-        }
-        cancelHandshakeTimeout = undefined;
-        try {
-          cancelAuthorizationTimeout?.();
-        } catch {
           // Continue removing both independent port listeners.
         }
-        cancelAuthorizationTimeout = undefined;
+        cancelHandshakeTimeout = undefined;
         try {
           port.onDisconnect.removeListener?.(onDisconnect);
         } catch {
@@ -296,10 +212,7 @@ export function createSettingsPortManager(options: {
         }
       });
       cancelHandshakeTimeout = handshakeScheduler.schedule(() => {
-        if (
-          connectionTokens.get(port) === connectionToken &&
-          !handshakeComplete
-        ) {
+        if (connectionTokens.get(port) === connectionToken && !accepted) {
           disconnect(port, connectionToken);
         }
       }, CONTENT_HANDSHAKE_TIMEOUT_MS);
@@ -410,26 +323,6 @@ export function createSettingsPortManager(options: {
         protectionEnabled: true,
         recentEventCount: count,
       };
-    },
-    refreshSurfaceAuthorization(surfaceId) {
-      for (const [port, descriptor] of [...descriptors]) {
-        if (descriptor.surfaceId !== surfaceId) continue;
-        const authorization = getAuthorization(descriptor);
-        if (authorization === "denied") {
-          disconnect(port);
-          continue;
-        }
-        if (authorization === "allowed") {
-          pendingAuthorization.get(port)?.activate();
-        }
-      }
-    },
-    disconnectSurface(surfaceId) {
-      for (const [port, descriptor] of [...descriptors]) {
-        if (descriptor.surfaceId === surfaceId) {
-          disconnect(port);
-        }
-      }
     },
   };
 }

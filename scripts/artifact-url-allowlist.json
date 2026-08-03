@@ -12,24 +12,6 @@
       "filePattern": "content-script.js",
       "classification": "inert_framework_error_reference",
       "justification": "React production error decoder reference; the bundle contains no request API that consumes this string."
-    },
-    {
-      "literal": "https://react.dev/errors/",
-      "filePattern": "content-claude.js",
-      "classification": "inert_framework_error_reference",
-      "justification": "React production error decoder reference; the bundle contains no request API that consumes this string."
-    },
-    {
-      "literal": "https://claude.ai:443/*",
-      "filePattern": "assets/*.js",
-      "classification": "optional_exact_host_permission_identifier",
-      "justification": "Exact optional Claude permission metadata; the bundle does not fetch this origin or expand its port scope."
-    },
-    {
-      "literal": "https://claude.ai:443/*",
-      "filePattern": "background.js",
-      "classification": "optional_exact_host_permission_identifier",
-      "justification": "Exact optional Claude permission metadata; the background worker uses it only for closed permission reconciliation."
     }
   ]
 }

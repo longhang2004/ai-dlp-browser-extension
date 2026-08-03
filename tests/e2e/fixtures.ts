@@ -21,11 +21,9 @@ type ExtensionFixtures = {
   extensionContext: BrowserContext;
   extensionId: string;
   chatPage: Page;
-  claudePage: Page;
 };
 
 export const CHATGPT_FIXTURE_URL = "https://chatgpt.com/c/ai-dlp-test";
-export const CLAUDE_FIXTURE_URL = "https://claude.ai/promptguard-e2e";
 
 export function composerFixtureHtml(): string {
   return `<!doctype html>
@@ -52,40 +50,6 @@ export function composerFixtureHtml(): string {
         output.textContent = String(submissions.length);
       });
       Object.defineProperty(window, '__aiDlpFixture', {
-        value: Object.freeze({ submissions }),
-        configurable: false,
-        enumerable: false,
-        writable: false,
-      });
-    </script>
-  </body>
-</html>`;
-}
-
-export function claudeComposerFixtureHtml(): string {
-  return `<!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>Local Claude composer fixture</title></head>
-  <body>
-    <main>
-      <form aria-label="Chat composer" id="claude-composer-form">
-        <label for="claude-chat-input">Message Claude</label>
-        <textarea id="claude-chat-input" data-testid="chat-input" aria-label="Message Claude"></textarea>
-        <button type="submit" data-testid="send-button" aria-label="Send message">Send</button>
-      </form>
-      <output id="claude-submission-count">0</output>
-    </main>
-    <script>
-      const submissions = [];
-      const form = document.querySelector('#claude-composer-form');
-      const composer = document.querySelector('#claude-chat-input');
-      const output = document.querySelector('#claude-submission-count');
-      form.addEventListener('submit', (event) => {
-        event.preventDefault();
-        submissions.push(composer.value);
-        output.textContent = String(submissions.length);
-      });
-      Object.defineProperty(window, '__aiDlpClaudeFixture', {
         value: Object.freeze({ submissions }),
         configurable: false,
         enumerable: false,
@@ -125,18 +89,6 @@ export const test = base.extend<ExtensionFixtures>({
           return;
         }
         if (
-          requestUrl.protocol === "https:" &&
-          requestUrl.hostname === "claude.ai" &&
-          (requestUrl.port === "" || requestUrl.port === "8443")
-        ) {
-          await route.fulfill({
-            status: 200,
-            contentType: "text/html; charset=utf-8",
-            body: claudeComposerFixtureHtml(),
-          });
-          return;
-        }
-        if (
           requestUrl.protocol === "http:" ||
           requestUrl.protocol === "https:"
         ) {
@@ -170,16 +122,6 @@ export const test = base.extend<ExtensionFixtures>({
   chatPage: async ({ extensionContext }, runFixture) => {
     const page = await extensionContext.newPage();
     await page.goto(CHATGPT_FIXTURE_URL, { waitUntil: "domcontentloaded" });
-    try {
-      await runFixture(page);
-    } finally {
-      await page.close();
-    }
-  },
-
-  claudePage: async ({ extensionContext }, runFixture) => {
-    const page = await extensionContext.newPage();
-    await page.goto(CLAUDE_FIXTURE_URL, { waitUntil: "domcontentloaded" });
     try {
       await runFixture(page);
     } finally {
@@ -236,13 +178,6 @@ export async function setComposerText(
   await composer.fill(value);
 }
 
-export async function setClaudeComposerText(
-  page: Page,
-  value: string,
-): Promise<void> {
-  await page.locator('[data-testid="chat-input"]').fill(value);
-}
-
 export async function setStructuralAttachment(
   page: Page,
   present: boolean,
@@ -273,17 +208,6 @@ export async function submissionValues(page: Page): Promise<string[]> {
         __aiDlpFixture: { submissions: string[] };
       }
     ).__aiDlpFixture;
-    return [...fixture.submissions];
-  });
-}
-
-export async function claudeSubmissionValues(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
-    const fixture = (
-      globalThis as typeof globalThis & {
-        __aiDlpClaudeFixture: { submissions: string[] };
-      }
-    ).__aiDlpClaudeFixture;
     return [...fixture.submissions];
   });
 }

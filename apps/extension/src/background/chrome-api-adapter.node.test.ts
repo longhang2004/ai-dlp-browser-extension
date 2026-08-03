@@ -5,10 +5,6 @@ import {
   createProductionChromeApiAdapter,
   type ProductionChromeApi,
 } from "./chrome-api-adapter.js";
-import {
-  isExactRegistration,
-  type RegisteredContentScript,
-} from "./content-registration.js";
 import type { RuntimePortLike } from "./settings-ports.js";
 
 describe("production Chrome API adapter", () => {
@@ -191,65 +187,5 @@ describe("production Chrome API adapter", () => {
     expect(internalMessage).toHaveBeenCalledWith({ type: "status.snapshot" });
     adaptedPort?.onMessage.removeListener?.(internalMessage);
     expect(messageListeners).toHaveLength(0);
-  });
-
-  it("preserves registration fields and omissions so malformed entries fail closed", async () => {
-    const malformedWithExtraField = {
-      id: "promptguard-claude-v1",
-      matches: ["https://claude.ai:443/*"],
-      js: ["content-claude.js"],
-      allFrames: false,
-      world: "ISOLATED",
-      runAt: "document_idle",
-      persistAcrossSessions: true,
-      excludeMatches: ["https://claude.ai:443/private/*"],
-    } as unknown as chrome.scripting.RegisteredContentScript;
-    const malformedWithOmittedField = {
-      id: "promptguard-claude-v1",
-      matches: ["https://claude.ai:443/*"],
-      js: ["content-claude.js"],
-      allFrames: false,
-      world: "ISOLATED",
-      runAt: "document_idle",
-    } as unknown as chrome.scripting.RegisteredContentScript;
-    const source = {
-      storage: {
-        local: {
-          get: vi.fn() as typeof chrome.storage.local.get,
-          set: vi.fn() as typeof chrome.storage.local.set,
-          setAccessLevel: vi.fn() as typeof chrome.storage.local.setAccessLevel,
-        },
-      },
-      runtime: {
-        id: "abcdefghijklmnopabcdefghijklmnop",
-        onMessage: {
-          addListener: vi.fn() as typeof chrome.runtime.onMessage.addListener,
-        },
-        onConnect: {
-          addListener: vi.fn() as typeof chrome.runtime.onConnect.addListener,
-        },
-      },
-      scripting: {
-        getRegisteredContentScripts: vi.fn(async () => [
-          malformedWithExtraField,
-          malformedWithOmittedField,
-        ]) as typeof chrome.scripting.getRegisteredContentScripts,
-        registerContentScripts:
-          vi.fn() as typeof chrome.scripting.registerContentScripts,
-        unregisterContentScripts:
-          vi.fn() as typeof chrome.scripting.unregisterContentScripts,
-      },
-    } satisfies ProductionChromeApi;
-
-    const scripts = (await createProductionChromeApiAdapter(
-      source,
-    ).scripting?.getRegisteredContentScripts()) as readonly RegisteredContentScript[];
-
-    expect(scripts[0]).toHaveProperty("excludeMatches");
-    expect(Object.keys(scripts[1] ?? {})).not.toContain(
-      "persistAcrossSessions",
-    );
-    expect(isExactRegistration(scripts[0]!)).toBe(false);
-    expect(isExactRegistration(scripts[1]!)).toBe(false);
   });
 });

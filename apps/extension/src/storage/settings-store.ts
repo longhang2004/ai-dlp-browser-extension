@@ -235,6 +235,9 @@ function validateSurfaceSettings(
         return { field: "surfaces", code: "duplicate_surface" };
       }
       seen.add(surface.surfaceId);
+      if (surface.surfaceId === "claude_web" && surface.enabled) {
+        return { field: "surfaces", code: "surface_disabled" };
+      }
     }
     return value[0]?.surfaceId === "chatgpt_web" &&
       value[1]?.surfaceId === "claude_web"

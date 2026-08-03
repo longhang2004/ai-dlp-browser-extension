@@ -1747,11 +1747,7 @@ describe("runtime message validation", () => {
   ];
 
   it("accepts every exact request variant", () => {
-    expect(
-      [...validRequests, { type: "permissions.claude.remove" }].every(
-        isRuntimeRequest,
-      ),
-    ).toBe(true);
+    expect(validRequests.every(isRuntimeRequest)).toBe(true);
   });
 
   it.each([
@@ -1785,31 +1781,6 @@ describe("runtime message validation", () => {
   it("validates response and port envelopes without generic payloads", () => {
     expect(
       isRuntimeResponse({
-        type: "permissions.claude.removed",
-        removed: true,
-      }),
-    ).toBe(true);
-    expect(
-      isRuntimeResponse({
-        type: "permissions.claude.removed",
-        removed: false,
-      }),
-    ).toBe(true);
-    expect(
-      isRuntimeResponse({
-        type: "permissions.claude.removed",
-        removed: "true",
-      }),
-    ).toBe(false);
-    expect(
-      isRuntimeResponse({
-        type: "permissions.claude.removed",
-        removed: true,
-        prompt: "secret",
-      }),
-    ).toBe(false);
-    expect(
-      isRuntimeResponse({
         type: "status.result",
         status: {
           state: "initializing",
@@ -1838,15 +1809,6 @@ describe("runtime message validation", () => {
         application: null,
         surfaceId: null,
         protectionEnabled: null,
-        recentEventCount: 0,
-      }),
-    ).toBe(true);
-    expect(
-      isProtectionStatusSnapshot({
-        state: "active",
-        application: "claude",
-        surfaceId: "claude_web",
-        protectionEnabled: true,
         recentEventCount: 0,
       }),
     ).toBe(true);
@@ -1896,18 +1858,6 @@ describe("runtime message validation", () => {
           application: "chatgpt",
           surfaceId: "chatgpt_web",
           protectionEnabled: true,
-        },
-      }),
-    ).toBe(true);
-    expect(
-      isContentStatusPortMessage({
-        type: "status.snapshot",
-        generation: 0,
-        status: {
-          state: "disabled",
-          application: "claude",
-          surfaceId: "claude_web",
-          protectionEnabled: false,
         },
       }),
     ).toBe(true);

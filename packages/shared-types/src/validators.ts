@@ -1,6 +1,5 @@
 import {
   ADAPTER_HEALTH_CODES,
-  CLAUDE_ADAPTER_VERSIONS,
   CHATGPT_ADAPTER_VERSIONS,
   DECISION_RESOLUTIONS,
   ENFORCEMENT_ERROR_CODES,
@@ -631,19 +630,12 @@ function isDecisionResolutionForAction(
 }
 
 function hasCommonAuditFields(value: Record<PropertyKey, unknown>): boolean {
-  if (!isAuditEventId(value.id) || !isAuditTimestamp(value.timestamp)) {
-    return false;
-  }
-  if (value.adapterId === "chatgpt") {
-    return (
-      value.surfaceId === "chatgpt_web" &&
-      isOneOf(value.adapterVersion, CHATGPT_ADAPTER_VERSIONS)
-    );
-  }
   return (
-    value.adapterId === "claude" &&
-    value.surfaceId === "claude_web" &&
-    isOneOf(value.adapterVersion, CLAUDE_ADAPTER_VERSIONS)
+    isAuditEventId(value.id) &&
+    isAuditTimestamp(value.timestamp) &&
+    value.adapterId === "chatgpt" &&
+    value.surfaceId === "chatgpt_web" &&
+    isOneOf(value.adapterVersion, CHATGPT_ADAPTER_VERSIONS)
   );
 }
 
@@ -951,8 +943,7 @@ function isProtectionStatusSnapshotValue(
     }
 
     const hasReportedIdentity =
-      (value.application === "chatgpt" && value.surfaceId === "chatgpt_web") ||
-      (value.application === "claude" && value.surfaceId === "claude_web");
+      value.application === "chatgpt" && value.surfaceId === "chatgpt_web";
     const hasNoIdentity =
       value.application === null && value.surfaceId === null;
 
@@ -994,11 +985,7 @@ function isContentProtectionStatusValue(
         "surfaceId",
         "protectionEnabled",
       ]) ||
-      !(
-        (value.application === "chatgpt" &&
-          value.surfaceId === "chatgpt_web") ||
-        (value.application === "claude" && value.surfaceId === "claude_web")
-      )
+      !(value.application === "chatgpt" && value.surfaceId === "chatgpt_web")
     ) {
       return false;
     }
@@ -1085,7 +1072,6 @@ function isRuntimeRequestSnapshot(value: unknown): value is RuntimeRequest {
       case "settings.read":
       case "audit.read":
       case "audit.clear":
-      case "permissions.claude.remove":
       case "status.read":
         return hasExactOwnKeys(value, ["type"]);
       case "settings.save":
@@ -1129,11 +1115,6 @@ function isRuntimeResponseSnapshot(value: unknown): value is RuntimeResponse {
       case "audit.appended":
       case "audit.cleared":
         return hasExactOwnKeys(value, ["type"]);
-      case "permissions.claude.removed":
-        return (
-          hasExactOwnKeys(value, ["type", "removed"]) &&
-          typeof value.removed === "boolean"
-        );
       case "status.result":
         return (
           hasExactOwnKeys(value, ["type", "status"]) &&

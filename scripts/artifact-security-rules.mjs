@@ -10,13 +10,10 @@ const PRODUCTION_SOURCE_EXTENSIONS = new Set([
 ]);
 
 const APPROVED_SOURCE_URLS = new Map([
-  [
-    "apps/extension/public/manifest.json",
-    new Set(["https://chatgpt.com/*", "https://claude.ai:443/*"]),
-  ],
+  ["apps/extension/public/manifest.json", new Set(["https://chatgpt.com/*"])],
   [
     "apps/extension/src/adapters/adapter-catalog.ts",
-    new Set(["https://chatgpt.com", "https://claude.ai"]),
+    new Set(["https://chatgpt.com"]),
   ],
   [
     "apps/extension/src/adapters/chatgpt/chatgpt-adapter.ts",
@@ -31,14 +28,6 @@ const APPROVED_SOURCE_URLS = new Map([
     new Set(["https://claude.ai:443/*"]),
   ],
   ["apps/extension/src/content/bootstrap.ts", new Set(["https://chatgpt.com"])],
-  [
-    "apps/extension/src/adapters/claude/selectors.ts",
-    new Set(["https://claude.ai"]),
-  ],
-  [
-    "apps/extension/src/background/content-registration.ts",
-    new Set(["https://claude.ai:443/*"]),
-  ],
   [
     "packages/shared-types/src/permissions.ts",
     new Set(["https://claude.ai:443/*"]),
@@ -65,7 +54,6 @@ const SOURCE_FORBIDDEN_PATTERNS = [
     /\b(?:registerContentScripts|unregisterContentScripts|getRegisteredContentScripts)\b/u,
     "dynamic content registration",
   ],
-  [/\bchrome\s*\[\s*["']scripting["']\s*\]/u, "hidden Chrome API access"],
   [/\bchat-input\b/u, "Claude selector"],
   [
     /\bchrome\.runtime\.(?:connectNative|sendNativeMessage)\b/u,
@@ -86,21 +74,7 @@ export function isProductionSourceFile(file, extension) {
 export function inspectProductionSource(file, source) {
   const findings = [];
   for (const [pattern, label] of SOURCE_FORBIDDEN_PATTERNS) {
-    const allowedClaudeSelector =
-      label === "Claude selector" && file.includes("/adapters/claude/");
-    const allowedRegistration =
-      label === "dynamic content registration" &&
-      (file.endsWith("/background/content-registration.ts") ||
-        file.endsWith("/background/chrome-api-adapter.ts"));
-    const allowedScriptingApi =
-      label === "network-capable Chrome API" &&
-      file.endsWith("/background/chrome-api-adapter.ts");
-    if (
-      pattern.test(source) &&
-      !allowedClaudeSelector &&
-      !allowedRegistration &&
-      !allowedScriptingApi
-    ) {
+    if (pattern.test(source)) {
       findings.push(
         `${file} contains forbidden ${label} in production source.`,
       );

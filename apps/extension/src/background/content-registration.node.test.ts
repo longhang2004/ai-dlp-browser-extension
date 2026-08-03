@@ -202,6 +202,102 @@ describe("Claude content registration", () => {
     expect(invalidateSurface).not.toHaveBeenCalled();
   });
 
+  it("accepts Chromium's false browser-owned fallback field without registration churn", async () => {
+    const browserCanonical = {
+      ...CLAUDE_CONTENT_REGISTRATION,
+      matchOriginAsFallback: false,
+    } as RegisteredContentScript;
+    const permissions = permissionHarness({ host: true, named: true });
+    const scripting = scriptingHarness([browserCanonical]);
+    const manager = createContentRegistrationManager({
+      permissionApi: permissions.api,
+      scripting,
+      readSettings: async () => settings(true),
+      invalidateSurface: vi.fn(),
+    });
+
+    await expect(manager.reconcile()).resolves.toMatchObject({
+      registration: "registered",
+      healthCode: null,
+    });
+    await expect(manager.reconcile()).resolves.toMatchObject({
+      registration: "registered",
+      healthCode: null,
+    });
+
+    expect(scripting.unregistrations).toEqual([]);
+    expect(scripting.registrations).toEqual([]);
+    expect(manager.isDescriptorAllowed()).toBe(true);
+  });
+
+  it.each([
+    ["true browser fallback", { matchOriginAsFallback: true }],
+    [
+      "exclude matches",
+      { excludeMatches: ["https://claude.ai:443/private/*"] },
+    ],
+    ["css injection", { css: ["content.css"] }],
+    ["unexpected JavaScript", { js: ["content-claude.js", "extra.js"] }],
+    [
+      "unexpected matches",
+      { matches: ["https://claude.ai:443/*", "https://example.com/*"] },
+    ],
+    ["unknown field", { unexpected: false }],
+  ] as const)("rejects a registration with %s", async (_label, override) => {
+    const malformed = {
+      ...CLAUDE_CONTENT_REGISTRATION,
+      ...override,
+    } as unknown as RegisteredContentScript;
+    const permissions = permissionHarness({ host: true, named: true });
+    const scripting = scriptingHarness([malformed]);
+    const manager = createContentRegistrationManager({
+      permissionApi: permissions.api,
+      scripting,
+      readSettings: async () => settings(true),
+      invalidateSurface: vi.fn(),
+    });
+
+    await manager.reconcile();
+
+    expect(scripting.unregistrations).toEqual([
+      [CLAUDE_CONTENT_REGISTRATION.id],
+    ]);
+    expect(scripting.registrations).toEqual([[CLAUDE_CONTENT_REGISTRATION]]);
+  });
+
+  it("rereads a mutated registration and keeps the runtime gate closed unless the browser result is exact", async () => {
+    const permissions = permissionHarness({ host: true, named: true });
+    let reads = 0;
+    const scripting: ScriptingApi = {
+      getRegisteredContentScripts: vi.fn(async () => {
+        reads += 1;
+        return reads === 1
+          ? []
+          : [
+              {
+                ...CLAUDE_CONTENT_REGISTRATION,
+                matchOriginAsFallback: true,
+              } as RegisteredContentScript,
+            ];
+      }),
+      registerContentScripts: vi.fn(async () => undefined),
+      unregisterContentScripts: vi.fn(async () => undefined),
+    };
+    const manager = createContentRegistrationManager({
+      permissionApi: permissions.api,
+      scripting,
+      readSettings: async () => settings(true),
+      invalidateSurface: vi.fn(),
+    });
+
+    await expect(manager.reconcile()).resolves.toMatchObject({
+      registration: "failed",
+      healthCode: "registration_failed",
+    });
+    expect(scripting.getRegisteredContentScripts).toHaveBeenCalledTimes(2);
+    expect(manager.isDescriptorAllowed()).toBe(false);
+  });
+
   it("removes stale versions before registering the exact current entry", async () => {
     const stale = {
       ...CLAUDE_CONTENT_REGISTRATION,

@@ -12,6 +12,7 @@ import {
 import { createSettingsStore } from "../storage/settings-store.js";
 import { createMemoryStoragePort } from "../storage/storage-port.js";
 import {
+  CONTENT_AUTHORIZATION_TIMEOUT_MS,
   CONTENT_HANDSHAKE_TIMEOUT_MS,
   createSettingsPortManager,
   type RuntimePortLike,
@@ -657,13 +658,13 @@ describe("settings ports", () => {
   });
 
   it("rechecks Claude authorization when a pending port handshakes", async () => {
-    let claudeAllowed = true;
+    let claudeAuthorization: "hydrating" | "allowed" | "denied" = "allowed";
     const manager = createSettingsPortManager({
       runtimeId,
       settingsStore: createSettingsStore(createMemoryStoragePort()),
       storageReady: Promise.resolve(),
-      isDescriptorAllowed: (descriptor) =>
-        descriptor.surfaceId !== "claude_web" || claudeAllowed,
+      getDescriptorAuthorization: (descriptor) =>
+        descriptor.surfaceId !== "claude_web" ? "allowed" : claudeAuthorization,
     });
     const connected = port({
       sender: {
@@ -674,7 +675,7 @@ describe("settings ports", () => {
     });
 
     manager.handleConnect(connected);
-    claudeAllowed = false;
+    claudeAuthorization = "denied";
     handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
     await flush();
 
@@ -682,6 +683,215 @@ describe("settings ports", () => {
     expect(connected.postMessage).not.toHaveBeenCalled();
     expect(manager.readStatus(0).state).toBe("unavailable");
   });
+
+  it("holds an exact Claude handshake during hydration and releases it only after authorization", async () => {
+    const timer = handshakeScheduler();
+    let claudeAuthorization: "hydrating" | "allowed" | "denied" = "hydrating";
+    const read = vi.fn(() =>
+      createSettingsStore(createMemoryStoragePort()).read(),
+    );
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: {
+        read,
+        save: (candidate) =>
+          createSettingsStore(createMemoryStoragePort()).save(candidate),
+      },
+      storageReady: Promise.resolve(),
+      handshakeScheduler: timer.scheduler,
+      getDescriptorAuthorization: (descriptor) =>
+        descriptor.surfaceId !== "claude_web" ? "allowed" : claudeAuthorization,
+    });
+    const connected = port({
+      sender: {
+        ...port().sender,
+        url: "https://claude.ai/promptguard-test",
+        origin: "https://claude.ai",
+      },
+    });
+
+    manager.handleConnect(connected);
+    handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
+    await flush();
+
+    expect(timer.scheduled).toHaveLength(2);
+    expect(read).not.toHaveBeenCalled();
+    expect(connected.postMessage).not.toHaveBeenCalled();
+    expect(connected.disconnect).not.toHaveBeenCalled();
+    expect(manager.readStatus(0).state).toBe("unavailable");
+
+    claudeAuthorization = "allowed";
+    manager.refreshSurfaceAuthorization("claude_web");
+
+    await vi.waitFor(() => expect(connected.postMessage).toHaveBeenCalled());
+    expect(timer.scheduled[1]?.cancelled).toBe(true);
+    timer.runNext();
+    timer.runNext();
+    expect(connected.disconnect).not.toHaveBeenCalled();
+    expect(manager.readStatus(0).state).toBe("initializing");
+  });
+
+  it("expires a fully handshaken Claude port when authorization hydration never settles", async () => {
+    const timer = handshakeScheduler();
+    let claudeAuthorization: "hydrating" | "allowed" = "hydrating";
+    const read = vi.fn(() =>
+      createSettingsStore(createMemoryStoragePort()).read(),
+    );
+    const manager = createSettingsPortManager({
+      runtimeId,
+      settingsStore: {
+        read,
+        save: (candidate) =>
+          createSettingsStore(createMemoryStoragePort()).save(candidate),
+      },
+      storageReady: Promise.resolve(),
+      handshakeScheduler: timer.scheduler,
+      getDescriptorAuthorization: (descriptor) =>
+        descriptor.surfaceId !== "claude_web" ? "allowed" : claudeAuthorization,
+    });
+    const connected = port({
+      sender: {
+        ...port().sender,
+        url: "https://claude.ai/promptguard-test",
+        origin: "https://claude.ai",
+      },
+    });
+
+    manager.handleConnect(connected);
+    handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
+    await flush();
+
+    expect(timer.scheduled).toHaveLength(2);
+    expect(timer.scheduled[0]).toMatchObject({
+      cancelled: true,
+      delayMs: CONTENT_HANDSHAKE_TIMEOUT_MS,
+    });
+    expect(timer.scheduled[1]).toMatchObject({
+      cancelled: false,
+      delayMs: CONTENT_AUTHORIZATION_TIMEOUT_MS,
+    });
+    expect(connected.listenerCounts()).toEqual({
+      disconnect: 1,
+      message: 1,
+    });
+
+    timer.runNext();
+    timer.runNext();
+    await flush();
+
+    expect(connected.disconnect).toHaveBeenCalledOnce();
+    expect(connected.listenerCounts()).toEqual({
+      disconnect: 0,
+      message: 0,
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(connected.postMessage).not.toHaveBeenCalled();
+    expect(manager.readStatus(0).state).toBe("unavailable");
+
+    claudeAuthorization = "allowed";
+    manager.refreshSurfaceAuthorization("claude_web");
+    connected.invokeCapturedMessage(0, {
+      type: "content.handshake",
+      descriptor: CLAUDE_ADAPTER_DESCRIPTOR,
+    });
+    await flush();
+
+    expect(connected.disconnect).toHaveBeenCalledOnce();
+    expect(read).not.toHaveBeenCalled();
+    expect(connected.postMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["disconnect", "invalidate", "rehandle"] as const)(
+    "cancels a pending authorization timeout on %s",
+    async (route) => {
+      const timer = handshakeScheduler();
+      let claudeAuthorization: "hydrating" | "allowed" = "hydrating";
+      const manager = createSettingsPortManager({
+        runtimeId,
+        settingsStore: createSettingsStore(createMemoryStoragePort()),
+        storageReady: Promise.resolve(),
+        handshakeScheduler: timer.scheduler,
+        getDescriptorAuthorization: (descriptor) =>
+          descriptor.surfaceId !== "claude_web"
+            ? "allowed"
+            : claudeAuthorization,
+      });
+      const connected = port({
+        sender: {
+          ...port().sender,
+          url: "https://claude.ai/promptguard-test",
+          origin: "https://claude.ai",
+        },
+      });
+
+      manager.handleConnect(connected);
+      handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
+      const authorizationTimeout = timer.scheduled[1];
+      expect(authorizationTimeout).toMatchObject({ cancelled: false });
+
+      if (route === "disconnect") connected.fireDisconnect();
+      if (route === "invalidate") manager.disconnectSurface("claude_web");
+      if (route === "rehandle") manager.handleConnect(connected);
+
+      expect(authorizationTimeout?.cancelled).toBe(true);
+      authorizationTimeout?.callback();
+      claudeAuthorization = "allowed";
+      manager.refreshSurfaceAuthorization("claude_web");
+      await flush();
+
+      expect(connected.postMessage).not.toHaveBeenCalled();
+      expect(connected.disconnect).toHaveBeenCalledTimes(
+        route === "invalidate" ? 1 : 0,
+      );
+      expect(connected.listenerCounts()).toEqual(
+        route === "rehandle"
+          ? { disconnect: 1, message: 1 }
+          : { disconnect: 0, message: 0 },
+      );
+    },
+  );
+
+  it.each(["denied", "error"] as const)(
+    "disconnects a hydrated Claude handshake when authorization resolves to %s",
+    async (outcome) => {
+      const timer = handshakeScheduler();
+      let authorizationRead = 0;
+      const manager = createSettingsPortManager({
+        runtimeId,
+        settingsStore: createSettingsStore(createMemoryStoragePort()),
+        storageReady: Promise.resolve(),
+        handshakeScheduler: timer.scheduler,
+        getDescriptorAuthorization: (descriptor) => {
+          if (descriptor.surfaceId !== "claude_web") return "allowed";
+          authorizationRead += 1;
+          if (authorizationRead <= 2) return "hydrating";
+          if (outcome === "error") throw new Error("authorization failed");
+          return "denied";
+        },
+      });
+      const connected = port({
+        sender: {
+          ...port().sender,
+          url: "https://claude.ai/promptguard-test",
+          origin: "https://claude.ai",
+        },
+      });
+
+      manager.handleConnect(connected);
+      handshake(connected, CLAUDE_ADAPTER_DESCRIPTOR);
+      await flush();
+      manager.refreshSurfaceAuthorization("claude_web");
+
+      expect(connected.disconnect).toHaveBeenCalledOnce();
+      expect(timer.scheduled[1]?.cancelled).toBe(true);
+      expect(connected.listenerCounts()).toEqual({
+        disconnect: 0,
+        message: 0,
+      });
+      expect(connected.postMessage).not.toHaveBeenCalled();
+      expect(manager.readStatus(0).state).toBe("unavailable");
+    },
+  );
 
   it("expires a pending content port after the bounded prompt-free handshake timeout", async () => {
     const timer = handshakeScheduler();

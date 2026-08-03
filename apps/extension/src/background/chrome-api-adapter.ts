@@ -4,6 +4,7 @@ import {
   type PermissionApiSource,
 } from "./permission-api.js";
 import type {
+  ContentScriptRegistration,
   RegisteredContentScript,
   ScriptingApi,
 } from "./content-registration.js";
@@ -203,7 +204,7 @@ export function createProductionChromeApiAdapter(
         );
       },
       async registerContentScripts(
-        scripts: readonly RegisteredContentScript[],
+        scripts: readonly ContentScriptRegistration[],
       ) {
         await source.scripting!.registerContentScripts(
           scripts as chrome.scripting.RegisteredContentScript[],

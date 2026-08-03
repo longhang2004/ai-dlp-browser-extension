@@ -12,8 +12,7 @@ import {
 } from "@ai-dlp/shared-types/permissions";
 import type { ProtectionSettings } from "@ai-dlp/shared-types";
 
-export type RegisteredContentScript = {
-  [key: string]: unknown;
+export type ContentScriptRegistration = {
   id: string;
   matches: readonly string[];
   js: readonly string[];
@@ -23,15 +22,22 @@ export type RegisteredContentScript = {
   persistAcrossSessions?: boolean;
 };
 
+// Chromium may materialize its browser-owned false default on returned
+// registrations even though it was absent from the registration input.
+export type RegisteredContentScript = ContentScriptRegistration & {
+  [key: string]: unknown;
+  matchOriginAsFallback?: boolean;
+};
+
 export type ScriptingApi = {
   getRegisteredContentScripts(): Promise<readonly RegisteredContentScript[]>;
   registerContentScripts(
-    scripts: readonly RegisteredContentScript[],
+    scripts: readonly ContentScriptRegistration[],
   ): Promise<void>;
   unregisterContentScripts(details: { ids: readonly string[] }): Promise<void>;
 };
 
-export const CLAUDE_CONTENT_REGISTRATION: RegisteredContentScript =
+export const CLAUDE_CONTENT_REGISTRATION: ContentScriptRegistration =
   Object.freeze({
     id: "promptguard-claude-v1",
     matches: Object.freeze([CLAUDE_HOST_PERMISSION_PATTERN]),
@@ -80,11 +86,16 @@ function sameStringArray(
 }
 
 function isExactRegistration(value: RegisteredContentScript): boolean {
-  const expectedKeys = Object.keys(CLAUDE_CONTENT_REGISTRATION).sort();
-  const actualKeys = Object.keys(value).sort();
+  const expectedKeys = Object.keys(CLAUDE_CONTENT_REGISTRATION);
+  const allowedKeys = new Set([...expectedKeys, "matchOriginAsFallback"]);
+  const actualKeys = Reflect.ownKeys(value);
   return (
-    actualKeys.length === expectedKeys.length &&
-    actualKeys.every((key, index) => key === expectedKeys[index]) &&
+    actualKeys.every(
+      (key) => typeof key === "string" && allowedKeys.has(key),
+    ) &&
+    expectedKeys.every((key) => Object.hasOwn(value, key)) &&
+    (!Object.hasOwn(value, "matchOriginAsFallback") ||
+      value.matchOriginAsFallback === false) &&
     value.id === CLAUDE_CONTENT_REGISTRATION.id &&
     sameStringArray(value.matches, CLAUDE_CONTENT_REGISTRATION.matches) &&
     sameStringArray(value.js, CLAUDE_CONTENT_REGISTRATION.js) &&
@@ -93,6 +104,19 @@ function isExactRegistration(value: RegisteredContentScript): boolean {
     value.runAt === CLAUDE_CONTENT_REGISTRATION.runAt &&
     value.persistAcrossSessions ===
       CLAUDE_CONTENT_REGISTRATION.persistAcrossSessions
+  );
+}
+
+function hasExactlyOneExactClaudeRegistration(
+  registrations: readonly RegisteredContentScript[],
+): boolean {
+  const owned = registrations.filter((registration) =>
+    isClaudeRegistrationId(registration.id),
+  );
+  return (
+    owned.length === 1 &&
+    owned[0]?.id === CLAUDE_CONTENT_REGISTRATION.id &&
+    isExactRegistration(owned[0])
   );
 }
 
@@ -222,13 +246,14 @@ export function createContentRegistrationManager(options: {
     return !(removal?.epoch === epoch && removal.pendingPermissionChange);
   }
 
-  function invalidateSnapshot(): void {
+  function invalidateSnapshot(forceSurfaceInvalidation = false): void {
     if (
       snapshot.registration === "not_registered" &&
       !snapshot.hostGranted &&
       !snapshot.namedPermissionGranted &&
       !snapshot.enabled
     ) {
+      if (forceSurfaceInvalidation) options.invalidateSurface();
       return;
     }
     snapshot = { ...snapshot, registration: "not_registered" };
@@ -240,7 +265,7 @@ export function createContentRegistrationManager(options: {
     // requested. Permission-change callbacks that arrive during that critical
     // section must not invalidate its post-removal reconciliation generation.
     if (activeRemoval === undefined) reconciliationEpoch += 1;
-    invalidateSnapshot();
+    invalidateSnapshot(true);
   }
 
   function enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
@@ -254,8 +279,8 @@ export function createContentRegistrationManager(options: {
 
   async function removeOwnedRegistrations(
     registrations: readonly RegisteredContentScript[],
-  ): Promise<void> {
-    if (options.scripting === undefined) return;
+  ): Promise<boolean> {
+    if (options.scripting === undefined) return false;
     const staleIds = registrations
       .filter(
         (registration) =>
@@ -265,7 +290,9 @@ export function createContentRegistrationManager(options: {
       .map((registration) => registration.id);
     if (staleIds.length > 0) {
       await options.scripting.unregisterContentScripts({ ids: staleIds });
+      return true;
     }
+    return false;
   }
 
   async function cleanupOwnedRegistrations(): Promise<void> {
@@ -377,17 +404,32 @@ export function createContentRegistrationManager(options: {
       const registrations =
         await options.scripting.getRegisteredContentScripts();
       if (!isCurrent()) return snapshot;
-      await removeOwnedRegistrations(registrations);
+      let mutated = await removeOwnedRegistrations(registrations);
       if (!isCurrent()) return snapshot;
-      const current = registrations.find(
-        (registration) => registration.id === CLAUDE_CONTENT_REGISTRATION.id,
+      const exactCurrent = registrations.filter(
+        (registration) =>
+          registration.id === CLAUDE_CONTENT_REGISTRATION.id &&
+          isExactRegistration(registration),
       );
-      if (current === undefined || !isExactRegistration(current)) {
+      if (exactCurrent.length === 0) {
         await options.scripting.registerContentScripts([
           CLAUDE_CONTENT_REGISTRATION,
         ]);
+        mutated = true;
       }
       if (!isCurrent()) return snapshot;
+      const verifiedRegistrations = mutated
+        ? await options.scripting.getRegisteredContentScripts()
+        : registrations;
+      if (!isCurrent()) return snapshot;
+      if (!hasExactlyOneExactClaudeRegistration(verifiedRegistrations)) {
+        snapshot = {
+          ...snapshot,
+          registration: "failed",
+          healthCode: "registration_failed",
+        };
+        return snapshot;
+      }
       snapshot = { ...snapshot, registration: "registered" };
       return snapshot;
     } catch {
@@ -480,7 +522,7 @@ export function createContentRegistrationManager(options: {
       // boundary. The final callback is invalidated and one fresh reconcile
       // is queued after the removal releases the boundary.
       activeRemoval.pendingPermissionChange = true;
-      invalidateSnapshot();
+      invalidateSnapshot(true);
       return;
     }
     invalidate();
@@ -595,7 +637,7 @@ export function createContentRegistrationManager(options: {
         return enqueueOperation(async () => {
           if (disposed) return false;
           const epoch = ++reconciliationEpoch;
-          invalidateSnapshot();
+          invalidateSnapshot(true);
           const removal = {
             epoch,
             suppressHostRemovalEvent: true,
@@ -611,7 +653,7 @@ export function createContentRegistrationManager(options: {
       // Invalidate before queuing any awaited permission or cleanup work and
       // mark the removal active synchronously so concurrent reconciles queue
       // behind it even while an earlier operation is still finishing.
-      invalidateSnapshot();
+      invalidateSnapshot(true);
       const removal = {
         epoch,
         suppressHostRemovalEvent: true,

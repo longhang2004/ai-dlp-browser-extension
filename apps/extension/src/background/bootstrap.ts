@@ -15,6 +15,7 @@ import {
 } from "./message-router.js";
 import {
   createSettingsPortManager,
+  type RuntimeAuthorizationState,
   type RuntimePortLike,
 } from "./settings-ports.js";
 import {
@@ -46,8 +47,11 @@ export function bootstrapBackground(
   );
   const settingsStore = createSettingsStore(storage, storageReady);
   const auditStore = createAuditStore(storage, settingsStore, storageReady);
-  let claudeRuntimeAllowed = false;
+  let claudeRuntimeAuthorization: RuntimeAuthorizationState =
+    api.permissions === undefined ? "denied" : "hydrating";
   let disconnectSurface: (surfaceId: string) => void = () => undefined;
+  let refreshSurfaceAuthorization: (surfaceId: string) => void = () =>
+    undefined;
   let reconcileClaude: () => void = () => undefined;
   let registrationManager: ContentRegistrationManager | undefined;
   if (api.permissions !== undefined) {
@@ -78,10 +82,12 @@ export function bootstrapBackground(
         ];
       },
       onReconciled(snapshot) {
-        claudeRuntimeAllowed = snapshot.registration === "registered";
+        claudeRuntimeAuthorization =
+          snapshot.registration === "registered" ? "allowed" : "denied";
+        refreshSurfaceAuthorization("claude_web");
       },
       invalidateSurface() {
-        claudeRuntimeAllowed = false;
+        claudeRuntimeAuthorization = "denied";
         disconnectSurface("claude_web");
       },
     });
@@ -93,10 +99,13 @@ export function bootstrapBackground(
     runtimeId: api.runtime.id,
     settingsStore,
     storageReady,
-    isDescriptorAllowed: (descriptor) =>
-      descriptor.surfaceId !== "claude_web" || claudeRuntimeAllowed,
+    getDescriptorAuthorization: (descriptor) =>
+      descriptor.surfaceId === "claude_web"
+        ? claudeRuntimeAuthorization
+        : "allowed",
   });
   disconnectSurface = settingsPorts.disconnectSurface;
+  refreshSurfaceAuthorization = settingsPorts.refreshSurfaceAuthorization;
   const messageListener = createMessageListener({
     runtimeId: api.runtime.id,
     storageReady,
@@ -106,12 +115,13 @@ export function bootstrapBackground(
     readStatus: async () =>
       settingsPorts.readStatus((await auditStore.read()).events.length),
     isContentRuntimeAllowed: (descriptor) =>
-      descriptor.surfaceId !== "claude_web" || claudeRuntimeAllowed,
+      descriptor.surfaceId !== "claude_web" ||
+      claudeRuntimeAuthorization === "allowed",
     removeClaudeAccess: () =>
       registrationManager?.removeClaudeAccess() ?? Promise.resolve(false),
     onSettingsSaved() {
       if (registrationManager !== undefined) {
-        claudeRuntimeAllowed = false;
+        claudeRuntimeAuthorization = "hydrating";
         disconnectSurface("claude_web");
         reconcileClaude();
       }
@@ -123,7 +133,12 @@ export function bootstrapBackground(
     settingsPorts.handleConnect(port),
   );
   if (registrationManager !== undefined) {
-    void storageReady.then(() => registrationManager?.reconcile());
+    void storageReady
+      .then(() => registrationManager?.reconcile())
+      .catch(() => {
+        claudeRuntimeAuthorization = "denied";
+        refreshSurfaceAuthorization("claude_web");
+      });
   }
 
   return { storageReady };

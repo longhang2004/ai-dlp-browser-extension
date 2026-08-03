@@ -27,15 +27,278 @@ import type { RuntimePortLike } from "./settings-ports.js";
 function deferred<T>(): {
   promise: Promise<T>;
   resolve(value: T | PromiseLike<T>): void;
+  reject(reason?: unknown): void;
 } {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
+}
+
+function claudeSettingsPort(runtimeId: string): {
+  port: RuntimePortLike;
+  handshake(): void;
+} {
+  const messageListeners = new Set<(message: unknown) => void>();
+  const port: RuntimePortLike = {
+    name: "settings-v2",
+    sender: {
+      id: runtimeId,
+      url: "https://claude.ai/promptguard-test",
+      origin: "https://claude.ai",
+      frameId: 0,
+    },
+    postMessage: vi.fn(),
+    disconnect: vi.fn(),
+    onMessage: {
+      addListener: (listener) => messageListeners.add(listener),
+      removeListener: (listener) => messageListeners.delete(listener),
+    },
+    onDisconnect: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    },
+  };
+  return {
+    port,
+    handshake() {
+      for (const listener of messageListeners) {
+        listener({
+          type: "content.handshake",
+          descriptor: CLAUDE_ADAPTER_DESCRIPTOR,
+        });
+      }
+    },
+  };
 }
 
 describe("background bootstrap", () => {
+  it("holds a persisted Claude port through worker hydration without registration churn", async () => {
+    const runtimeId = "abcdefghijklmnopabcdefghijklmnop";
+    const storageGate = deferred<void>();
+    const enabledSettings = createDefaultProtectionSettings();
+    enabledSettings.surfaces = enabledSettings.surfaces.map((surface) =>
+      surface.surfaceId === "claude_web"
+        ? { ...surface, enabled: true }
+        : surface,
+    );
+    const values: Record<string, unknown> = {
+      settings: { schemaVersion: 3, settings: enabledSettings },
+    };
+    const connectListeners: Array<(port: RuntimePortLike) => void> = [];
+    let registrations: RegisteredContentScript[] = [
+      {
+        ...CLAUDE_CONTENT_REGISTRATION,
+        matchOriginAsFallback: false,
+      },
+    ];
+    const scripting: ScriptingApi = {
+      getRegisteredContentScripts: vi.fn(async () => [...registrations]),
+      registerContentScripts: vi.fn(
+        async (
+          scripts: Parameters<ScriptingApi["registerContentScripts"]>[0],
+        ) => {
+          registrations = scripts.map((script) => ({
+            ...script,
+            matchOriginAsFallback: false,
+          }));
+        },
+      ),
+      unregisterContentScripts: vi.fn(async ({ ids }) => {
+        registrations = registrations.filter(
+          (registration) => !ids.includes(registration.id),
+        );
+      }),
+    };
+    const permissions: PermissionApi = {
+      contains: vi.fn(async () => true),
+      request: vi.fn(async () => true),
+      remove: vi.fn(async () => true),
+      onAdded: { addListener: vi.fn(), removeListener: vi.fn() },
+      onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+    };
+    const api: BackgroundChromeApi = {
+      storage: {
+        local: {
+          async get(key) {
+            return { [key]: structuredClone(values[key]) };
+          },
+          async set(items) {
+            Object.assign(values, structuredClone(items));
+          },
+          setAccessLevel: vi.fn(() => storageGate.promise),
+        },
+      },
+      runtime: {
+        id: runtimeId,
+        onMessage: { addListener: vi.fn() },
+        onConnect: {
+          addListener(listener) {
+            connectListeners.push(listener);
+          },
+        },
+      },
+      permissions,
+      scripting,
+    };
+
+    bootstrapBackground(api);
+    const first = claudeSettingsPort(runtimeId);
+    connectListeners[0]?.(first.port);
+    first.handshake();
+    await Promise.resolve();
+
+    expect(first.port.postMessage).not.toHaveBeenCalled();
+    expect(first.port.disconnect).not.toHaveBeenCalled();
+    expect(scripting.getRegisteredContentScripts).not.toHaveBeenCalled();
+
+    storageGate.resolve();
+    await vi.waitFor(() => expect(first.port.postMessage).toHaveBeenCalled());
+    expect(first.port.disconnect).not.toHaveBeenCalled();
+    expect(scripting.registerContentScripts).not.toHaveBeenCalled();
+    expect(scripting.unregisterContentScripts).not.toHaveBeenCalled();
+
+    bootstrapBackground(api);
+    const reloaded = claudeSettingsPort(runtimeId);
+    connectListeners[1]?.(reloaded.port);
+    reloaded.handshake();
+
+    await vi.waitFor(() =>
+      expect(reloaded.port.postMessage).toHaveBeenCalled(),
+    );
+    expect(reloaded.port.disconnect).not.toHaveBeenCalled();
+    expect(scripting.getRegisteredContentScripts).toHaveBeenCalledTimes(2);
+    expect(scripting.registerContentScripts).not.toHaveBeenCalled();
+    expect(scripting.unregisterContentScripts).not.toHaveBeenCalled();
+  });
+
+  it("disconnects a Claude port when startup hydration fails", async () => {
+    const runtimeId = "abcdefghijklmnopabcdefghijklmnop";
+    const storageGate = deferred<void>();
+    const connectListeners: Array<(port: RuntimePortLike) => void> = [];
+    const api: BackgroundChromeApi = {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+          setAccessLevel: vi.fn(() => storageGate.promise),
+        },
+      },
+      runtime: {
+        id: runtimeId,
+        onMessage: { addListener: vi.fn() },
+        onConnect: {
+          addListener(listener) {
+            connectListeners.push(listener);
+          },
+        },
+      },
+      permissions: {
+        contains: vi.fn(async () => true),
+        request: vi.fn(async () => true),
+        remove: vi.fn(async () => true),
+        onAdded: { addListener: vi.fn(), removeListener: vi.fn() },
+        onRemoved: { addListener: vi.fn(), removeListener: vi.fn() },
+      },
+      scripting: {
+        getRegisteredContentScripts: vi.fn(async () => []),
+        registerContentScripts: vi.fn(async () => undefined),
+        unregisterContentScripts: vi.fn(async () => undefined),
+      },
+    };
+
+    bootstrapBackground(api);
+    const connected = claudeSettingsPort(runtimeId);
+    connectListeners[0]?.(connected.port);
+    connected.handshake();
+    expect(connected.port.disconnect).not.toHaveBeenCalled();
+    expect(connected.port.postMessage).not.toHaveBeenCalled();
+
+    storageGate.reject(new Error("storage unavailable"));
+
+    await vi.waitFor(() =>
+      expect(connected.port.disconnect).toHaveBeenCalledOnce(),
+    );
+    expect(connected.port.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("disconnects a held Claude port immediately when permission is revoked during hydration", async () => {
+    const runtimeId = "abcdefghijklmnopabcdefghijklmnop";
+    const storageGate = deferred<void>();
+    const enabledSettings = createDefaultProtectionSettings();
+    enabledSettings.surfaces = enabledSettings.surfaces.map((surface) =>
+      surface.surfaceId === "claude_web"
+        ? { ...surface, enabled: true }
+        : surface,
+    );
+    const values: Record<string, unknown> = {
+      settings: { schemaVersion: 3, settings: enabledSettings },
+    };
+    const connectListeners: Array<(port: RuntimePortLike) => void> = [];
+    const removedListeners = new Set<(change: PermissionChange) => void>();
+    let hostGranted = true;
+    const api: BackgroundChromeApi = {
+      storage: {
+        local: {
+          async get(key) {
+            return { [key]: structuredClone(values[key]) };
+          },
+          set: vi.fn(async () => undefined),
+          setAccessLevel: vi.fn(() => storageGate.promise),
+        },
+      },
+      runtime: {
+        id: runtimeId,
+        onMessage: { addListener: vi.fn() },
+        onConnect: {
+          addListener(listener) {
+            connectListeners.push(listener);
+          },
+        },
+      },
+      permissions: {
+        contains: vi.fn(async (scope) =>
+          scope.origins.length > 0 ? hostGranted : true,
+        ),
+        request: vi.fn(async () => true),
+        remove: vi.fn(async () => true),
+        onAdded: { addListener: vi.fn(), removeListener: vi.fn() },
+        onRemoved: {
+          addListener: (listener) => removedListeners.add(listener),
+          removeListener: (listener) => removedListeners.delete(listener),
+        },
+      },
+      scripting: {
+        getRegisteredContentScripts: vi.fn(async () => []),
+        registerContentScripts: vi.fn(async () => undefined),
+        unregisterContentScripts: vi.fn(async () => undefined),
+      },
+    };
+
+    bootstrapBackground(api);
+    const connected = claudeSettingsPort(runtimeId);
+    connectListeners[0]?.(connected.port);
+    connected.handshake();
+    expect(connected.port.disconnect).not.toHaveBeenCalled();
+
+    hostGranted = false;
+    for (const listener of removedListeners) {
+      listener({
+        kind: "host",
+        originPattern: CLAUDE_HOST_PERMISSION_PATTERN,
+      });
+    }
+
+    expect(connected.port.disconnect).toHaveBeenCalledOnce();
+    storageGate.resolve();
+    await vi.waitFor(() =>
+      expect(connected.port.postMessage).not.toHaveBeenCalled(),
+    );
+  });
+
   it("updates the Claude runtime gate after a joint permission grant before accepting a settings port", async () => {
     const runtimeId = "abcdefghijklmnopabcdefghijklmnop";
     const values: Record<string, unknown> = {};

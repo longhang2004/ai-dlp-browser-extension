@@ -12,7 +12,6 @@ import {
   test,
   waitForProtectionState,
 } from "./fixtures.js";
-
 type SensitiveFixture = {
   email: { valid: string };
   phone: { vietnameseDomestic: string };
@@ -40,6 +39,16 @@ const sensitive: SensitiveFixture = {
     longLived: rawSensitive.awsAccessKey.longLived.parts.join(""),
   },
 };
+
+const AMBIGUOUS_SHARED_SEND_FIXTURE = `
+  <main>
+    <section data-testid="composer-root" id="shared-composer-root">
+      <div id="prompt-a" contenteditable="true" role="textbox" aria-label="Message ChatGPT">Prompt A</div>
+      <div id="prompt-textarea" contenteditable="true" role="textbox">Prompt B</div>
+      <button id="shared-send" type="button" data-testid="send-button" aria-label="Send prompt">Send</button>
+    </section>
+  </main>
+`;
 
 async function saveSettings(
   page: Parameters<typeof sendRuntimeMessage>[0],
@@ -201,6 +210,228 @@ test("email and Vietnamese phone warnings support one-shot bypass and Shift+Ente
   await protectionDialog(chatPage)
     .getByRole("button", { name: "Cancel" })
     .click();
+  await extensionPage.close();
+});
+
+test("Enter is protected while IME composition remains pass-through", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await waitForProtectionState(extensionPage, "active");
+  await setComposerText(chatPage, sensitive.email.valid);
+
+  const imePrevented = await chatPage
+    .locator("#prompt-textarea")
+    .evaluate((composer) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+      });
+      composer.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+  expect(imePrevented).toBe(false);
+  expect(await submissionValues(chatPage)).toEqual([]);
+  await expect(protectionDialog(chatPage)).toHaveCount(0);
+
+  await chatPage.locator("#prompt-textarea").press("Enter");
+  await expect(protectionDialog(chatPage)).toBeVisible();
+  expect(await submissionValues(chatPage)).toEqual([]);
+  await protectionDialog(chatPage)
+    .getByRole("button", { name: "Cancel" })
+    .click();
+
+  await setComposerText(chatPage, "Ordinary synthetic prompt.");
+  await chatPage.locator("#prompt-textarea").press("Enter");
+  await expect
+    .poll(() => submissionValues(chatPage))
+    .toEqual(["Ordinary synthetic prompt."]);
+  await extensionPage.close();
+});
+
+test("SPA navigation invalidates a visible warning before bypass can resume", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await waitForProtectionState(extensionPage, "active");
+  await setComposerText(chatPage, sensitive.email.valid);
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  await expect(protectionDialog(chatPage)).toBeVisible();
+
+  await chatPage.evaluate(() => {
+    history.pushState({}, "", "/c/after-navigation");
+  });
+  await protectionDialog(chatPage)
+    .getByRole("button", { name: "Send anyway" })
+    .click();
+  await expect.poll(() => submissionValues(chatPage)).toEqual([]);
+
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  await expect(protectionDialog(chatPage)).toBeVisible();
+  await protectionDialog(chatPage)
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await extensionPage.close();
+});
+
+test("policy revision invalidates stale bypass and preserves catalog-correlated status and audit identity", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await waitForProtectionState(extensionPage, "active");
+  const status = (await sendRuntimeMessage(extensionPage, {
+    type: "status.read",
+  })) as {
+    type: string;
+    status: {
+      state: string;
+      application: string | null;
+      surfaceId: string | null;
+    };
+  };
+  expect(status).toMatchObject({
+    type: "status.result",
+    status: {
+      state: "active",
+      application: "chatgpt",
+      surfaceId: "chatgpt_web",
+    },
+  });
+
+  await setComposerText(chatPage, sensitive.email.valid);
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  await expect(protectionDialog(chatPage)).toBeVisible();
+  await saveSettings(extensionPage, { emailAction: "block" });
+  await expect(protectionDialog(chatPage)).toHaveCount(0);
+  expect(await submissionValues(chatPage)).toEqual([]);
+
+  await chatPage.getByRole("button", { name: "Send prompt" }).click();
+  const blocked = protectionDialog(chatPage);
+  await expect(blocked).toContainText("Submission blocked");
+  await expect(
+    blocked.getByRole("button", { name: "Send anyway" }),
+  ).toHaveCount(0);
+  await blocked.getByRole("button", { name: "Close" }).click();
+
+  const audit = (await sendRuntimeMessage(extensionPage, {
+    type: "audit.read",
+  })) as {
+    type: string;
+    envelope: {
+      events: Array<{
+        application?: unknown;
+        adapterVersion?: unknown;
+      }>;
+    };
+  };
+  expect(audit.envelope.events.length).toBeGreaterThan(0);
+  for (const event of audit.envelope.events) {
+    expect(event.application).toBe("chatgpt");
+    expect(event.adapterVersion).toBe("3");
+  }
+  expect(JSON.stringify(audit.envelope.events)).not.toContain(
+    sensitive.email.valid,
+  );
+  await extensionPage.close();
+});
+
+test("shared-Send ambiguity fails closed without a prompt-bearing audit", async ({
+  chatPage,
+  extensionContext,
+  extensionId,
+}) => {
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await waitForProtectionState(extensionPage, "active");
+  await chatPage.evaluate((fixture) => {
+    document.body.innerHTML = fixture;
+    const state = globalThis as typeof globalThis & {
+      __sharedSendClicks?: number;
+    };
+    state.__sharedSendClicks = 0;
+    document.querySelector("#shared-send")?.addEventListener("click", () => {
+      state.__sharedSendClicks = (state.__sharedSendClicks ?? 0) + 1;
+    });
+  }, AMBIGUOUS_SHARED_SEND_FIXTURE);
+
+  await chatPage.locator("#shared-send").click({ force: true });
+  await expect
+    .poll(() =>
+      chatPage.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              __sharedSendClicks?: number;
+            }
+          ).__sharedSendClicks ?? 0,
+      ),
+    )
+    .toBe(0);
+  const dialog = protectionDialog(chatPage);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Send anyway" })).toHaveCount(
+    0,
+  );
+  await expect(dialog).not.toContainText("Prompt A");
+  await expect(dialog).not.toContainText("Prompt B");
+  const audit = (await sendRuntimeMessage(extensionPage, {
+    type: "audit.read",
+  })) as { type: string; envelope: { events: unknown[] } };
+  expect(JSON.stringify(audit.envelope.events)).not.toContain("Prompt A");
+  expect(JSON.stringify(audit.envelope.events)).not.toContain("Prompt B");
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await extensionPage.close();
+});
+
+test("alternate-port ChatGPT remains unprotected and unreported", async ({
+  extensionContext,
+  extensionId,
+}) => {
+  const alternatePage = await extensionContext.newPage();
+  const extensionPage = await openExtensionPage(
+    extensionContext,
+    extensionId,
+    "popup.html",
+  );
+  await alternatePage.goto("https://chatgpt.com:8443/c/alternate-port", {
+    waitUntil: "domcontentloaded",
+  });
+  await waitForProtectionState(extensionPage, "unavailable");
+
+  await setComposerText(alternatePage, sensitive.paymentCard.validVisa);
+  await alternatePage.getByRole("button", { name: "Send prompt" }).click();
+  await expect
+    .poll(() => submissionValues(alternatePage))
+    .toEqual([sensitive.paymentCard.validVisa]);
+  await expect(protectionDialog(alternatePage)).toHaveCount(0);
+  const audit = (await sendRuntimeMessage(extensionPage, {
+    type: "audit.read",
+  })) as { type: string; envelope: { events: unknown[] } };
+  expect(audit.envelope.events).toEqual([]);
+  await alternatePage.close();
   await extensionPage.close();
 });
 

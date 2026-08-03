@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import * as sharedTypes from "./index.js";
 import {
+  ADAPTER_CAPABILITY_KEYS,
+  ADAPTER_IDS,
+  ADAPTER_TRUST_LEVELS,
   ADAPTER_HEALTH_CODES,
+  AI_SURFACE_IDS,
+  CAPABILITY_SUPPORT_LEVELS,
   CHATGPT_ADAPTER_VERSION,
   cloneProtectionSettings,
   createAuditEventId,
@@ -21,10 +27,14 @@ import {
   ENFORCEMENT_ERROR_CODES,
   FINDING_CONFIDENCES,
   isAdapterHealthAuditEvent,
+  isAdapterDescriptorClaim,
+  isAdapterId,
+  isAiSurfaceId,
   isAuditEvent,
   isAuditEventId,
   isAuditTimestamp,
   isContentStatusPortMessage,
+  isContentHandshakePortMessage,
   isDecisionAuditEvent,
   isDisplayFinding,
   isEnforcementErrorAuditEvent,
@@ -53,6 +63,7 @@ import {
   SETTINGS_VALIDATION_ERROR_CODES,
   SETTINGS_VALIDATION_FIELDS,
   type AuditEvent,
+  type AdapterDescriptor,
   type DetectorId,
   type DisplayFinding,
   type PolicyConfiguration,
@@ -68,6 +79,23 @@ import {
   type StoredAuditEnvelope,
   type StoredSettingsEnvelope,
 } from "./index.js";
+
+const validChatGptDescriptorInput = {
+  adapterId: "chatgpt",
+  surfaceId: "chatgpt_web",
+  version: CHATGPT_ADAPTER_VERSION,
+  trust: "verified",
+  origins: ["https://chatgpt.com"],
+  capabilities: {
+    submissionDetection: "verified",
+    promptRead: "verified",
+    attachmentDetection: "verified",
+    attachmentInspection: "unsupported",
+    promptReplacement: "unsupported",
+    submissionResume: "verified",
+  },
+  entryPoint: "content-script.js",
+} satisfies AdapterDescriptor;
 
 const validSettingsEnvelope: StoredSettingsEnvelope = {
   schemaVersion: 2,
@@ -209,13 +237,236 @@ describe("frozen schema allowlists", () => {
   });
 });
 
+describe("closed adapter descriptor boundaries", () => {
+  it("exports frozen closed identity and capability allowlists", () => {
+    expect(AI_SURFACE_IDS).toEqual([
+      "chatgpt_web",
+      "claude_web",
+      "gemini_web",
+      "perplexity_web",
+      "deepseek_web",
+      "copilot_web",
+    ]);
+    expect(ADAPTER_IDS).toEqual(["chatgpt", "claude"]);
+    expect(ADAPTER_TRUST_LEVELS).toEqual([
+      "verified",
+      "discovered",
+      "unsupported",
+    ]);
+    expect(CAPABILITY_SUPPORT_LEVELS).toEqual([
+      "verified",
+      "unsupported",
+      "not_applicable",
+    ]);
+    expect(ADAPTER_CAPABILITY_KEYS).toEqual([
+      "submissionDetection",
+      "promptRead",
+      "attachmentDetection",
+      "attachmentInspection",
+      "promptReplacement",
+      "submissionResume",
+    ]);
+    expect(
+      [
+        AI_SURFACE_IDS,
+        ADAPTER_IDS,
+        ADAPTER_TRUST_LEVELS,
+        CAPABILITY_SUPPORT_LEVELS,
+        ADAPTER_CAPABILITY_KEYS,
+      ].every(Object.isFrozen),
+    ).toBe(true);
+    expect(isAiSurfaceId("chatgpt_web")).toBe(true);
+    expect(isAiSurfaceId("unknown_web")).toBe(false);
+    expect(isAdapterId("claude")).toBe(true);
+    expect(isAdapterId("unknown")).toBe(false);
+  });
+
+  it("does not export standalone descriptor authorization or factory APIs", () => {
+    expect(sharedTypes).not.toHaveProperty("isAdapterDescriptor");
+    expect(sharedTypes).not.toHaveProperty("createAdapterDescriptor");
+  });
+
+  it("accepts only a structurally valid claim matching the trusted descriptor", () => {
+    expect(
+      isAdapterDescriptorClaim(
+        validChatGptDescriptorInput,
+        validChatGptDescriptorInput,
+      ),
+    ).toBe(true);
+
+    const invalidClaims = [
+      { ...validChatGptDescriptorInput, adapterId: "unknown" },
+      { ...validChatGptDescriptorInput, surfaceId: "unknown_web" },
+      { ...validChatGptDescriptorInput, surfaceId: "claude_web" },
+      { ...validChatGptDescriptorInput, origins: ["https://claude.ai"] },
+      {
+        ...validChatGptDescriptorInput,
+        origins: ["https://chatgpt.com", "https://chatgpt.com"],
+      },
+      { ...validChatGptDescriptorInput, origins: ["https://chatgpt.com/"] },
+      { ...validChatGptDescriptorInput, version: "" },
+      { ...validChatGptDescriptorInput, entryPoint: "../content-script.js" },
+      { ...validChatGptDescriptorInput, metadata: {} },
+      { ...validChatGptDescriptorInput, prompt: "secret" },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          promptRead: "unknown",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          metadata: {},
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          prompt: "secret",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        trust: "unsupported",
+      },
+    ];
+
+    for (const claim of invalidClaims) {
+      expect(isAdapterDescriptorClaim(validChatGptDescriptorInput, claim)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("rejects runtime identity, trust, capability, origin, and version upgrades", () => {
+    for (const claim of [
+      { ...validChatGptDescriptorInput, adapterId: "claude" },
+      { ...validChatGptDescriptorInput, surfaceId: "claude_web" },
+      { ...validChatGptDescriptorInput, version: "999" },
+      { ...validChatGptDescriptorInput, trust: "discovered" },
+      { ...validChatGptDescriptorInput, origins: ["https://claude.ai"] },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          attachmentInspection: "verified",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        capabilities: {
+          ...validChatGptDescriptorInput.capabilities,
+          promptReplacement: "verified",
+        },
+      },
+      {
+        ...validChatGptDescriptorInput,
+        entryPoint: "claude-content-script.js",
+      },
+    ]) {
+      expect(isAdapterDescriptorClaim(validChatGptDescriptorInput, claim)).toBe(
+        false,
+      );
+    }
+
+    expect(
+      isAdapterDescriptorClaim(
+        validChatGptDescriptorInput,
+        validChatGptDescriptorInput,
+      ),
+    ).toBe(true);
+  });
+
+  it("reserves Claude scalar identifiers without authorizing a Claude descriptor", () => {
+    const untrustedClaudeClaim = {
+      ...validChatGptDescriptorInput,
+      adapterId: "claude",
+      surfaceId: "claude_web",
+      origins: ["https://claude.ai"],
+      entryPoint: "claude-content-script.js",
+    };
+
+    expect(isAdapterId(untrustedClaudeClaim.adapterId)).toBe(true);
+    expect(isAiSurfaceId(untrustedClaudeClaim.surfaceId)).toBe(true);
+    expect(
+      isAdapterDescriptorClaim(
+        validChatGptDescriptorInput,
+        untrustedClaudeClaim,
+      ),
+    ).toBe(false);
+  });
+
+  it("validates only an exact content handshake correlated to its trusted descriptor", () => {
+    expect(
+      isContentHandshakePortMessage(validChatGptDescriptorInput, {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          origins: [...validChatGptDescriptorInput.origins],
+          capabilities: { ...validChatGptDescriptorInput.capabilities },
+        },
+      }),
+    ).toBe(true);
+
+    for (const message of [
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          adapterId: "claude",
+        },
+      },
+      {
+        type: "content.handshake",
+        descriptor: validChatGptDescriptorInput,
+        metadata: {},
+      },
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          capabilities: {
+            ...validChatGptDescriptorInput.capabilities,
+            submissionResume: "unsupported",
+          },
+        },
+      },
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          capabilities: {
+            ...validChatGptDescriptorInput.capabilities,
+            promptReplacement: "verified",
+          },
+        },
+      },
+      {
+        type: "content.handshake",
+        descriptor: {
+          ...validChatGptDescriptorInput,
+          entryPoint: "other-content.js",
+        },
+      },
+    ]) {
+      expect(
+        isContentHandshakePortMessage(validChatGptDescriptorInput, message),
+      ).toBe(false);
+    }
+  });
+});
+
 describe("policy runtime boundaries", () => {
   it("accepts exact fixed metadata and decisions", () => {
     expect(isPolicyFinding(validPolicyFinding)).toBe(true);
     expect(isPolicyConfiguration(validPolicy)).toBe(true);
     expect(
       isPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
@@ -225,13 +476,13 @@ describe("policy runtime boundaries", () => {
     expect(createPolicyFinding(validPolicyFinding)).toEqual(validPolicyFinding);
     expect(
       createPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
       }),
     ).toEqual({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
@@ -239,6 +490,19 @@ describe("policy runtime boundaries", () => {
     expect(createPolicyDecision(validPolicyDecision)).toEqual(
       validPolicyDecision,
     );
+  });
+
+  it("accepts every closed surface ID without application-specific policy exceptions", () => {
+    for (const surfaceId of AI_SURFACE_IDS) {
+      expect(
+        isPolicyInput({
+          surfaceId,
+          attachmentPresent: false,
+          findings: [validPolicyFinding],
+          policy: validPolicy,
+        }),
+      ).toBe(true);
+    }
   });
 
   it.each([
@@ -368,6 +632,15 @@ describe("policy runtime boundaries", () => {
     expect(
       isPolicyInput({
         application: "chatgpt",
+        attachmentPresent: false,
+        findings: [validPolicyFinding],
+        policy: validPolicy,
+      }),
+    ).toBe(false);
+    expect(
+      isPolicyInput({
+        surfaceId: "chatgpt_web",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
         renamedSecret: "secret",
@@ -375,7 +648,8 @@ describe("policy runtime boundaries", () => {
     ).toBe(false);
     expect(
       isPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
         offsets: [0, 16],
@@ -383,7 +657,8 @@ describe("policy runtime boundaries", () => {
     ).toBe(false);
     expect(
       isPolicyInput({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
+        attachmentPresent: false,
         findings: [validPolicyFinding],
         policy: validPolicy,
         sanitizedPrompt: "[EMAIL]",
@@ -1489,16 +1764,21 @@ describe("runtime message validation", () => {
       settings: { ...DEFAULT_PROTECTION_SETTINGS, matchedText: "secret" },
     },
     { type: "audit.append", event: { ...validDecisionEvent, text: "secret" } },
-    {
-      type: "audit.append",
-      event: { ...validDecisionEvent, adapterVersion: "1" },
-    },
   ])(
     "rejects unknown, missing, or prompt-bearing request data %#",
     (candidate) => {
       expect(isRuntimeRequest(candidate)).toBe(false);
     },
   );
+
+  it("keeps historical V3 adapter versions structurally valid for sender correlation", () => {
+    expect(
+      isRuntimeRequest({
+        type: "audit.append",
+        event: { ...validDecisionEvent, adapterVersion: "1" },
+      }),
+    ).toBe(true);
+  });
 
   it("validates response and port envelopes without generic payloads", () => {
     expect(
@@ -1507,6 +1787,7 @@ describe("runtime message validation", () => {
         status: {
           state: "initializing",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
           recentEventCount: 0,
         },
@@ -1518,11 +1799,37 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
           recentEventCount: 0,
         },
       }),
     ).toBe(false);
+    expect(
+      isProtectionStatusSnapshot({
+        state: "unavailable",
+        application: null,
+        surfaceId: null,
+        protectionEnabled: null,
+        recentEventCount: 0,
+      }),
+    ).toBe(true);
+    for (const [application, surfaceId] of [
+      ["unknown", "chatgpt_web"],
+      ["chatgpt", "claude_web"],
+      [null, "chatgpt_web"],
+      ["chatgpt", null],
+    ]) {
+      expect(
+        isProtectionStatusSnapshot({
+          state: "active",
+          application,
+          surfaceId,
+          protectionEnabled: true,
+          recentEventCount: 0,
+        }),
+      ).toBe(false);
+    }
     expect(
       isSettingsPortMessage({
         type: "settings.snapshot",
@@ -1551,6 +1858,7 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
       }),
@@ -1561,6 +1869,7 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
       }),
@@ -1572,6 +1881,7 @@ describe("runtime message validation", () => {
         status: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
         },
         prompt: "secret",
@@ -1591,6 +1901,7 @@ describe("runtime message validation", () => {
         status: {
           state: "initializing",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: null,
         },
       }),
@@ -1692,7 +2003,7 @@ describe("factory snapshot and TOCTOU safety", () => {
     expect(policyFinding).not.toBe(policyFindingInput);
 
     const policyInputSource: PolicyInput = {
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
@@ -1757,7 +2068,7 @@ describe("factory snapshot and TOCTOU safety", () => {
     expect(finding.getReadCount()).toBe(0);
 
     const input = poisonAfterFirstRead({
-      application: "chatgpt" as const,
+      surfaceId: "chatgpt_web" as const,
       attachmentPresent: false,
       findings: [validPolicyFinding],
       policy: validPolicy,
@@ -1979,6 +2290,7 @@ describe("hostile object containment", () => {
         value: {
           state: "active",
           application: "chatgpt",
+          surfaceId: "chatgpt_web",
           protectionEnabled: true,
           recentEventCount: 0,
         },
@@ -2016,6 +2328,7 @@ describe("hostile object containment", () => {
           status: {
             state: "initializing",
             application: "chatgpt",
+            surfaceId: "chatgpt_web",
             protectionEnabled: null,
           },
         },

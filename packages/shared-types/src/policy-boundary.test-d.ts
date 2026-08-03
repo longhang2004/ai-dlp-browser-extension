@@ -8,6 +8,8 @@ import {
   createMaskedPreview,
   createProtectionDialogModel,
   DEFAULT_PROTECTION_SETTINGS,
+  type AdapterCapabilities,
+  type AdapterDescriptor,
   type AdapterHealthAuditEvent,
   type AuditEvent,
   type DecisionAuditEvent,
@@ -31,6 +33,7 @@ import {
   type SettingsPortMessage,
   type StoredAuditEnvelope,
 } from "./index.js";
+import * as sharedTypes from "./index.js";
 import type { PromptFreeBoundary } from "./privacy.js";
 
 type Assert<Condition extends true> = Condition;
@@ -81,6 +84,12 @@ export type AuditEventIsPromptFree = Assert<IsPromptFree<AuditEvent>>;
 export type AuditEnvelopeIsPromptFree = Assert<
   IsPromptFree<StoredAuditEnvelope>
 >;
+export type AdapterCapabilitiesArePromptFree = Assert<
+  IsPromptFree<AdapterCapabilities>
+>;
+export type AdapterDescriptorIsPromptFree = Assert<
+  IsPromptFree<AdapterDescriptor>
+>;
 type RequiredPromptFreeVocabulary =
   | "prompt"
   | "text"
@@ -108,6 +117,42 @@ export type PromptFreeVocabularyIsComplete = Assert<
     ? true
     : false
 >;
+
+declare const descriptor: AdapterDescriptor;
+// @ts-expect-error Packaged adapter identity is immutable.
+descriptor.adapterId = "claude";
+// @ts-expect-error Packaged origin collections are immutable.
+descriptor.origins.push("https://claude.ai");
+// @ts-expect-error Nested capability support is immutable.
+descriptor.capabilities.promptRead = "unsupported";
+
+// @ts-expect-error Standalone descriptor authorization is not public.
+const removedDescriptorValidator = sharedTypes.isAdapterDescriptor;
+// @ts-expect-error Generic descriptor factories are not public.
+const removedDescriptorFactory = sharedTypes.createAdapterDescriptor;
+void removedDescriptorValidator;
+void removedDescriptorFactory;
+
+const descriptorWithPrompt = {
+  adapterId: "chatgpt" as const,
+  surfaceId: "chatgpt_web" as const,
+  version: CHATGPT_ADAPTER_VERSION,
+  trust: "verified" as const,
+  origins: ["https://chatgpt.com"],
+  capabilities: {
+    submissionDetection: "verified" as const,
+    promptRead: "verified" as const,
+    attachmentDetection: "verified" as const,
+    attachmentInspection: "unsupported" as const,
+    promptReplacement: "unsupported" as const,
+    submissionResume: "verified" as const,
+  },
+  entryPoint: "content-script.js",
+  prompt: "secret",
+};
+// @ts-expect-error Adapter descriptors reject raw prompt data.
+const rejectedDescriptorWithPrompt: AdapterDescriptor = descriptorWithPrompt;
+void rejectedDescriptorWithPrompt;
 
 const policy: PolicyConfiguration = {
   schemaVersion: 2,
@@ -145,11 +190,21 @@ const rejectedMismatchedDetectorCategoryFinding: PolicyFinding =
 void rejectedMismatchedDetectorCategoryFinding;
 
 const input = {
-  application: "chatgpt",
+  surfaceId: "chatgpt_web",
   attachmentPresent: false,
   findings: [finding],
   policy,
 } satisfies PolicyInput;
+
+const legacyApplicationInput = {
+  application: "chatgpt",
+  attachmentPresent: false,
+  findings: [finding],
+  policy,
+};
+// @ts-expect-error Policy input identity is a closed surface ID, not an application string.
+const rejectedLegacyApplicationInput: PolicyInput = legacyApplicationInput;
+void rejectedLegacyApplicationInput;
 
 const augmentedPolicyFindings = Object.assign([finding], {
   rawPrompt: "secret",

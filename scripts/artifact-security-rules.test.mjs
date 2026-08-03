@@ -21,6 +21,20 @@ test("accepts only the locked ChatGPT production URL identifiers", () => {
     ),
     [],
   );
+  assert.deepEqual(
+    inspectProductionSource(
+      "apps/extension/src/adapters/adapter-catalog.ts",
+      'const canonicalOrigin = "https://chatgpt.com";',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    inspectProductionSource(
+      "apps/extension/src/content/bootstrap.ts",
+      'if (location.origin !== "https://chatgpt.com") return;',
+    ),
+    [],
+  );
   assert.match(
     inspectProductionSource(
       "apps/extension/src/background/sender-validation.ts",
@@ -38,6 +52,8 @@ test("rejects prompt-obscuring logs and dynamic or network-capable code", () => 
     'Function("return 1")',
     'setTimeout("run()", 1)',
     'chrome.runtime.sendNativeMessage("helper", {})',
+    'chrome["scripting"]["registerContentScripts"]([])',
+    'document.querySelector("[data-testid=chat-input]")',
   ]) {
     assert.notEqual(
       inspectProductionSource("apps/extension/src/example.ts", source).length,

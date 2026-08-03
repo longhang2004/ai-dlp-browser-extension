@@ -18,17 +18,28 @@ const STATUS_COPY = {
 
 const INITIAL_STATUS: ProtectionStatusSnapshot = {
   state: "initializing",
-  application: "chatgpt",
+  application: null,
+  surfaceId: null,
   protectionEnabled: null,
   recentEventCount: 0,
 };
 
 const UNAVAILABLE_STATUS: ProtectionStatusSnapshot = {
   state: "unavailable",
-  application: "chatgpt",
+  application: null,
+  surfaceId: null,
   protectionEnabled: null,
   recentEventCount: 0,
 };
+
+function normalizePopupStatus(
+  status: ProtectionStatusSnapshot,
+): ProtectionStatusSnapshot {
+  if (status.application === null && status.surfaceId === null) return status;
+  return status.application === "chatgpt" && status.surfaceId === "chatgpt_web"
+    ? status
+    : UNAVAILABLE_STATUS;
+}
 
 export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
   const [status, setStatus] =
@@ -47,7 +58,7 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
           if (!current) return;
           setStatus(
             response.type === "status.result"
-              ? response.status
+              ? normalizePopupStatus(response.status)
               : UNAVAILABLE_STATUS,
           );
         },
@@ -60,18 +71,25 @@ export function App({ runtime }: { runtime?: ExtensionPageRuntime }) {
     };
   }, [runtime]);
 
+  const applicationName =
+    status.application === "chatgpt" && status.surfaceId === "chatgpt_web"
+      ? "ChatGPT"
+      : null;
+
   return (
     <main className="page-shell popup-shell">
       <p className="eyebrow">AI DLP</p>
       <h1>{STATUS_COPY[status.state]}</h1>
       <p className={`status-pill status-${status.state}`}>
         {status.state === "initializing"
-          ? "Waiting for validated settings"
+          ? applicationName === null
+            ? "Waiting for a validated content connection"
+            : `Waiting for validated ${applicationName} settings`
           : status.state === "waiting_for_composer"
-            ? "Waiting for the ChatGPT composer"
+            ? `Waiting for the ${applicationName ?? "supported"} composer`
             : status.state === "unavailable"
-              ? "No protected ChatGPT tab is reporting"
-              : "ChatGPT · local inspection only"}
+              ? "No validated protected surface is reporting"
+              : `${applicationName ?? "Supported surface"} · local inspection only`}
       </p>
       <p className="muted">
         {status.recentEventCount} recent protection events

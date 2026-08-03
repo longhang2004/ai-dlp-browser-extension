@@ -1,5 +1,6 @@
 import {
   SETTINGS_PORT_NAME,
+  isContentHandshakePortMessage,
   isContentStatusPortMessage,
   isStoredSettingsEnvelope,
   type ContentProtectionStatus,
@@ -10,7 +11,7 @@ import {
 import { createSettingsSnapshotMessage } from "../messaging/schemas.js";
 import type { SettingsStore } from "../storage/settings-store.js";
 import {
-  isValidSettingsPortSender,
+  resolveSettingsPortSenderDescriptor,
   type RuntimeSender,
 } from "./sender-validation.js";
 
@@ -36,11 +37,27 @@ export interface SettingsPortManager {
   readStatus(recentEventCount: number): ProtectionStatusSnapshot;
 }
 
+export interface HandshakeScheduler {
+  schedule(callback: () => void, delayMs: number): () => void;
+}
+
+export const CONTENT_HANDSHAKE_TIMEOUT_MS = 5_000;
+
+const browserHandshakeScheduler: HandshakeScheduler = {
+  schedule(callback, delayMs) {
+    const timeout = setTimeout(callback, delayMs);
+    return () => clearTimeout(timeout);
+  },
+};
+
 export function createSettingsPortManager(options: {
   runtimeId: string;
   settingsStore: SettingsStore;
   storageReady: Promise<void>;
+  handshakeScheduler?: HandshakeScheduler;
 }): SettingsPortManager {
+  const handshakeScheduler =
+    options.handshakeScheduler ?? browserHandshakeScheduler;
   const ports = new Set<RuntimePortLike>();
   const lastSentGeneration = new Map<RuntimePortLike, number>();
   const expectedGeneration = new Map<RuntimePortLike, number>();
@@ -69,8 +86,14 @@ export function createSettingsPortManager(options: {
     cleanup?.();
   }
 
-  function disconnect(port: RuntimePortLike): void {
-    forget(port);
+  function disconnect(port: RuntimePortLike, connectionToken?: number): void {
+    if (
+      connectionToken !== undefined &&
+      connectionTokens.get(port) !== connectionToken
+    ) {
+      return;
+    }
+    forget(port, connectionToken);
     try {
       port.disconnect();
     } catch {
@@ -100,34 +123,62 @@ export function createSettingsPortManager(options: {
 
   return {
     handleConnect(port) {
-      if (
-        port.name !== SETTINGS_PORT_NAME ||
-        !isValidSettingsPortSender(port.sender, options.runtimeId)
-      ) {
+      const expectedDescriptor = resolveSettingsPortSenderDescriptor(
+        port.sender,
+        options.runtimeId,
+      );
+      if (port.name !== SETTINGS_PORT_NAME || expectedDescriptor === null) {
         disconnect(port);
         return;
       }
 
-      if (ports.has(port)) forget(port);
+      if (connectionTokens.has(port)) forget(port);
 
-      ports.add(port);
       const connectionToken = ++nextConnectionToken;
       connectionTokens.set(port, connectionToken);
-      expectedGeneration.set(port, generation);
-      statuses.set(port, {
-        state: "initializing",
-        application: "chatgpt",
-        protectionEnabled: null,
-      });
-      const initialGeneration = generation;
+      let accepted = false;
+      let cancelHandshakeTimeout: (() => void) | undefined;
       const onDisconnect = (): void => {
         forget(port, connectionToken);
       };
       const onMessage = (message: unknown): void => {
+        if (connectionTokens.get(port) !== connectionToken) return;
+        if (!accepted) {
+          if (!isContentHandshakePortMessage(expectedDescriptor, message)) {
+            disconnect(port, connectionToken);
+            return;
+          }
+          accepted = true;
+          cancelHandshakeTimeout?.();
+          cancelHandshakeTimeout = undefined;
+          ports.add(port);
+          const initialGeneration = generation;
+          expectedGeneration.set(port, initialGeneration);
+          statuses.set(port, {
+            state: "initializing",
+            application: expectedDescriptor.adapterId,
+            surfaceId: expectedDescriptor.surfaceId,
+            protectionEnabled: null,
+          });
+          void options.storageReady
+            .then(() => options.settingsStore.read())
+            .then((envelope) => {
+              if (
+                connectionTokens.get(port) === connectionToken &&
+                generation === initialGeneration
+              ) {
+                send(port, envelope, initialGeneration);
+              }
+            })
+            .catch(() => disconnect(port, connectionToken));
+          return;
+        }
+
         const protectionEnabled = expectedProtectionEnabled.get(port);
         if (
-          connectionTokens.get(port) !== connectionToken ||
           !isContentStatusPortMessage(message) ||
+          message.status.application !== expectedDescriptor.adapterId ||
+          message.status.surfaceId !== expectedDescriptor.surfaceId ||
           expectedGeneration.get(port) !== message.generation ||
           lastSentGeneration.get(port) !== message.generation ||
           protectionEnabled === undefined ||
@@ -144,6 +195,12 @@ export function createSettingsPortManager(options: {
       port.onMessage.addListener(onMessage);
       listenerCleanup.set(port, () => {
         try {
+          cancelHandshakeTimeout?.();
+        } catch {
+          // Continue removing both independent port listeners.
+        }
+        cancelHandshakeTimeout = undefined;
+        try {
           port.onDisconnect.removeListener?.(onDisconnect);
         } catch {
           // Continue removing the independent message listener.
@@ -154,18 +211,11 @@ export function createSettingsPortManager(options: {
           // The port may already have invalidated its listener registry.
         }
       });
-
-      void options.storageReady
-        .then(() => options.settingsStore.read())
-        .then((envelope) => {
-          if (
-            connectionTokens.get(port) === connectionToken &&
-            generation === initialGeneration
-          ) {
-            send(port, envelope, initialGeneration);
-          }
-        })
-        .catch(() => disconnect(port));
+      cancelHandshakeTimeout = handshakeScheduler.schedule(() => {
+        if (connectionTokens.get(port) === connectionToken && !accepted) {
+          disconnect(port, connectionToken);
+        }
+      }, CONTENT_HANDSHAKE_TIMEOUT_MS);
     },
     async broadcast(envelope) {
       if (!isStoredSettingsEnvelope(envelope)) {
@@ -174,9 +224,12 @@ export function createSettingsPortManager(options: {
       const broadcastGeneration = ++generation;
       for (const port of ports) {
         expectedGeneration.set(port, broadcastGeneration);
+        const currentStatus = statuses.get(port);
+        if (currentStatus === undefined) continue;
         statuses.set(port, {
           state: "initializing",
-          application: "chatgpt",
+          application: currentStatus.application,
+          surfaceId: currentStatus.surfaceId,
           protectionEnabled: null,
         });
       }
@@ -197,15 +250,37 @@ export function createSettingsPortManager(options: {
       if (current.length === 0) {
         return {
           state: "unavailable",
-          application: "chatgpt",
+          application: null,
+          surfaceId: null,
           protectionEnabled: null,
           recentEventCount: count,
         };
       }
+      const first = current[0];
+      if (
+        first === undefined ||
+        current.some(
+          (status) =>
+            status.application !== first.application ||
+            status.surfaceId !== first.surfaceId,
+        )
+      ) {
+        return {
+          state: "initializing",
+          application: null,
+          surfaceId: null,
+          protectionEnabled: null,
+          recentEventCount: count,
+        };
+      }
+      const identity = {
+        application: first.application,
+        surfaceId: first.surfaceId,
+      } as const;
       if (current.some((status) => status.state === "initializing")) {
         return {
           state: "initializing",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: null,
           recentEventCount: count,
         };
@@ -213,7 +288,7 @@ export function createSettingsPortManager(options: {
       if (current.every((status) => status.state === "disabled")) {
         return {
           state: "disabled",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: false,
           recentEventCount: count,
         };
@@ -221,7 +296,7 @@ export function createSettingsPortManager(options: {
       if (current.some((status) => status.state === "disabled")) {
         return {
           state: "initializing",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: null,
           recentEventCount: count,
         };
@@ -229,7 +304,7 @@ export function createSettingsPortManager(options: {
       if (current.some((status) => status.state === "degraded")) {
         return {
           state: "degraded",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: true,
           recentEventCount: count,
         };
@@ -237,14 +312,14 @@ export function createSettingsPortManager(options: {
       if (current.some((status) => status.state === "waiting_for_composer")) {
         return {
           state: "waiting_for_composer",
-          application: "chatgpt",
+          ...identity,
           protectionEnabled: true,
           recentEventCount: count,
         };
       }
       return {
         state: "active",
-        application: "chatgpt",
+        ...identity,
         protectionEnabled: true,
         recentEventCount: count,
       };

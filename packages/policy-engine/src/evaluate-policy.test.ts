@@ -59,7 +59,7 @@ describe("evaluatePolicy", () => {
   it("allows no findings with the exact no-findings decision", () => {
     expect(
       evaluatePolicy({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [],
         policy: createPolicy(),
@@ -75,7 +75,7 @@ describe("evaluatePolicy", () => {
 
   it("reports only highest-precedence contributors in fixed table order", () => {
     const decision = evaluatePolicy({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [
         finding("protected-keyword", "protected_keyword", "medium", 0),
@@ -140,7 +140,7 @@ describe("evaluatePolicy", () => {
     ) => {
       expect(
         evaluatePolicy({
-          application: "chatgpt",
+          surfaceId: "chatgpt_web",
           attachmentPresent: false,
           findings: [
             finding("phone", "phone", "high", 0),
@@ -162,7 +162,7 @@ describe("evaluatePolicy", () => {
     for (const action of ["allow", "warn", "redact", "block"] as const) {
       expect(
         evaluatePolicy({
-          application: "chatgpt",
+          surfaceId: "chatgpt_web",
           attachmentPresent: false,
           findings: [
             finding("email", "email", "high", 0),
@@ -202,7 +202,7 @@ describe("evaluatePolicy", () => {
     (detectorId, category, confidence, ruleId, action) => {
       expect(
         evaluatePolicy({
-          application: "chatgpt",
+          surfaceId: "chatgpt_web",
           attachmentPresent: false,
           findings: [finding(detectorId, category, confidence)],
           policy: createPolicy(),
@@ -220,7 +220,7 @@ describe("evaluatePolicy", () => {
   it("rejects unsafe input before evaluating any rules", () => {
     expect(() =>
       evaluatePolicy({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [{ ...finding("email", "email"), matchedText: "secret" }],
         policy: createPolicy(),
@@ -231,7 +231,7 @@ describe("evaluatePolicy", () => {
   it("rejects a payment-card detector mislabeled as email before configured allow can evaluate", () => {
     expect(() =>
       evaluatePolicy({
-        application: "chatgpt",
+        surfaceId: "chatgpt_web",
         attachmentPresent: false,
         findings: [
           {
@@ -325,7 +325,7 @@ describe("evaluatePolicy", () => {
     ) => {
       expect(
         evaluatePolicy({
-          application: "chatgpt",
+          surfaceId: "chatgpt_web",
           attachmentPresent: true,
           findings: [finding("email", "email")],
           policy: createPolicy(textAction, "warn", attachmentAction),
@@ -345,7 +345,7 @@ describe("evaluatePolicy", () => {
     (attachmentAction) => {
       expect(
         evaluatePolicy({
-          application: "chatgpt",
+          surfaceId: "chatgpt_web",
           attachmentPresent: true,
           findings: [],
           policy: createPolicy("warn", "warn", attachmentAction),

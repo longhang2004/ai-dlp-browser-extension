@@ -1,6 +1,5 @@
 import {
   ADAPTER_HEALTH_CODES,
-  CHATGPT_ADAPTER_VERSION,
   CHATGPT_ADAPTER_VERSIONS,
   DECISION_RESOLUTIONS,
   ENFORCEMENT_ERROR_CODES,
@@ -33,6 +32,7 @@ import type {
 } from "./findings.js";
 import { RUNTIME_ERROR_CODES } from "./messages.js";
 import type {
+  ContentHandshakePortMessage,
   RuntimeRequest,
   RuntimeResponse,
   ContentStatusPortMessage,
@@ -75,6 +75,21 @@ import type {
   ProtectionStatusSnapshot,
 } from "./status.js";
 import {
+  ADAPTER_CAPABILITY_KEYS,
+  ADAPTER_IDS,
+  ADAPTER_TRUST_LEVELS,
+  AI_SURFACE_IDS,
+  CAPABILITY_SUPPORT_LEVELS,
+} from "./surfaces.js";
+import type {
+  AdapterCapabilities,
+  AdapterDescriptor,
+  AdapterId,
+  AdapterTrust,
+  AiSurfaceId,
+  CapabilitySupport,
+} from "./surfaces.js";
+import {
   hasExactOwnKeys,
   INVALID_SNAPSHOT,
   isDenseExactArray,
@@ -89,6 +104,122 @@ function isOneOf<const Values extends readonly string[]>(
   values: Values,
 ): value is Values[number] {
   return typeof value === "string" && values.includes(value);
+}
+
+export function isAiSurfaceId(value: unknown): value is AiSurfaceId {
+  return isOneOf(value, AI_SURFACE_IDS);
+}
+
+export function isAdapterId(value: unknown): value is AdapterId {
+  return isOneOf(value, ADAPTER_IDS);
+}
+
+function isAdapterTrust(value: unknown): value is AdapterTrust {
+  return isOneOf(value, ADAPTER_TRUST_LEVELS);
+}
+
+function isCapabilitySupport(value: unknown): value is CapabilitySupport {
+  return isOneOf(value, CAPABILITY_SUPPORT_LEVELS);
+}
+
+function isAdapterCapabilitiesSnapshot(
+  value: unknown,
+): value is AdapterCapabilities {
+  return safelyValidate(
+    () =>
+      isPlainRecord(value) &&
+      hasExactOwnKeys(value, ADAPTER_CAPABILITY_KEYS) &&
+      ADAPTER_CAPABILITY_KEYS.every((key) => isCapabilitySupport(value[key])),
+  );
+}
+
+function hasTrustCapabilityCorrelation(
+  trust: AdapterTrust,
+  capabilities: AdapterCapabilities,
+): boolean {
+  return (
+    trust === "verified" ||
+    ADAPTER_CAPABILITY_KEYS.every((key) => capabilities[key] !== "verified")
+  );
+}
+
+function isCanonicalHttpsOrigin(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^https:\/\/[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[1-9][0-9]{0,4})?$/u.test(
+      value,
+    )
+  );
+}
+
+function isAdapterDescriptorSnapshot(
+  value: unknown,
+): value is AdapterDescriptor {
+  return safelyValidate(() => {
+    if (
+      !isPlainRecord(value) ||
+      !hasExactOwnKeys(value, [
+        "adapterId",
+        "surfaceId",
+        "version",
+        "trust",
+        "origins",
+        "capabilities",
+        "entryPoint",
+      ]) ||
+      !isAdapterId(value.adapterId) ||
+      !isAiSurfaceId(value.surfaceId) ||
+      typeof value.version !== "string" ||
+      !/^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,63})$/u.test(value.version) ||
+      !isAdapterTrust(value.trust) ||
+      !isAdapterCapabilitiesSnapshot(value.capabilities) ||
+      typeof value.entryPoint !== "string" ||
+      !/^[a-z0-9][a-z0-9._-]{0,126}\.js$/u.test(value.entryPoint)
+    ) {
+      return false;
+    }
+
+    return (
+      isDenseExactArray(value.origins, 1, 1, (origin): origin is string =>
+        isCanonicalHttpsOrigin(origin),
+      ) && hasTrustCapabilityCorrelation(value.trust, value.capabilities)
+    );
+  });
+}
+
+function descriptorsEqual(
+  claim: AdapterDescriptor,
+  expected: AdapterDescriptor,
+): boolean {
+  return (
+    claim.adapterId === expected.adapterId &&
+    claim.surfaceId === expected.surfaceId &&
+    claim.version === expected.version &&
+    claim.trust === expected.trust &&
+    claim.entryPoint === expected.entryPoint &&
+    claim.origins.length === expected.origins.length &&
+    claim.origins.every(
+      (origin, index) => origin === expected.origins[index],
+    ) &&
+    ADAPTER_CAPABILITY_KEYS.every(
+      (key) => claim.capabilities[key] === expected.capabilities[key],
+    )
+  );
+}
+
+export function isAdapterDescriptorClaim(
+  expected: AdapterDescriptor,
+  value: unknown,
+): value is AdapterDescriptor {
+  const claimSnapshot = snapshotStructuredValue(value);
+  const expectedSnapshot = snapshotStructuredValue(expected);
+  return (
+    claimSnapshot !== INVALID_SNAPSHOT &&
+    expectedSnapshot !== INVALID_SNAPSHOT &&
+    isAdapterDescriptorSnapshot(claimSnapshot) &&
+    isAdapterDescriptorSnapshot(expectedSnapshot) &&
+    descriptorsEqual(claimSnapshot, expectedSnapshot)
+  );
 }
 
 function isSensitiveDataCategory(
@@ -320,12 +451,12 @@ function isPolicyInputSnapshot(value: unknown): value is PolicyInput {
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, [
-        "application",
+        "surfaceId",
         "attachmentPresent",
         "findings",
         "policy",
       ]) &&
-      value.application === "chatgpt" &&
+      isAiSurfaceId(value.surfaceId) &&
       typeof value.attachmentPresent === "boolean" &&
       isDenseExactArray(value.findings, 0, 700_000, isPolicyFindingSnapshot) &&
       isPolicyConfigurationSnapshot(value.policy),
@@ -343,7 +474,7 @@ export function createPolicyInput(value: PolicyInput): PolicyInput {
   }
 
   return {
-    application: "chatgpt",
+    surfaceId: snapshot.surfaceId,
     attachmentPresent: snapshot.attachmentPresent,
     findings: snapshot.findings,
     policy: snapshot.policy,
@@ -798,25 +929,34 @@ function isProtectionStatusSnapshotValue(
       !hasExactOwnKeys(value, [
         "state",
         "application",
+        "surfaceId",
         "protectionEnabled",
         "recentEventCount",
       ]) ||
-      value.application !== "chatgpt" ||
       !isNonNegativeSafeInteger(value.recentEventCount)
     ) {
       return false;
     }
 
+    const hasReportedIdentity =
+      value.application === "chatgpt" && value.surfaceId === "chatgpt_web";
+    const hasNoIdentity =
+      value.application === null && value.surfaceId === null;
+
     switch (value.state) {
       case "initializing":
+        return (
+          (hasReportedIdentity || hasNoIdentity) &&
+          value.protectionEnabled === null
+        );
       case "unavailable":
-        return value.protectionEnabled === null;
+        return hasNoIdentity && value.protectionEnabled === null;
       case "active":
       case "degraded":
       case "waiting_for_composer":
-        return value.protectionEnabled === true;
+        return hasReportedIdentity && value.protectionEnabled === true;
       case "disabled":
-        return value.protectionEnabled === false;
+        return hasReportedIdentity && value.protectionEnabled === false;
       default:
         return false;
     }
@@ -835,8 +975,13 @@ function isContentProtectionStatusValue(
   return safelyValidate(() => {
     if (
       !isPlainRecord(value) ||
-      !hasExactOwnKeys(value, ["state", "application", "protectionEnabled"]) ||
-      value.application !== "chatgpt"
+      !hasExactOwnKeys(value, [
+        "state",
+        "application",
+        "surfaceId",
+        "protectionEnabled",
+      ]) ||
+      !(value.application === "chatgpt" && value.surfaceId === "chatgpt_web")
     ) {
       return false;
     }
@@ -925,8 +1070,7 @@ function isRuntimeRequestSnapshot(value: unknown): value is RuntimeRequest {
       case "audit.append":
         return (
           hasExactOwnKeys(value, ["type", "event"]) &&
-          isAuditEventSnapshot(value.event) &&
-          value.event.adapterVersion === CHATGPT_ADAPTER_VERSION
+          isAuditEventSnapshot(value.event)
         );
       default:
         return false;
@@ -1012,6 +1156,23 @@ export function isSettingsPortMessage(
   value: unknown,
 ): value is SettingsPortMessage {
   return validatesStructuredSnapshot(value, isSettingsPortMessageSnapshot);
+}
+
+export function isContentHandshakePortMessage(
+  expectedDescriptor: AdapterDescriptor,
+  value: unknown,
+): value is ContentHandshakePortMessage {
+  return validatesStructuredSnapshot(
+    value,
+    (snapshot): snapshot is ContentHandshakePortMessage =>
+      safelyValidate(
+        () =>
+          isPlainRecord(snapshot) &&
+          hasExactOwnKeys(snapshot, ["type", "descriptor"]) &&
+          snapshot.type === "content.handshake" &&
+          isAdapterDescriptorClaim(expectedDescriptor, snapshot.descriptor),
+      ),
+  );
 }
 
 function isContentStatusPortMessageSnapshot(

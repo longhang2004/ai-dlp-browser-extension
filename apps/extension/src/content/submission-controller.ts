@@ -558,7 +558,7 @@ export function createSubmissionController(
 
     try {
       attempt.decision = evaluate({
-        application: "chatgpt",
+        surfaceId: options.adapter.descriptor.surfaceId,
         attachmentPresent: attempt.attachmentPresent,
         findings: toPolicyFindings(attempt.findings),
         policy: derivePolicy(attempt.settings),

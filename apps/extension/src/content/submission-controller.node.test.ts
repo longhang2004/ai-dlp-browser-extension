@@ -16,6 +16,7 @@ import type {
   ChatApplicationAdapter,
   LiveSubmissionContext,
 } from "../adapters/chat-application-adapter.js";
+import { CHATGPT_ADAPTER_DESCRIPTOR } from "../adapters/chatgpt/chatgpt-adapter.js";
 import {
   AUTHORIZATION_LIFETIME_MS,
   consumeSubmissionAuthorization,
@@ -100,8 +101,7 @@ function createHarness(value: string | HarnessOptions = "clean prompt") {
     () => harnessOptions.replacementCapability ?? "supported",
   );
   const adapter: ChatApplicationAdapter = {
-    id: "chatgpt",
-    version: "1",
+    descriptor: CHATGPT_ADAPTER_DESCRIPTOR,
     matches: (url) => url.origin === "https://chatgpt.com",
     resolveCurrentSubmissionContext: vi.fn(() => context()),
     resolveSubmissionContext: vi.fn(() => context()),
@@ -945,7 +945,7 @@ describe("submission controller", () => {
 
     const input = evaluate.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(input).toEqual({
-      application: "chatgpt",
+      surfaceId: "chatgpt_web",
       attachmentPresent: false,
       findings: [
         {

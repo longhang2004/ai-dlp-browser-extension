@@ -193,6 +193,7 @@ describe("content settings cache", () => {
       cache.postStatus({
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       }),
     ).toBe(false);
@@ -201,6 +202,7 @@ describe("content settings cache", () => {
       cache.postStatus({
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       }),
     ).toBe(true);
@@ -210,6 +212,7 @@ describe("content settings cache", () => {
       status: {
         state: "active",
         application: "chatgpt",
+        surfaceId: "chatgpt_web",
         protectionEnabled: true,
       },
     });

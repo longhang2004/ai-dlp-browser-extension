@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -29,7 +29,7 @@ const manifest = JSON.stringify({
   ],
   content_security_policy: {
     extension_pages:
-      "default-src 'self'; script-src 'self'; object-src 'none'; worker-src 'self'; connect-src 'none';",
+      "default-src 'self'; script-src 'self'; object-src 'none'; worker-src 'self'; connect-src 'none'; img-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline';",
   },
 });
 
@@ -55,6 +55,16 @@ function cleanArtifact() {
     ["assets/popup.css", "body { color: black; }"],
     ["assets/options.css", "body { color: black; }"],
   ];
+}
+
+function artifactWithManifest(update) {
+  const candidate = JSON.parse(manifest);
+  update(candidate);
+  return cleanArtifact().map(([file, contents]) =>
+    file === "manifest.json"
+      ? [file, `${JSON.stringify(candidate)}\n`]
+      : [file, contents],
+  );
 }
 
 async function createArtifact(entries = cleanArtifact()) {
@@ -129,6 +139,71 @@ test("verify artifact rejects a missing imported asset", async () => {
   assert.match(result.output, /imports missing local asset/u);
 });
 
+test("verify artifact rejects optional scripting even without an optional host", async () => {
+  const { result } = await runVerifier(
+    await createArtifact(
+      artifactWithManifest((candidate) => {
+        candidate.optional_permissions = ["scripting"];
+      }),
+    ),
+  );
+  assert.notEqual(result.code, 0, result.output);
+  assert.match(result.output, /optional_permissions/u);
+});
+
+test("verify artifact rejects any extension CSP drift", async () => {
+  const { result } = await runVerifier(
+    await createArtifact(
+      artifactWithManifest((candidate) => {
+        candidate.content_security_policy.extension_pages +=
+          " frame-src 'self';";
+      }),
+    ),
+  );
+  assert.notEqual(result.code, 0, result.output);
+  assert.match(result.output, /CSP must match/u);
+});
+
+test("verify artifact rejects Claude-named bundles and selector literals", async () => {
+  const claudeBundle = await runVerifier(
+    await createArtifact([
+      ...cleanArtifact(),
+      ["claude-content-script.js", "var candidate = true;"],
+    ]),
+  );
+  assert.notEqual(claudeBundle.result.code, 0, claudeBundle.result.output);
+  assert.match(claudeBundle.result.output, /Claude-named artifact/u);
+
+  const claudeSelector = await runVerifier(
+    await createArtifact(
+      cleanArtifact().map(([file, contents]) =>
+        file === "content-script.js"
+          ? [file, 'document.querySelector("[data-testid=chat-input]");']
+          : [file, contents],
+      ),
+    ),
+  );
+  assert.notEqual(claudeSelector.result.code, 0, claudeSelector.result.output);
+  assert.match(claudeSelector.result.output, /Claude selector/u);
+});
+
+test("verify artifact rejects bracket-hidden dynamic content registration", async () => {
+  const { result } = await runVerifier(
+    await createArtifact(
+      cleanArtifact().map(([file, contents]) =>
+        file === "background.js"
+          ? [
+              file,
+              'chrome["scripting"]["registerContentScripts"]([{ id: "candidate" }]);',
+            ]
+          : [file, contents],
+      ),
+    ),
+  );
+  assert.notEqual(result.code, 0, result.output);
+  assert.match(result.output, /dynamic content registration/u);
+});
+
 test("verify artifact isolates URL reports for concurrent fixtures", async () => {
   const artifacts = await Promise.all([
     createArtifact(),
@@ -152,6 +227,29 @@ test("pnpm build creates and verifies a clean artifact", async () => {
     cwd: repositoryRoot,
   });
   assert.match(result.stdout, /Verified MV3 build topology \(12 files\)\./u);
+
+  const artifactRoot = new URL("./apps/extension/dist/", repositoryRoot);
+  const javascriptFiles = (
+    await readdir(artifactRoot, { recursive: true })
+  ).filter((relativePath) => relativePath.endsWith(".js"));
+  const generatedJavascript = (
+    await Promise.all(
+      javascriptFiles.map((relativePath) =>
+        readFile(new URL(relativePath, artifactRoot), "utf8"),
+      ),
+    )
+  ).join("\n");
+
+  assert.equal(
+    /promptReplacement:[`"]unsupported[`"]/u.test(generatedJavascript),
+    true,
+    "Generated JavaScript must package promptReplacement as unsupported.",
+  );
+  assert.equal(
+    /promptReplacement:[`"]verified[`"]/u.test(generatedJavascript),
+    false,
+    "Generated JavaScript must not package promptReplacement as verified.",
+  );
 });
 
 test("canonical digest runs only after reachability passes", async () => {

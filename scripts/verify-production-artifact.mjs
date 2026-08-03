@@ -26,6 +26,8 @@ const reportPath = resolve(
   repositoryRoot,
   process.argv[3] ?? "artifacts/verification/url-report.json",
 );
+const LOCKED_EXTENSION_CSP =
+  "default-src 'self'; script-src 'self'; object-src 'none'; worker-src 'self'; connect-src 'none'; img-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline';";
 
 const failures = [];
 const referencedFiles = new Set(["manifest.json"]);
@@ -264,6 +266,7 @@ function validateManifest(manifest) {
   );
   for (const forbidden of [
     "host_permissions",
+    "optional_permissions",
     "optional_host_permissions",
     "externally_connectable",
     "sandbox",
@@ -302,7 +305,10 @@ function validateManifest(manifest) {
   }
 
   const csp = manifest.content_security_policy?.extension_pages;
-  assert(typeof csp === "string", "Extension page CSP is missing.");
+  assert(
+    csp === LOCKED_EXTENSION_CSP,
+    "Extension page CSP must match the locked M2.0 policy.",
+  );
   for (const directive of [
     "default-src 'self'",
     "script-src 'self'",
@@ -369,6 +375,11 @@ function inspectJavaScript(file, source) {
       /\bchrome\.(?:tabs|scripting|debugger|webRequest)\b/u,
       "network-capable Chrome API",
     ],
+    [
+      /\b(?:registerContentScripts|unregisterContentScripts|getRegisteredContentScripts)\b/u,
+      "dynamic content registration",
+    ],
+    [/\bchat-input\b/u, "Claude selector"],
     [/(?:^|["'`/])tests?\//u, "test import"],
     [/\.(?:test|spec)\.[cm]?[jt]sx?\b/u, "test module"],
   ];
@@ -440,6 +451,12 @@ try {
   files = await listFiles(distRoot);
 } catch (error) {
   fail(`Production artifact could not be listed: ${String(error)}`);
+}
+
+for (const file of files) {
+  if (/(?:^|\/)claude[^/]*\.(?:[cm]?js|css|html)$/iu.test(file)) {
+    fail(`Claude-named artifact is forbidden in M2.0: ${file}`);
+  }
 }
 
 try {

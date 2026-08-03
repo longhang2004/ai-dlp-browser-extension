@@ -31,7 +31,7 @@ export function validatePolicyConfiguration(
   value: unknown,
 ): PolicyConfiguration {
   const candidate = {
-    application: "chatgpt",
+    surfaceId: "chatgpt_web",
     attachmentPresent: false,
     findings: [],
     policy: value,

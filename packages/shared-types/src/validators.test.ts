@@ -98,7 +98,7 @@ const validChatGptDescriptorInput = {
 } satisfies AdapterDescriptor;
 
 const validSettingsEnvelope: StoredSettingsEnvelope = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   settings: createDefaultProtectionSettings(),
 };
 
@@ -106,7 +106,8 @@ const validDecisionEvent: AuditEvent = {
   kind: "decision",
   id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
   timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-  application: "chatgpt",
+  adapterId: "chatgpt",
+  surfaceId: "chatgpt_web",
   policyAction: "warn",
   resolution: "cancelled",
   detectorCategories: ["email"],
@@ -167,7 +168,7 @@ const validDialog: ProtectionDialogModel =
   createProtectionDialogModel(validDialogInput);
 
 const validAuditEnvelope: StoredAuditEnvelope = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   events: [validDecisionEvent],
 };
 
@@ -1261,7 +1262,7 @@ describe("settings validation", () => {
     undefined,
     null,
     {},
-    { schemaVersion: 3, settings: DEFAULT_PROTECTION_SETTINGS },
+    { schemaVersion: 2, settings: DEFAULT_PROTECTION_SETTINGS },
     { schemaVersion: 1 },
     { ...validSettingsEnvelope, prompt: "secret" },
     {
@@ -1375,14 +1376,7 @@ describe("settings validation", () => {
     first.protectedKeywords.push("local");
     const second = createDefaultProtectionSettings();
 
-    expect(second).toEqual({
-      protectionEnabled: true,
-      emailAction: "warn",
-      phoneAction: "warn",
-      attachmentAction: "warn",
-      protectedKeywords: [],
-      auditRetentionLimit: 100,
-    });
+    expect(second).toEqual(DEFAULT_PROTECTION_SETTINGS);
     expect(DEFAULT_PROTECTION_SETTINGS.protectionEnabled).toBe(true);
     expect(DEFAULT_PROTECTION_SETTINGS.protectedKeywords).toEqual([]);
   });
@@ -1443,7 +1437,8 @@ describe("audit validation", () => {
       kind: "decision",
       id: createAuditEventId("00000000-0000-4000-8000-000000000006"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:05.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       policyAction: "warn",
       resolution: "attachment_bypassed",
       detectorCategories: [],
@@ -1474,14 +1469,15 @@ describe("audit validation", () => {
     expect(isStoredAuditEnvelope(validAuditEnvelope)).toBe(true);
     expect(
       isStoredAuditEnvelope({
-        schemaVersion: 3,
+        schemaVersion: 4,
         events: [
           validDecisionEvent,
           {
             kind: "enforcement_error",
             id: "00000000-0000-4000-8000-000000000002",
             timestamp: "2026-07-26T12:00:01.000Z",
-            application: "chatgpt",
+            adapterId: "chatgpt",
+            surfaceId: "chatgpt_web",
             errorCode: "prompt_too_large",
             adapterVersion: "1",
           },
@@ -1489,7 +1485,8 @@ describe("audit validation", () => {
             kind: "adapter_health",
             id: "00000000-0000-4000-8000-000000000003",
             timestamp: "2026-07-26T12:00:02.000Z",
-            application: "chatgpt",
+            adapterId: "chatgpt",
+            surfaceId: "chatgpt_web",
             status: "degraded",
             healthCode: "composer_not_found",
             adapterVersion: "1",
@@ -1504,7 +1501,8 @@ describe("audit validation", () => {
       kind: "decision",
       id: createAuditEventId("00000000-0000-4000-8000-000000000005"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:04.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       policyAction: "allow",
       resolution: "submitted",
       detectorCategories: [],
@@ -1730,7 +1728,7 @@ describe("audit validation", () => {
     )) {
       expect(
         isStoredAuditEnvelope({
-          schemaVersion: 3,
+          schemaVersion: 4,
           events,
         }),
       ).toBe(false);

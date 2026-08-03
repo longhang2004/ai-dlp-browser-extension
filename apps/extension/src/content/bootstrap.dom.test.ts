@@ -95,6 +95,10 @@ function settingsSnapshot(
 ) {
   const settings: ProtectionSettings = {
     protectionEnabled: enabled,
+    surfaces: [
+      { surfaceId: "chatgpt_web", enabled: true },
+      { surfaceId: "claude_web", enabled: false },
+    ],
     emailAction: "warn",
     phoneAction: "warn",
     attachmentAction: "warn",
@@ -105,7 +109,7 @@ function settingsSnapshot(
   return {
     type: "settings.snapshot" as const,
     generation,
-    envelope: { schemaVersion: 2 as const, settings },
+    envelope: { schemaVersion: 3 as const, settings },
   };
 }
 
@@ -801,7 +805,8 @@ describe("content bootstrap", () => {
       type: "audit.append",
       event: expect.objectContaining({
         kind: "adapter_health",
-        application: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+        adapterId: CHATGPT_ADAPTER_DESCRIPTOR.adapterId,
+        surfaceId: CHATGPT_ADAPTER_DESCRIPTOR.surfaceId,
         adapterVersion: CHATGPT_ADAPTER_DESCRIPTOR.version,
         status: "degraded",
         healthCode: "composer_not_found",

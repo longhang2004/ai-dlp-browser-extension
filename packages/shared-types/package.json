@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./permissions": {
+      "types": "./src/permissions.ts",
+      "default": "./src/permissions.ts"
     }
   },
   "scripts": {

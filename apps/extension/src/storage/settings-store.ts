@@ -1,8 +1,10 @@
 import {
   CONFIGURABLE_PROTECTION_ACTIONS,
+  CONFIGURABLE_SURFACE_IDS,
   POLICY_ACTIONS,
   areUnicodeCaseInsensitiveEquivalent,
   createDefaultProtectionSettings,
+  createDefaultSurfaceSettings,
   isProtectionSettings,
   isStoredSettingsEnvelope,
   MAX_PROTECTED_KEYWORD_COUNT,
@@ -10,7 +12,9 @@ import {
   type ProtectionSettings,
   type PolicyAction,
   type SettingsValidationError,
+  type SurfaceSettings,
   type StoredSettingsEnvelope,
+  type ConfigurableSurfaceId,
 } from "@ai-dlp/shared-types";
 
 import type { StoragePort } from "./storage-port.js";
@@ -19,6 +23,7 @@ export const SETTINGS_STORAGE_KEY = "settings";
 
 const SETTING_KEYS = Object.freeze([
   "protectionEnabled",
+  "surfaces",
   "emailAction",
   "phoneAction",
   "attachmentAction",
@@ -36,7 +41,7 @@ export interface SettingsStore {
 }
 
 function defaultEnvelope(): StoredSettingsEnvelope {
-  return { schemaVersion: 2, settings: createDefaultProtectionSettings() };
+  return { schemaVersion: 3, settings: createDefaultProtectionSettings() };
 }
 
 function cloneEnvelope(
@@ -57,19 +62,40 @@ const V1_SETTING_KEYS = Object.freeze([
   "auditRetentionLimit",
 ] as const);
 
-function migrateV1Envelope(value: unknown): StoredSettingsEnvelope | null {
+const V2_SETTING_KEYS = Object.freeze([
+  "protectionEnabled",
+  "emailAction",
+  "phoneAction",
+  "attachmentAction",
+  "protectedKeywords",
+  "auditRetentionLimit",
+] as const);
+
+function isLegacySettingsEnvelope(
+  value: unknown,
+  schemaVersion: 1 | 2,
+  keys: readonly string[],
+): value is { schemaVersion: 1 | 2; settings: Record<string, unknown> } {
   if (
     !hasPlainDataFields(value) ||
     Reflect.ownKeys(value).length !== 2 ||
-    !Object.hasOwn(value, "schemaVersion") ||
-    !Object.hasOwn(value, "settings") ||
-    value.schemaVersion !== 1 ||
-    !hasPlainDataFields(value.settings) ||
-    Reflect.ownKeys(value.settings).length !== V1_SETTING_KEYS.length ||
-    V1_SETTING_KEYS.some(
-      (key) => !Object.hasOwn(value.settings as Record<string, unknown>, key),
-    )
+    value.schemaVersion !== schemaVersion ||
+    !hasPlainDataFields(value.settings)
   ) {
+    return false;
+  }
+  const settings = value.settings;
+  return (
+    Reflect.ownKeys(settings).length === keys.length &&
+    keys.every((key) => Object.hasOwn(settings, key)) &&
+    Reflect.ownKeys(settings).every(
+      (key) => typeof key === "string" && keys.includes(key),
+    )
+  );
+}
+
+function migrateV1Envelope(value: unknown): StoredSettingsEnvelope | null {
+  if (!isLegacySettingsEnvelope(value, 1, V1_SETTING_KEYS)) {
     return null;
   }
   const settings = value.settings;
@@ -89,11 +115,26 @@ function migrateV1Envelope(value: unknown): StoredSettingsEnvelope | null {
   }
   const migrated = validateAndNormalizeSettings({
     ...settings,
+    surfaces: createDefaultSurfaceSettings(),
     emailAction: emailAction === "redact" ? "warn" : emailAction,
     phoneAction: phoneAction === "redact" ? "warn" : phoneAction,
     attachmentAction: "warn",
   });
-  return migrated.ok ? { schemaVersion: 2, settings: migrated.settings } : null;
+  return migrated.ok
+    ? {
+        schemaVersion: 3,
+        settings: migrated.settings,
+      }
+    : null;
+}
+
+function migrateV2Envelope(value: unknown): StoredSettingsEnvelope | null {
+  if (!isLegacySettingsEnvelope(value, 2, V2_SETTING_KEYS)) return null;
+  const migrated = validateAndNormalizeSettings({
+    ...value.settings,
+    surfaces: createDefaultSurfaceSettings(),
+  });
+  return migrated.ok ? { schemaVersion: 3, settings: migrated.settings } : null;
 }
 
 function hasPlainDataFields(value: unknown): value is Record<string, unknown> {
@@ -157,6 +198,56 @@ function normalizeKeywords(value: unknown): {
   return { keywords };
 }
 
+function validateSurfaceSettings(
+  value: unknown,
+): SettingsValidationError | null {
+  try {
+    if (
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      value.length !== 2 ||
+      Reflect.ownKeys(value).length !== value.length + 1 ||
+      !Reflect.ownKeys(value).includes("length")
+    ) {
+      return { field: "surfaces", code: "invalid_type" };
+    }
+
+    const seen = new Set<string>();
+    for (const surface of value) {
+      if (
+        !hasPlainDataFields(surface) ||
+        Reflect.ownKeys(surface).length !== 2 ||
+        !Object.hasOwn(surface, "surfaceId") ||
+        !Object.hasOwn(surface, "enabled") ||
+        typeof surface.surfaceId !== "string" ||
+        typeof surface.enabled !== "boolean"
+      ) {
+        return { field: "surfaces", code: "invalid_type" };
+      }
+      if (
+        !CONFIGURABLE_SURFACE_IDS.includes(
+          surface.surfaceId as ConfigurableSurfaceId,
+        )
+      ) {
+        return { field: "surfaces", code: "invalid_surface" };
+      }
+      if (seen.has(surface.surfaceId)) {
+        return { field: "surfaces", code: "duplicate_surface" };
+      }
+      seen.add(surface.surfaceId);
+      if (surface.surfaceId === "claude_web" && surface.enabled) {
+        return { field: "surfaces", code: "surface_disabled" };
+      }
+    }
+    return value[0]?.surfaceId === "chatgpt_web" &&
+      value[1]?.surfaceId === "claude_web"
+      ? null
+      : { field: "surfaces", code: "invalid_surface" };
+  } catch {
+    return { field: "surfaces", code: "invalid_type" };
+  }
+}
+
 export function validateAndNormalizeSettings(
   value: unknown,
 ):
@@ -194,6 +285,12 @@ export function validateAndNormalizeSettings(
   if (typeof value.protectionEnabled !== "boolean") {
     errors.push({ field: "protectionEnabled", code: "invalid_type" });
   }
+  if (!Object.hasOwn(value, "surfaces")) {
+    errors.push({ field: "surfaces", code: "required" });
+  } else {
+    const surfaceError = validateSurfaceSettings(value.surfaces);
+    if (surfaceError !== null) errors.push(surfaceError);
+  }
   if (
     typeof value.emailAction !== "string" ||
     !CONFIGURABLE_PROTECTION_ACTIONS.includes(value.emailAction as never)
@@ -230,6 +327,10 @@ export function validateAndNormalizeSettings(
 
   const settings: ProtectionSettings = {
     protectionEnabled: value.protectionEnabled as boolean,
+    surfaces: (value.surfaces as SurfaceSettings[]).map((surface) => ({
+      surfaceId: surface.surfaceId,
+      enabled: surface.enabled,
+    })),
     emailAction: value.emailAction as ProtectionSettings["emailAction"],
     phoneAction: value.phoneAction as ProtectionSettings["phoneAction"],
     attachmentAction:
@@ -271,7 +372,7 @@ export function createSettingsStore(
         if (isStoredSettingsEnvelope(stored)) {
           return cloneEnvelope(stored);
         }
-        const migrated = migrateV1Envelope(stored);
+        const migrated = migrateV2Envelope(stored) ?? migrateV1Envelope(stored);
         if (migrated === null) {
           return defaultEnvelope();
         }
@@ -287,7 +388,7 @@ export function createSettingsStore(
           return result;
         }
         const envelope: StoredSettingsEnvelope = {
-          schemaVersion: 2,
+          schemaVersion: 3,
           settings: result.settings,
         };
         await storage.write(SETTINGS_STORAGE_KEY, cloneEnvelope(envelope));

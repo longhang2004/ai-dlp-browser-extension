@@ -23,7 +23,15 @@ const APPROVED_SOURCE_URLS = new Map([
     "apps/extension/src/background/sender-validation.ts",
     new Set(["https://chatgpt.com"]),
   ],
+  [
+    "apps/extension/src/background/permission-api.ts",
+    new Set(["https://claude.ai:443/*"]),
+  ],
   ["apps/extension/src/content/bootstrap.ts", new Set(["https://chatgpt.com"])],
+  [
+    "packages/shared-types/src/permissions.ts",
+    new Set(["https://claude.ai:443/*"]),
+  ],
 ]);
 
 const SOURCE_FORBIDDEN_PATTERNS = [

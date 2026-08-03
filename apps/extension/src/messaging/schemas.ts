@@ -10,6 +10,7 @@ import {
 
 const SETTINGS_CANDIDATE_KEYS = new Set([
   "protectionEnabled",
+  "surfaces",
   "emailAction",
   "phoneAction",
   "attachmentAction",
@@ -104,6 +105,31 @@ function isBoundedCandidateValue(value: unknown): boolean {
   );
 }
 
+function isBoundedSurfaceCandidateValue(value: unknown): boolean {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    value.length > 4
+  ) {
+    return false;
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== value.length + 1 || !keys.includes("length")) {
+    return false;
+  }
+  return value.every(
+    (surface) =>
+      hasExactEnumerableDataKeys(
+        surface,
+        new Set(["surfaceId", "enabled"]),
+        new Set(["surfaceId", "enabled"]),
+      ) &&
+      typeof surface.surfaceId === "string" &&
+      surface.surfaceId.length <= 101 &&
+      typeof surface.enabled === "boolean",
+  );
+}
+
 function isSettingsCandidateRecord(value: unknown): boolean {
   if (!hasExactEnumerableDataKeys(value, SETTINGS_CANDIDATE_KEYS)) {
     return false;
@@ -114,7 +140,9 @@ function isSettingsCandidateRecord(value: unknown): boolean {
       return (
         descriptor !== undefined &&
         Object.hasOwn(descriptor, "value") &&
-        isBoundedCandidateValue(descriptor.value)
+        (key === "surfaces"
+          ? isBoundedSurfaceCandidateValue(descriptor.value)
+          : isBoundedCandidateValue(descriptor.value))
       );
     });
   } catch {

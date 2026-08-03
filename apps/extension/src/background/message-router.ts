@@ -67,8 +67,10 @@ export function createMessageListener(options: {
       senderAuthorization === null ||
       (request.type === "audit.append" &&
         (senderAuthorization.source !== "content_script" ||
-          request.event.application !==
+          request.event.adapterId !==
             senderAuthorization.descriptor.adapterId ||
+          request.event.surfaceId !==
+            senderAuthorization.descriptor.surfaceId ||
           request.event.adapterVersion !==
             senderAuthorization.descriptor.version))
     ) {

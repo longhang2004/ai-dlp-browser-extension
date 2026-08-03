@@ -258,7 +258,8 @@ export function createSubmissionController(
     return {
       id: createAuditEventId(eventId()),
       timestamp: createAuditTimestamp(wallClockNow().toISOString()),
-      application: "chatgpt" as const,
+      adapterId: "chatgpt" as const,
+      surfaceId: "chatgpt_web" as const,
       adapterVersion: CHATGPT_ADAPTER_VERSION,
     };
   }

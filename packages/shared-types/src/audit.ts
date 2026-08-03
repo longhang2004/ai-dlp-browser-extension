@@ -2,6 +2,7 @@ import type { MaskedPreview } from "./display.js";
 import type { SensitiveDataCategory } from "./findings.js";
 import type { DecisionReason, PolicyAction } from "./policy.js";
 import type { PromptFreeArray, PromptFreeBoundary } from "./privacy.js";
+import type { AdapterId, AiSurfaceId } from "./surfaces.js";
 import {
   INVALID_SNAPSHOT,
   snapshotStructuredValue,
@@ -70,7 +71,8 @@ export type DecisionAuditEvent = PromptFreeBoundary & {
   kind: "decision";
   id: AuditEventId;
   timestamp: AuditTimestamp;
-  application: "chatgpt";
+  adapterId: "chatgpt";
+  surfaceId: "chatgpt_web";
   policyAction: PolicyAction;
   resolution: DecisionResolution;
   detectorCategories: PromptFreeArray<SensitiveDataCategory>;
@@ -99,7 +101,8 @@ export type EnforcementErrorAuditEvent = PromptFreeBoundary & {
   kind: "enforcement_error";
   id: AuditEventId;
   timestamp: AuditTimestamp;
-  application: "chatgpt";
+  adapterId: "chatgpt";
+  surfaceId: "chatgpt_web";
   errorCode: EnforcementErrorCode;
   adapterVersion: ChatGptAdapterVersion;
 };
@@ -122,7 +125,8 @@ export type AdapterHealthAuditEvent = PromptFreeBoundary & {
   kind: "adapter_health";
   id: AuditEventId;
   timestamp: AuditTimestamp;
-  application: "chatgpt";
+  adapterId: "chatgpt";
+  surfaceId: "chatgpt_web";
   status: "degraded";
   healthCode: AdapterHealthCode;
   adapterVersion: ChatGptAdapterVersion;
@@ -132,6 +136,11 @@ export type AuditEvent =
   DecisionAuditEvent | EnforcementErrorAuditEvent | AdapterHealthAuditEvent;
 
 export type StoredAuditEnvelope = PromptFreeBoundary & {
-  schemaVersion: 3;
+  schemaVersion: 4;
   events: PromptFreeArray<AuditEvent>;
+};
+
+export type AuditApplicationIdentity = PromptFreeBoundary & {
+  readonly adapterId: AdapterId;
+  readonly surfaceId: AiSurfaceId;
 };

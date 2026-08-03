@@ -99,7 +99,7 @@ function snapshot(enabled = true, generation = 0) {
   return {
     type: "settings.snapshot" as const,
     generation,
-    envelope: { schemaVersion: 2 as const, settings },
+    envelope: { schemaVersion: 3 as const, settings },
   };
 }
 
@@ -121,7 +121,7 @@ describe("content settings cache", () => {
 
     port.emitMessage({
       type: "settings.snapshot",
-      envelope: { schemaVersion: 2 },
+      envelope: { schemaVersion: 3 },
     });
     port.emitMessage({ ...snapshot(), prompt: "must be rejected" });
     expect(received).not.toHaveBeenCalled();

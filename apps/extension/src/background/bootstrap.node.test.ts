@@ -89,6 +89,10 @@ describe("background bootstrap", () => {
           type: "settings.save",
           settings: {
             protectionEnabled: false,
+            surfaces: [
+              { surfaceId: "chatgpt_web", enabled: true },
+              { surfaceId: "claude_web", enabled: false },
+            ],
             emailAction: "warn",
             phoneAction: "warn",
             attachmentAction: "warn",
@@ -159,7 +163,8 @@ describe("background bootstrap", () => {
       kind: "enforcement_error",
       id: createAuditEventId("00000000-0000-4000-8000-000000000001"),
       timestamp: createAuditTimestamp("2026-07-26T12:00:00.000Z"),
-      application: "chatgpt",
+      adapterId: "chatgpt",
+      surfaceId: "chatgpt_web",
       errorCode: "detector_failure",
       adapterVersion: CHATGPT_ADAPTER_VERSION,
     };
@@ -192,7 +197,7 @@ describe("background bootstrap", () => {
 
     expect(response).toMatchObject({
       type: "audit.result",
-      envelope: { schemaVersion: 3, events: [event] },
+      envelope: { schemaVersion: 4, events: [event] },
     });
   });
 

@@ -591,7 +591,7 @@ function isStoredSettingsEnvelopeSnapshot(
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, ["schemaVersion", "settings"]) &&
-      value.schemaVersion === 2 &&
+      value.schemaVersion === 3 &&
       isProtectionSettingsSnapshot(value.settings),
   );
 }
@@ -633,7 +633,8 @@ function hasCommonAuditFields(value: Record<PropertyKey, unknown>): boolean {
   return (
     isAuditEventId(value.id) &&
     isAuditTimestamp(value.timestamp) &&
-    value.application === "chatgpt" &&
+    value.adapterId === "chatgpt" &&
+    value.surfaceId === "chatgpt_web" &&
     isOneOf(value.adapterVersion, CHATGPT_ADAPTER_VERSIONS)
   );
 }
@@ -686,7 +687,8 @@ function isDecisionAuditEventSnapshot(
           "kind",
           "id",
           "timestamp",
-          "application",
+          "adapterId",
+          "surfaceId",
           "policyAction",
           "resolution",
           "detectorCategories",
@@ -832,7 +834,8 @@ function isEnforcementErrorAuditEventSnapshot(
         "kind",
         "id",
         "timestamp",
-        "application",
+        "adapterId",
+        "surfaceId",
         "errorCode",
         "adapterVersion",
       ]) &&
@@ -861,7 +864,8 @@ function isAdapterHealthAuditEventSnapshot(
         "kind",
         "id",
         "timestamp",
-        "application",
+        "adapterId",
+        "surfaceId",
         "status",
         "healthCode",
         "adapterVersion",
@@ -909,7 +913,7 @@ function isStoredAuditEnvelopeSnapshot(
     () =>
       isPlainRecord(value) &&
       hasExactOwnKeys(value, ["schemaVersion", "events"]) &&
-      value.schemaVersion === 3 &&
+      value.schemaVersion === 4 &&
       isDenseExactArray(value.events, 0, 1_000, isAuditEventSnapshot),
   );
 }
@@ -1022,6 +1026,14 @@ function isSettingsValidationErrorSnapshot(
         );
       case "protectionEnabled":
         return value.code === "required" || value.code === "invalid_type";
+      case "surfaces":
+        return (
+          value.code === "required" ||
+          value.code === "invalid_type" ||
+          value.code === "invalid_surface" ||
+          value.code === "duplicate_surface" ||
+          value.code === "surface_disabled"
+        );
       case "emailAction":
       case "phoneAction":
       case "attachmentAction":

@@ -13,6 +13,7 @@ export type {
   AdapterHealthAuditEvent,
   AdapterHealthCode,
   AuditEvent,
+  AuditApplicationIdentity,
   AuditEventId,
   AuditTimestamp,
   ChatGptAdapterVersion,
@@ -111,11 +112,13 @@ export type { RedactionResult } from "./redaction.js";
 export type { PromptFreeArray, ReadonlyPromptFreeArray } from "./privacy.js";
 export {
   cloneProtectionSettings,
+  createDefaultSurfaceSettings,
   CONFIGURABLE_PROTECTION_ACTIONS,
   createDefaultProtectionSettings,
   DEFAULT_PROTECTION_SETTINGS,
   SETTINGS_VALIDATION_ERROR_CODES,
   SETTINGS_VALIDATION_FIELDS,
+  isSurfaceSettingsSnapshot,
 } from "./settings.js";
 export type {
   ConfigurableProtectionAction,
@@ -124,6 +127,7 @@ export type {
   SettingsValidationError,
   SettingsValidationErrorCode,
   SettingsValidationField,
+  SurfaceSettings,
   StoredSettingsEnvelope,
 } from "./settings.js";
 export { areUnicodeCaseInsensitiveEquivalent } from "./unicode-equivalence.js";
@@ -137,6 +141,7 @@ export {
   ADAPTER_CAPABILITY_KEYS,
   ADAPTER_IDS,
   ADAPTER_TRUST_LEVELS,
+  CONFIGURABLE_SURFACE_IDS,
   AI_SURFACE_IDS,
   CAPABILITY_SUPPORT_LEVELS,
 } from "./surfaces.js";
@@ -147,6 +152,7 @@ export type {
   AdapterTrust,
   AiSurfaceId,
   CapabilitySupport,
+  ConfigurableSurfaceId,
 } from "./surfaces.js";
 export {
   createPolicyDecision,

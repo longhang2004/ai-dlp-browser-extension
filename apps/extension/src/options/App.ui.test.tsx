@@ -9,6 +9,10 @@ afterEach(cleanup);
 
 const settings = {
   protectionEnabled: true,
+  surfaces: [
+    { surfaceId: "chatgpt_web" as const, enabled: true },
+    { surfaceId: "claude_web" as const, enabled: false },
+  ],
   emailAction: "warn" as const,
   phoneAction: "warn" as const,
   attachmentAction: "warn" as const,
@@ -43,13 +47,13 @@ describe("options App", () => {
       .fn()
       .mockResolvedValueOnce({
         type: "settings.result",
-        envelope: { schemaVersion: 2, settings },
+        envelope: { schemaVersion: 3, settings },
       })
       .mockImplementation(async (request: unknown) => {
         const candidate = request as { settings: typeof settings };
         return {
           type: "settings.saved",
-          envelope: { schemaVersion: 2, settings: candidate.settings },
+          envelope: { schemaVersion: 3, settings: candidate.settings },
         };
       });
     const runtime: ExtensionPageRuntime = { sendMessage };
@@ -87,6 +91,10 @@ describe("options App", () => {
       type: "settings.save",
       settings: {
         protectionEnabled: true,
+        surfaces: [
+          { surfaceId: "chatgpt_web", enabled: true },
+          { surfaceId: "claude_web", enabled: false },
+        ],
         emailAction: "allow",
         phoneAction: "block",
         attachmentAction: "allow",
@@ -103,7 +111,7 @@ describe("options App", () => {
       .fn()
       .mockResolvedValueOnce({
         type: "settings.result",
-        envelope: { schemaVersion: 2, settings },
+        envelope: { schemaVersion: 3, settings },
       })
       .mockResolvedValueOnce({
         type: "error",
